@@ -1,0 +1,32 @@
+[package]
+name = "light-ord"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.8.1"
+axum-server = "0.7.1"
+bitcoin = "0.32.5"
+bitcoincore-rpc = "0.19.0"
+borsh = { version = "1.5.3", features = ["derive"] }
+brotli = "7.0.0"
+clap = { version = "4.5.23", features = ["derive"] }
+derive_more = { version = "1.0.0", features = ["display", "from_str"] }
+hex = "0.4.3"
+http = "1.2.0"
+indicatif = "0.17.9"
+lazy_static = "1.5.0"
+ordinals = "0.0.14"
+prometheus = "0.13.4"
+rayon = "1.10.0"
+regex = "1.11.1"
+rocksdb = "0.22.0"
+serde = "1.0.216"
+serde_json = "1.0.133"
+serde_with = "3.11.0"
+thiserror = "2.0.8"
+tokio = { version = "1.42.0", features = ["rt-multi-thread", "macros", "signal"] }
+tower-http = { version = "0.6.2", features = ["compression-br", "compression-gzip", "cors"] }
+tracing = "0.1.40"
+tracing-subscriber = "0.3.19"
+zmq = "0.10"

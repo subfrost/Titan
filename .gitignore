@@ -1,0 +1,11 @@
+/.idea/
+/.vagrant
+/.vscode
+/docs/build
+/env
+/ord.log
+/target
+/tmp
+
+# Indexed data
+/data
