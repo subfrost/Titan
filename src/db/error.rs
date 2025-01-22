@@ -10,6 +10,12 @@ pub enum RocksDBError {
     InvalidU64,
     #[error("invalid String")]
     InvalidString,
+    #[error("invalid block hash")]
+    InvalidBlockHash,
+    #[error("invalid rune id")]
+    InvalidRuneId,
+    #[error("invalid txid")]
+    InvalidTxid,
     #[error("poisoned lock")]
     LockPoisoned,
     #[error("not found: {0}")]

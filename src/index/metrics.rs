@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{sync::atomic::AtomicBool, thread};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 pub use prometheus::{
     GaugeVec, Histogram, HistogramVec, IntCounter as Counter, IntCounterVec as CounterVec,
@@ -115,7 +115,7 @@ impl Metrics {
                     }
                 }
                 for (method, avg) in method_avg_latencies {
-                    debug!("Average Latency for {}: {:.3} ms", method, avg);
+                    info!("Average Latency for {}: {:.3} ms", method, avg);
                 }
             }
 

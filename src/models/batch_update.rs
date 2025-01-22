@@ -1,7 +1,7 @@
 use {
-    super::Block,
+    super::{Block, ScriptPubkeyEntry},
     crate::models::{Inscription, InscriptionId, RuneEntry, TransactionStateChange, TxOutEntry},
-    bitcoin::{BlockHash, OutPoint, Txid},
+    bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
     ordinals::RuneId,
     std::{
         collections::{HashMap, HashSet},
@@ -11,6 +11,9 @@ use {
 
 #[derive(Debug, Clone)]
 pub struct BatchUpdate {
+    pub script_pubkeys: HashMap<ScriptBuf, ScriptPubkeyEntry>,
+    pub script_pubkeys_outpoints: HashMap<OutPoint, ScriptBuf>,
+    pub spent_outpoints_in_mempool: HashSet<OutPoint>,
     pub blocks: HashMap<BlockHash, Block>,
     pub block_hashes: HashMap<u64, BlockHash>,
     pub txouts: HashMap<OutPoint, TxOutEntry>,
@@ -29,6 +32,9 @@ pub struct BatchUpdate {
 impl BatchUpdate {
     pub fn new(rune_count: u64, block_count: u64, purged_blocks_count: u64) -> Self {
         Self {
+            script_pubkeys: HashMap::new(),
+            script_pubkeys_outpoints: HashMap::new(),
+            spent_outpoints_in_mempool: HashSet::new(),
             blocks: HashMap::new(),
             block_hashes: HashMap::new(),
             txouts: HashMap::new(),
@@ -46,7 +52,10 @@ impl BatchUpdate {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.blocks.is_empty()
+        self.script_pubkeys.is_empty()
+            && self.script_pubkeys_outpoints.is_empty()
+            && self.spent_outpoints_in_mempool.is_empty()
+            && self.blocks.is_empty()
             && self.block_hashes.is_empty()
             && self.txouts.is_empty()
             && self.tx_state_changes.is_empty()
@@ -66,6 +75,8 @@ impl Display for BatchUpdate {
             "BatchUpdate: \
              counts: [blocks: {}, runes: {}, purged_blocks: {}] \
              added: [blocks: {}, txouts: {}, tx_changes: {}, \
+             addresses: {} , address_outpoints: {}, \
+             spent_outpoints_in_mempool: {}, \
              runes: txs {}/ runes {}/ ids {}, \
              inscriptions: {}]",
             self.block_count,
@@ -74,6 +85,9 @@ impl Display for BatchUpdate {
             self.blocks.len(),
             self.txouts.len(),
             self.tx_state_changes.len(),
+            self.script_pubkeys.len(),
+            self.script_pubkeys_outpoints.len(),
+            self.spent_outpoints_in_mempool.len(),
             self.rune_transactions.len(),
             self.runes.len(),
             self.rune_ids.len(),

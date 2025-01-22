@@ -4,13 +4,18 @@ use {
         index::{store::StoreError, Settings},
         models::{
             BatchDelete, BatchUpdate, Block, Inscription, InscriptionId, RuneEntry,
-            TransactionStateChange, TxOutEntry,
+            ScriptPubkeyEntry, TransactionStateChange, TxOutEntry,
         },
     },
-    bitcoin::{BlockHash, OutPoint, Txid},
+    bitcoin::{Block as BitcoinBlock, BlockHash, OutPoint, ScriptBuf, Txid},
     ordinals::{Rune, RuneId},
-    std::{cmp, str::FromStr, sync::Arc},
-    tracing::{debug, info},
+    std::{
+        cmp,
+        collections::{HashMap, HashSet},
+        str::FromStr,
+        sync::Arc,
+    },
+    tracing::info,
 };
 
 type Result<T> = std::result::Result<T, StoreError>;
@@ -124,6 +129,30 @@ impl UpdaterCache {
         }
     }
 
+    pub fn get_tx_outs(&self, outpoints: &Vec<OutPoint>) -> Result<HashMap<OutPoint, TxOutEntry>> {
+        let mut results = HashMap::new();
+        let mut to_fetch = HashSet::new();
+        for outpoint in outpoints.iter() {
+            if let Some(tx_out) = self.update.txouts.get(outpoint) {
+                results.insert(outpoint.clone(), tx_out.clone());
+            } else {
+                to_fetch.insert(outpoint.clone());
+            }
+        }
+
+        if !to_fetch.is_empty() {
+            let tx_outs = self
+                .db
+                .read()
+                .get_tx_outs(&to_fetch.iter().cloned().collect(), None)?;
+            for (outpoint, tx_out) in tx_outs.iter() {
+                results.insert(outpoint.clone(), tx_out.clone());
+            }
+        }
+
+        Ok(results)
+    }
+
     pub fn set_tx_out(&mut self, outpoint: OutPoint, tx_out: TxOutEntry) -> () {
         self.update.txouts.insert(outpoint, tx_out);
     }
@@ -199,16 +228,6 @@ impl UpdaterCache {
         self.update.rune_ids.insert(rune.0, rune_id);
     }
 
-    pub fn get_rune_id_by_number(&mut self, number: u64) -> Result<RuneId> {
-        if let Some(rune_id) = self.update.rune_numbers.get(&number) {
-            return Ok(rune_id.clone());
-        } else {
-            let rune_id = self.db.read().get_rune_id_by_number(number)?;
-            self.update.rune_numbers.insert(number, rune_id);
-            return Ok(rune_id);
-        }
-    }
-
     pub fn set_rune_id_number(&mut self, number: u64, rune_id: RuneId) -> () {
         self.update.rune_numbers.insert(number, rune_id);
     }
@@ -225,6 +244,86 @@ impl UpdaterCache {
         self.update.mempool_txs.insert(txid);
     }
 
+    pub fn get_script_pubkey_entries(
+        &self,
+        script_pubkeys: &Vec<ScriptBuf>,
+    ) -> Result<HashMap<ScriptBuf, ScriptPubkeyEntry>> {
+        let mut results = HashMap::new();
+        let mut to_fetch = HashSet::new();
+        for script_pubkey in script_pubkeys.iter() {
+            if let Some(script_pubkey_entry) = self.update.script_pubkeys.get(script_pubkey) {
+                results.insert(script_pubkey.clone(), script_pubkey_entry.clone());
+            } else {
+                to_fetch.insert(script_pubkey.clone());
+            }
+        }
+
+        if !to_fetch.is_empty() {
+            let script_pubkeys_entries = self.db.read().get_script_pubkey_entries(
+                &to_fetch.iter().cloned().collect(),
+                self.settings.mempool,
+            )?;
+
+            for (script_pubkey, script_pubkey_entry) in script_pubkeys_entries.iter() {
+                results.insert(script_pubkey.clone(), script_pubkey_entry.clone());
+            }
+        }
+
+        return Ok(results);
+    }
+
+    pub fn set_script_pubkey_entry(
+        &mut self,
+        script_pubkey: ScriptBuf,
+        script_pubkey_entry: ScriptPubkeyEntry,
+    ) -> () {
+        self.update
+            .script_pubkeys
+            .insert(script_pubkey, script_pubkey_entry);
+    }
+
+    pub fn get_outpoints_to_script_pubkey(
+        &self,
+        outpoints: Vec<OutPoint>,
+        optimistic: bool,
+    ) -> Result<HashMap<OutPoint, ScriptBuf>> {
+        let mut results = HashMap::new();
+        let mut to_fetch = HashSet::new();
+        for outpoint in outpoints.iter() {
+            if let Some(script_pubkey) = self.update.script_pubkeys_outpoints.get(outpoint) {
+                results.insert(outpoint.clone(), script_pubkey.clone());
+            } else {
+                to_fetch.insert(outpoint.clone());
+            }
+        }
+
+        if !to_fetch.is_empty() {
+            let script_pubkeys = self.db.read().get_outpoints_to_script_pubkey(
+                &to_fetch.iter().cloned().collect(),
+                None,
+                optimistic,
+            )?;
+
+            for (outpoint, script_pubkey) in script_pubkeys.iter() {
+                results.insert(outpoint.clone(), script_pubkey.clone());
+            }
+        }
+
+        return Ok(results);
+    }
+
+    pub fn batch_set_outpoints_to_script_pubkey(&mut self, items: &[(OutPoint, ScriptBuf)]) {
+        for (outpoint, script_pubkey) in items {
+            self.update
+                .script_pubkeys_outpoints
+                .insert(*outpoint, script_pubkey.clone());
+        }
+    }
+
+    pub fn batch_set_spent_outpoints_in_mempool(&mut self, outpoints: Vec<OutPoint>) {
+        self.update.spent_outpoints_in_mempool.extend(outpoints);
+    }
+
     pub fn should_flush(&self, max_size: usize) -> bool {
         self.update.blocks.len() >= max_size
     }
@@ -232,19 +331,21 @@ impl UpdaterCache {
     pub fn flush(&mut self) -> Result<()> {
         let db = self.db.write();
 
-        self.prepare_to_delete(
-            self.settings.max_recoverable_reorg_depth,
-            self.settings.index_spent_outputs,
-        )?;
+        if !self.settings.mempool {
+            self.prepare_to_delete(
+                self.settings.max_recoverable_reorg_depth,
+                self.settings.index_spent_outputs,
+            )?;
+        }
 
         if !self.update.is_empty() {
             db.batch_update(self.update.clone(), self.settings.mempool)?;
-            debug!("Flushed update: {}", self.update);
+            info!("Flushed update: {}", self.update);
         }
 
         if !self.delete.is_empty() {
-            db.batch_delete(self.delete.clone(), self.settings.mempool)?;
-            debug!("Flushed delete: {}", self.delete);
+            db.batch_delete(self.delete.clone())?;
+            info!("Flushed delete: {}", self.delete);
         }
 
         // Clear the cache
@@ -301,10 +402,12 @@ impl UpdaterCache {
             let txid = Txid::from_str(txid)?;
             let tx_state_changes = self.get_tx_state_changes(txid)?;
 
-            if !index_spent_outputs {
-                for txin in tx_state_changes.inputs.iter() {
+            for txin in tx_state_changes.inputs.iter() {
+                if !index_spent_outputs {
                     self.delete.tx_outs.insert(txin.clone());
                 }
+
+                self.delete.script_pubkeys_outpoints.insert(txin.clone());
             }
 
             self.delete.tx_state_changes.insert(txid);

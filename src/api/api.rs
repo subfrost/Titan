@@ -8,9 +8,9 @@ use {
     },
     crate::{
         index::{Index, IndexError, StoreError},
-        models::{Block, InscriptionId, Pagination, PaginationResponse, TxOutEntry},
+        models::{AddressData, Block, InscriptionId, Pagination, PaginationResponse, TxOutEntry},
     },
-    bitcoin::{OutPoint, Txid},
+    bitcoin::{Address, OutPoint, Txid},
     bitcoincore_rpc::{Client, RpcApi},
     http::HeaderMap,
     std::sync::Arc,
@@ -101,7 +101,7 @@ pub fn last_rune_transactions(
     index: Arc<Index>,
     rune_query: &query::Rune,
     pagination: Option<Pagination>,
-) -> Result<PaginationResponse<String>> {
+) -> Result<PaginationResponse<Txid>> {
     let rune_id = rune_query.to_rune_id(&index)?;
     let transactions = index.get_last_rune_transactions(&rune_id, pagination, None)?;
     Ok(transactions)
@@ -144,4 +144,10 @@ pub fn transaction(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Tra
 
 pub fn mempool_txids(index: Arc<Index>) -> Result<Vec<Txid>> {
     Ok(index.get_mempool_txids()?)
+}
+
+pub fn address(index: Arc<Index>, address: &Address) -> Result<AddressData> {
+    let script_pubkey = address.script_pubkey();
+    let outpoints = index.get_script_pubkey_outpoints(&script_pubkey)?;
+    Ok(outpoints)
 }

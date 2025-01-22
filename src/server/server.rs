@@ -1,7 +1,7 @@
 use {
     super::{
         deserialize_from_str::DeserializeFromStr,
-        error::{OptionExt, ServerResult},
+        error::{OptionExt, ServerError, ServerResult},
         ServerConfig,
     },
     crate::{
@@ -16,7 +16,7 @@ use {
         Router,
     },
     axum_server::Handle,
-    bitcoin::{OutPoint, Txid},
+    bitcoin::{address::NetworkUnchecked, Address, OutPoint, Txid},
     http::StatusCode,
     std::{io, net::ToSocketAddrs, sync::Arc},
     tokio::task,
@@ -55,7 +55,7 @@ impl Server {
             .route("/tip", get(Self::tip))
             .route("/block/{query}", get(Self::block))
             // Addresses
-            // .route("/address/:address", get(Self::address))
+            .route("/address/{address}", get(Self::address))
             // Transactions
             .route("/tx/{txid}", get(Self::transaction))
             .route("/output/{outpoint}", get(Self::output))
@@ -187,6 +187,18 @@ impl Server {
 
     async fn mempool_txids(Extension(index): Extension<Arc<Index>>) -> ServerResult {
         task::block_in_place(|| Ok(Json(api::mempool_txids(index)?).into_response()))
+    }
+
+    async fn address(
+        Extension(index): Extension<Arc<Index>>,
+        Extension(config): Extension<Arc<ServerConfig>>,
+        Path(address): Path<Address<NetworkUnchecked>>,
+    ) -> ServerResult {
+        let address = address
+            .require_network(config.chain.network())
+            .map_err(|err| ServerError::BadRequest(err.to_string()))?;
+
+        task::block_in_place(|| Ok(Json(api::address(index, &address)?).into_response()))
     }
 }
 

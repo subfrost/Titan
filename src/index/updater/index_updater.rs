@@ -6,6 +6,7 @@ use {
         },
         models::{Block, RuneEntry},
     },
+    address::AddressUpdater,
     bitcoin::{
         constants::SUBSIDY_HALVING_INTERVAL, hashes::Hash, hex::HexToArrayError,
         Block as BitcoinBlock, Transaction, Txid,
@@ -268,9 +269,14 @@ impl Updater {
                 self.db.clone(),
                 UpdaterCacheSettings::new(&self.settings, true),
             )?;
+            let mut address_updater = AddressUpdater::new();
             for txid in tx_order {
                 let tx = tx_map.get(&txid).unwrap();
-                self.index_tx(&txid, &tx, &mut cache)?;
+                self.index_tx(&txid, &tx, &mut cache, Some(&mut address_updater))?;
+            }
+
+            if self.settings.index_addresses {
+                address_updater.batch_update_script_pubkey(&mut cache)?;
             }
 
             cache.flush()?;
@@ -316,10 +322,15 @@ impl Updater {
             .par_iter()
             .enumerate()
             .filter_map(|(i, tx)| {
+                let _timer = self
+                    .latency
+                    .with_label_values(&["index_runes"])
+                    .start_timer();
+
                 let txid = tx.compute_txid();
                 match rune_parser.index_runes(u32::try_from(i).unwrap(), tx, txid) {
                     Ok(result) => {
-                        if result.has_rune_updates() {
+                        if result.has_rune_updates() || self.settings.index_addresses {
                             Some((i, txid, result))
                         } else {
                             None
@@ -333,25 +344,47 @@ impl Updater {
             })
             .collect::<Vec<_>>();
 
-        let mut transaction_updater = TransactionUpdater::new(cache, None, false)?;
+        let mut address_updater = AddressUpdater::new();
+        let mut transaction_updater = TransactionUpdater::new(
+            cache,
+            None,
+            self.settings.clone().into(),
+            Some(&mut address_updater),
+        )?;
 
         let block_header: bitcoin::block::Header = bitcoin_block.header.clone();
         let block_height = height as u32;
 
         let mut block = Block::empty_block(height as u32, bitcoin_block.header);
 
-        for (i, txid, result) in block_data {
-            transaction_updater.save(
-                block_header.time,
-                block_height,
-                txid,
-                &bitcoin_block.txdata[i],
-                &result,
-            )?;
-            block.tx_ids.push(txid.to_string());
-            if let Some((id, ..)) = result.etched {
-                block.etched_runes.push(id);
+        {
+            let _timer = self
+                .latency
+                .with_label_values(&["index_block_txs"])
+                .start_timer();
+
+            for (i, txid, result) in block_data {
+                transaction_updater.save(
+                    block_header.time,
+                    block_height,
+                    txid,
+                    &bitcoin_block.txdata[i],
+                    &result,
+                )?;
+                block.tx_ids.push(txid.to_string());
+                if let Some((id, ..)) = result.etched {
+                    block.etched_runes.push(id);
+                }
             }
+        }
+
+        // 5) If index_addresses is enabled, do one big pass
+        if self.settings.index_addresses {
+            let _timer = self
+                .latency
+                .with_label_values(&["batch_update_script_pubkeys_for_block"])
+                .start_timer();
+            address_updater.batch_update_script_pubkey(cache)?;
         }
 
         Ok(block)
@@ -368,12 +401,24 @@ impl Updater {
             UpdaterCacheSettings::new(&self.settings, true),
         )?;
 
-        self.index_tx(txid, tx, &mut cache)?;
+        let mut address_updater = AddressUpdater::new();
+        self.index_tx(txid, tx, &mut cache, Some(&mut address_updater))?;
+
+        if self.settings.index_addresses {
+            address_updater.batch_update_script_pubkey(&mut cache)?;
+        }
+
         cache.flush()?;
         Ok(())
     }
 
-    fn index_tx(&self, txid: &Txid, tx: &Transaction, cache: &mut UpdaterCache) -> Result<()> {
+    fn index_tx(
+        &self,
+        txid: &Txid,
+        tx: &Transaction,
+        cache: &mut UpdaterCache,
+        address_updater: Option<&mut AddressUpdater>,
+    ) -> Result<()> {
         if cache.does_tx_exist(*txid)? {
             warn!(
                 "Skipping tx {} in {} because it already exists",
@@ -384,15 +429,12 @@ impl Updater {
                     "block"
                 }
             );
-
             return Ok(());
         }
 
         let _timer = self.latency.with_label_values(&["index_tx"]).start_timer();
 
         let height = cache.get_block_count();
-
-        // now
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -403,14 +445,23 @@ impl Updater {
             RuneParser::new(&rpc_client, self.settings.chain, height as u32, true, cache)?;
 
         let result = rune_parser.index_runes(0, tx, *txid)?;
-        if result.has_rune_updates() {
+        if result.has_rune_updates() || self.settings.index_addresses {
             info!("Indexing tx {}", txid);
-            let mut transaction_updater = TransactionUpdater::new(cache, None, true)?;
-            transaction_updater.save(now as u32, height as u32, txid.clone(), tx, &result)?;
+
+            // Create a TransactionUpdater that references the optional address_updater
+            let mut transaction_updater = TransactionUpdater::new(
+                cache,
+                None,
+                self.settings.clone().into(),
+                address_updater,
+            )?;
+
+            // The same "save" logic as before
+            transaction_updater.save(now as u32, height as u32, *txid, tx, &result)?;
         }
 
         if cache.settings.mempool {
-            cache.set_mempool_tx(txid.clone());
+            cache.set_mempool_tx(*txid);
         }
 
         Ok(())
@@ -418,7 +469,7 @@ impl Updater {
 
     fn remove_txs(&self, txids: Vec<Txid>, mempool: bool) -> Result<()> {
         let db = self.db.write();
-        let mut rollback_updater = Rollback::new(&db, mempool)?;
+        let mut rollback_updater = Rollback::new(&db, mempool, self.settings.index_addresses)?;
 
         // Remove transactions that are no longer in mempool
         for txid in txids {
@@ -517,7 +568,7 @@ impl Updater {
     fn revert_block(&self, height: u32, block: &Block) -> Result<()> {
         let db = self.db.write();
 
-        let mut rollback_updater = Rollback::new(&db, false)?;
+        let mut rollback_updater = Rollback::new(&db, false, self.settings.index_addresses)?;
 
         for tx in block.tx_ids.iter().rev() {
             let txid = Txid::from_str(tx)?;

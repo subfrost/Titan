@@ -10,13 +10,14 @@ use {
     crate::{
         index::updater::{ReorgError, UpdaterError},
         models::{
-            Block, Inscription, InscriptionId, Pagination, PaginationResponse, RuneEntry,
-            TxOutEntry,
+            AddressData, AddressTxOut, Block, Inscription, InscriptionId, Pagination,
+            PaginationResponse, RuneAmount, RuneEntry, TxOutEntry,
         },
     },
-    bitcoin::{BlockHash, OutPoint, Txid},
+    bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
     ordinals::{Rune, RuneId},
     std::{
+        collections::HashMap,
         sync::{
             atomic::{AtomicBool, Ordering},
             Arc,
@@ -207,9 +208,38 @@ impl Index {
         rune_id: &RuneId,
         pagination: Option<Pagination>,
         mempool: Option<bool>,
-    ) -> Result<PaginationResponse<String>> {
+    ) -> Result<PaginationResponse<Txid>> {
         Ok(self
             .db
             .get_last_rune_transactions(rune_id, pagination, mempool)?)
+    }
+
+    pub fn get_script_pubkey_outpoints(&self, script: &ScriptBuf) -> Result<AddressData> {
+        let entry = self.db.get_script_pubkey_entry(script, None)?;
+        let outpoints = self.db.get_tx_outs(&entry.utxos, None)?;
+
+        let mut runes = HashMap::new();
+        let mut value = 0;
+        let mut outputs = Vec::new();
+        for (outpoint, tx_out) in outpoints {
+            for rune in tx_out.runes.iter() {
+                runes
+                    .entry(rune.rune_id)
+                    .and_modify(|amount| *amount += rune.amount)
+                    .or_insert(rune.amount);
+            }
+
+            value += tx_out.value;
+            outputs.push(AddressTxOut::from((outpoint, tx_out)));
+        }
+
+        Ok(AddressData {
+            value,
+            runes: runes
+                .into_iter()
+                .map(|(rune_id, amount)| RuneAmount::from((rune_id, amount)))
+                .collect(),
+            outputs,
+        })
     }
 }

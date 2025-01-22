@@ -5,4 +5,5 @@ mod error;
 mod helpers;
 mod mapper;
 mod rocks;
+mod util;
 mod wrapper;

@@ -1,13 +1,15 @@
 use {
-    super::cache::UpdaterCache,
+    super::{address::AddressUpdater, cache::UpdaterCache},
     crate::{
-        index::{event::Event, inscription::index_rune_icon, StoreError},
+        index::{event::Event, inscription::index_rune_icon, Chain, Settings, StoreError},
         models::{RuneEntry, TransactionStateChange},
     },
-    bitcoin::{OutPoint, Transaction, Txid},
+    bitcoin::{OutPoint, ScriptBuf, Transaction, Txid},
     ordinals::{Artifact, Etching, Rune, RuneId, Runestone, SpacedRune},
+    std::collections::HashSet,
     thiserror::Error,
     tokio::sync::mpsc::{self, error::SendError},
+    tracing::info,
 };
 
 #[derive(Debug, Error)]
@@ -24,22 +26,43 @@ pub enum TransactionUpdaterError {
 
 type Result<T> = std::result::Result<T, TransactionUpdaterError>;
 
+#[derive(Debug)]
+pub(super) struct TransactionUpdaterSettings {
+    pub(super) index_addresses: bool,
+    pub(super) chain: Chain,
+}
+
+impl From<Settings> for TransactionUpdaterSettings {
+    fn from(settings: Settings) -> Self {
+        Self {
+            index_addresses: settings.index_addresses,
+            chain: settings.chain,
+        }
+    }
+}
+
 pub(super) struct TransactionUpdater<'a> {
+    pub(super) address_updater: Option<&'a mut AddressUpdater>,
     pub(super) event_sender: Option<&'a mpsc::Sender<Event>>,
     pub(super) cache: &'a mut UpdaterCache,
-    pub(super) mempool: bool,
+
+    pub(super) settings: TransactionUpdaterSettings,
+    pub(super) modified_addresses: HashSet<ScriptBuf>,
 }
 
 impl<'a> TransactionUpdater<'a> {
     pub(super) fn new(
         cache: &'a mut UpdaterCache,
         event_sender: Option<&'a mpsc::Sender<Event>>,
-        mempool: bool,
+        settings: TransactionUpdaterSettings,
+        address_updater: Option<&'a mut AddressUpdater>,
     ) -> Result<Self> {
         Ok(Self {
+            address_updater,
             event_sender,
             cache,
-            mempool,
+            settings,
+            modified_addresses: HashSet::new(),
         })
     }
 
@@ -85,7 +108,7 @@ impl<'a> TransactionUpdater<'a> {
 
         // Create new outputs
         for (vout, output) in transaction_state_change.outputs.iter().enumerate() {
-            if output.runes.is_empty() {
+            if output.runes.is_empty() && !self.settings.index_addresses {
                 continue;
             }
 
@@ -105,7 +128,7 @@ impl<'a> TransactionUpdater<'a> {
                         outpoint,
                         rune_id: rune_amount.rune_id,
                         amount: rune_amount.amount,
-                        in_mempool: self.mempool,
+                        in_mempool: self.cache.settings.mempool,
                     })?;
                 }
             }
@@ -123,7 +146,67 @@ impl<'a> TransactionUpdater<'a> {
             self.cache.add_rune_transaction(rune_id, txid);
         }
 
+        if self.settings.index_addresses {
+            self.update_script_pubkeys(txid, transaction, transaction_state_change);
+        }
+
+        if self.cache.settings.mempool {
+            self.cache.set_mempool_tx(txid.clone());
+        }
+
         Ok(())
+    }
+
+    pub(super) fn notify_script_pubkeys_updated(&mut self, height: u32) -> Result<()> {
+        if let Some(sender) = self.event_sender {
+            for script_pubkey in self.modified_addresses.iter() {
+                let address = Chain::address_from_script(self.settings.chain, script_pubkey);
+
+                match address {
+                    Ok(address) => {
+                        sender.blocking_send(Event::AddressModified {
+                            block_height: height,
+                            address,
+                        })?;
+                    }
+                    Err(_) => {
+                        // Ignore unknown script pubkeys.
+                    }
+                }
+            }
+        }
+
+        self.modified_addresses.clear();
+        Ok(())
+    }
+
+    fn update_script_pubkeys(
+        &mut self,
+        txid: Txid,
+        transaction: &Transaction,
+        transaction_state_change: &TransactionStateChange,
+    ) -> () {
+        // skip coinbase inputs
+        if !transaction_state_change.is_coinbase {
+            for input_outpoint in &transaction_state_change.inputs {
+                // Add the spent outpoint to the address_updater
+                if let Some(addr_updater) = self.address_updater.as_mut() {
+                    addr_updater.add_spent_outpoint(*input_outpoint);
+                }
+            }
+        }
+
+        // Add new outputs
+        for (vout, txout) in transaction.output.iter().enumerate() {
+            // (If you want to skip certain scriptPubKeys, that's up to you.)
+            let outpoint = OutPoint {
+                txid,
+                vout: vout as u32,
+            };
+            if let Some(addr_updater) = self.address_updater.as_mut() {
+                addr_updater.add_new_outpoint(outpoint, txout.script_pubkey.clone());
+            }
+        }
     }
 
     fn update_spendable_input(&mut self, outpoint: &OutPoint, spent: bool) -> Result<()> {
@@ -147,7 +230,7 @@ impl<'a> TransactionUpdater<'a> {
     fn update_mints(&mut self, rune_id: &RuneId, amount: i128) -> Result<()> {
         let mut rune_entry = self.cache.get_rune(rune_id)?;
 
-        if self.mempool {
+        if self.cache.settings.mempool {
             let result = rune_entry.pending_mints.saturating_add_signed(amount);
             rune_entry.pending_mints = result;
         } else {
@@ -164,7 +247,7 @@ impl<'a> TransactionUpdater<'a> {
     fn update_burn_balance(&mut self, rune_id: &RuneId, amount: i128) -> Result<()> {
         let mut rune_entry = self.cache.get_rune(rune_id)?;
 
-        if self.mempool {
+        if self.cache.settings.mempool {
             let result = rune_entry
                 .pending_burns
                 .checked_add_signed(amount)
@@ -193,7 +276,7 @@ impl<'a> TransactionUpdater<'a> {
                 txid,
                 amount: amount as u128,
                 rune_id: *rune_id,
-                in_mempool: self.mempool,
+                in_mempool: self.cache.settings.mempool,
             })?;
         }
 
@@ -209,7 +292,7 @@ impl<'a> TransactionUpdater<'a> {
                 txid,
                 amount: amount as u128,
                 rune_id: *rune_id,
-                in_mempool: self.mempool,
+                in_mempool: self.cache.settings.mempool,
             })?;
         }
 

@@ -1,5 +1,5 @@
 use {
-    bitcoin::{OutPoint, Txid},
+    bitcoin::{Address, OutPoint, Txid},
     ordinals::RuneId,
 };
 
@@ -33,7 +33,8 @@ pub enum Event {
         txid: Txid,
         in_mempool: bool,
     },
-    TransactionReplaced {
-        txid: Txid,
+    AddressModified {
+        address: Address,
+        block_height: u32,
     },
 }

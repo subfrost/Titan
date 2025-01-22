@@ -5,7 +5,7 @@ use {
     },
     bitcoin::{OutPoint, Txid},
     ordinals::RuneId,
-    std::{fmt::format, sync::Arc},
+    std::sync::Arc,
     thiserror::Error,
 };
 
@@ -22,15 +22,21 @@ type Result<T> = std::result::Result<T, RollbackError>;
 pub(super) struct Rollback<'a> {
     store: &'a Arc<dyn Store + Send + Sync>,
     mempool: bool,
+    index_addresses: bool,
     runes: u64,
 }
 
 impl<'a> Rollback<'a> {
-    pub(super) fn new(store: &'a Arc<dyn Store + Send + Sync>, mempool: bool) -> Result<Self> {
+    pub(super) fn new(
+        store: &'a Arc<dyn Store + Send + Sync>,
+        mempool: bool,
+        index_addresses: bool,
+    ) -> Result<Self> {
         let runes = store.get_runes_count()?;
         Ok(Self {
             store,
             mempool,
+            index_addresses,
             runes,
         })
     }
@@ -100,7 +106,7 @@ impl<'a> Rollback<'a> {
     ) -> Result<()> {
         // Make spendable the inputs again.
         for tx_in in transaction.inputs.iter() {
-            self.update_spendable_input(tx_in, false)?;
+            self.update_spendable_input(&tx_in, false)?;
         }
 
         // Remove tx_outs
@@ -146,8 +152,107 @@ impl<'a> Rollback<'a> {
             self.update_burn_balance(rune_id, -(amount.n() as i128))?;
         }
 
+        if self.index_addresses {
+            self.revert_transaction_script_pubkeys_modifications(txid, transaction)?;
+        }
+
         // Finally remove the transaction state change.
         self.store.delete_tx_state_changes(txid, self.mempool)?;
+
+        Ok(())
+    }
+
+    fn revert_transaction_script_pubkeys_modifications(
+        &self,
+        txid: &Txid,
+        transaction: &TransactionStateChange,
+    ) -> Result<()> {
+        // Get outpoints.
+        let outpoints_to_script_pubkeys = self.store.get_outpoints_to_script_pubkey(
+            &transaction
+                .outputs
+                .iter()
+                .enumerate()
+                .map(|(vout, _)| OutPoint {
+                    txid: txid.clone(),
+                    vout: vout as u32,
+                })
+                .collect(),
+            Some(self.mempool),
+            false,
+        )?;
+
+        // Get script pubkeys.
+        let script_pubkeys = outpoints_to_script_pubkeys.values().cloned().collect();
+
+        // Update script pubkey entries.
+        let mut script_pubkey_entries = self
+            .store
+            .get_script_pubkey_entries(&script_pubkeys, self.mempool)?;
+
+        // Delete outpoints.
+        for (vout, _tx_out) in transaction.outputs.iter().enumerate() {
+            let outpoint = OutPoint {
+                txid: txid.clone(),
+                vout: vout as u32,
+            };
+
+            let script_pubkey = outpoints_to_script_pubkeys
+                .get(&outpoint)
+                .unwrap_or_else(|| panic!("script pubkey not found"));
+
+            let script_pubkey_entry = script_pubkey_entries
+                .get_mut(script_pubkey)
+                .unwrap_or_else(|| panic!("script pubkey entry not found"));
+
+            script_pubkey_entry
+                .utxos
+                .retain(|outpoint| *outpoint != *outpoint);
+
+            // Update script pubkey entries.
+            self.store.set_script_pubkey_entry(
+                script_pubkey,
+                script_pubkey_entry.clone(),
+                self.mempool,
+            )?;
+        }
+
+        self.store.delete_script_pubkey_outpoints(
+            &outpoints_to_script_pubkeys.keys().cloned().collect(),
+            self.mempool,
+        )?;
+
+        if self.mempool {
+            // Remove spent outpoints.
+            self.store
+                .delete_spent_outpoints_in_mempool(&transaction.inputs)?;
+        } else if transaction.is_coinbase {
+            let input_outpoints_to_script_pubkeys =
+                self.store
+                    .get_outpoints_to_script_pubkey(&transaction.inputs, None, false)?;
+
+            let input_script_pubkeys = input_outpoints_to_script_pubkeys
+                .values()
+                .cloned()
+                .collect();
+            let mut input_script_pubkeys_entries = self
+                .store
+                .get_script_pubkey_entries(&input_script_pubkeys, self.mempool)?;
+
+            for (outpoint, script_pubkey) in input_outpoints_to_script_pubkeys.iter() {
+                let script_pubkey_entry = input_script_pubkeys_entries
+                    .get_mut(script_pubkey)
+                    .unwrap_or_else(|| panic!("script pubkey entry not found"));
+
+                script_pubkey_entry.utxos.push(outpoint.clone());
+
+                self.store.set_script_pubkey_entry(
+                    script_pubkey,
+                    script_pubkey_entry.clone(),
+                    self.mempool,
+                )?;
+            }
+        }
 
         Ok(())
     }

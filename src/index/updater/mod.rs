@@ -4,6 +4,7 @@ pub use {
     transaction_updater::TransactionUpdaterError,
 };
 
+mod address;
 mod block_fetcher;
 mod cache;
 mod index_updater;

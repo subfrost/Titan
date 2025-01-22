@@ -1,3 +1,7 @@
+use bitcoin::{
+    hashes::{sha256d, Hash},
+    BlockHash,
+};
 use rocks::DBResult;
 
 use super::*;
@@ -50,6 +54,18 @@ impl DBResultMapper<String> for DBResult<Option<Vec<u8>>> {
             Ok(std::str::from_utf8(vec)
                 .map_err(|_| RocksDBError::InvalidString)?
                 .to_string())
+        };
+
+        map_db_type(self, &func)
+    }
+}
+
+impl DBResultMapper<BlockHash> for DBResult<Option<Vec<u8>>> {
+    fn mapped(self) -> DBResult<Option<BlockHash>> {
+        let func = |vec: &[u8]| -> DBResult<BlockHash> {
+            Ok(BlockHash::from_raw_hash(
+                Hash::from_slice(&vec).map_err(|_| RocksDBError::InvalidBlockHash)?,
+            ))
         };
 
         map_db_type(self, &func)

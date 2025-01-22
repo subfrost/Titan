@@ -19,6 +19,7 @@ pub struct TransactionStateChange {
     pub etched: Option<(RuneId, Rune)>,
     pub minted: Option<RuneAmount>,
     pub burned: HashMap<RuneId, Lot>,
+    pub is_coinbase: bool,
 }
 
 impl BorshSerialize for TransactionStateChange {
@@ -74,6 +75,9 @@ impl BorshSerialize for TransactionStateChange {
             lot.0.serialize(writer)?;
         }
 
+        // 6) is_coinbase: bool
+        self.is_coinbase.serialize(writer)?;
+
         Ok(())
     }
 }
@@ -124,12 +128,16 @@ impl BorshDeserialize for TransactionStateChange {
             burned.insert(RuneId { block, tx }, Lot(lot_value));
         }
 
+        // 6) is_coinbase
+        let is_coinbase = bool::deserialize_reader(reader)?;
+
         Ok(TransactionStateChange {
             inputs,
             outputs,
             etched,
             minted,
             burned,
+            is_coinbase,
         })
     }
 }
@@ -138,8 +146,8 @@ impl Display for TransactionStateChange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "TransactionStateChange {{ inputs: {:?}, outputs: {:?}, etched: {:?}, minted: {:?}, burned: {:?} }}",
-            self.inputs, self.outputs, self.etched, self.minted, self.burned
+            "TransactionStateChange {{ inputs: {:?}, outputs: {:?}, etched: {:?}, minted: {:?}, burned: {:?}, is_coinbase: {:?} }}",
+            self.inputs, self.outputs, self.etched, self.minted, self.burned, self.is_coinbase
         )
     }
 }

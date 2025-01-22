@@ -5,7 +5,7 @@ use {
         models::{Lot, RuneAmount, TransactionStateChange, TxOutEntry},
         util::IntoUsize,
     },
-    bitcoin::{consensus::encode, OutPoint, Transaction, Txid},
+    bitcoin::{consensus::encode, transaction, OutPoint, Transaction, Txid},
     bitcoincore_rpc::{Client, RpcApi},
     ordinals::{Artifact, Edict, Height, Rune, RuneId, Runestone},
     std::collections::HashMap,
@@ -219,6 +219,7 @@ impl<'a, 'client> RuneParser<'a, 'client> {
             let mut tx_out = TxOutEntry {
                 runes: vec![],
                 spent: false,
+                value: tx.output[vout].value.to_sat(),
             };
 
             for (id, balance) in balances {
@@ -244,6 +245,7 @@ impl<'a, 'client> RuneParser<'a, 'client> {
             outputs: tx_outs,
             etched,
             minted,
+            is_coinbase: tx.is_coinbase(),
         };
 
         Ok(transaction_state_change)
@@ -259,7 +261,7 @@ impl<'a, 'client> RuneParser<'a, 'client> {
             return Ok(None);
         }
 
-        let rune = match artifact {
+        let rune: Option<Rune> = match artifact {
             Artifact::Runestone(runestone) => match runestone.etching {
                 Some(etching) => etching.rune,
                 None => return Ok(None),
@@ -385,24 +387,22 @@ impl<'a, 'client> RuneParser<'a, 'client> {
     }
 
     fn unallocated(&self, tx: &Transaction) -> Result<HashMap<RuneId, Lot>> {
-        // map of rune ID to un-allocated balance of that rune
-        let mut unallocated: HashMap<RuneId, Lot> = HashMap::new();
+        let mut unallocated = HashMap::new();
 
-        // increment unallocated runes with the runes in tx inputs
-        for input in &tx.input {
-            match self.cache.get_tx_out(&input.previous_output.into()) {
-                Ok(tx_out) => {
-                    for rune_amount in tx_out.runes {
-                        *unallocated.entry(rune_amount.rune_id).or_default() += rune_amount.amount;
-                    }
-                }
-                Err(e) => {
-                    if e.is_not_found() {
-                        continue;
-                    }
+        // 1) Collect all outpoints:
+        let outpoints: Vec<_> = tx
+            .input
+            .iter()
+            .map(|input| input.previous_output.into())
+            .collect();
 
-                    return Err(e.into());
-                }
+        // 2) Do a single multi-get in the cache:
+        let tx_out_map = self.cache.get_tx_outs(&outpoints)?;
+
+        // 3) Accumulate unallocated:
+        for (_, tx_out) in tx_out_map {
+            for rune_amount in tx_out.runes {
+                *unallocated.entry(rune_amount.rune_id).or_default() += rune_amount.amount;
             }
         }
 
