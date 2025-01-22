@@ -23,10 +23,11 @@ pub struct BatchUpdate {
     pub mempool_txs: HashSet<Txid>,
     pub rune_count: u64,
     pub block_count: u64,
+    pub purged_blocks_count: u64,
 }
 
 impl BatchUpdate {
-    pub fn new(rune_count: u64, block_count: u64) -> Self {
+    pub fn new(rune_count: u64, block_count: u64, purged_blocks_count: u64) -> Self {
         Self {
             blocks: HashMap::new(),
             block_hashes: HashMap::new(),
@@ -40,6 +41,7 @@ impl BatchUpdate {
             mempool_txs: HashSet::new(),
             rune_count,
             block_count,
+            purged_blocks_count,
         }
     }
 
@@ -62,12 +64,13 @@ impl Display for BatchUpdate {
         write!(
             f,
             "BatchUpdate: \
-             counts: [blocks: {}, runes: {}] \
+             counts: [blocks: {}, runes: {}, purged_blocks: {}] \
              added: [blocks: {}, txouts: {}, tx_changes: {}, \
              runes: txs {}/ runes {}/ ids {}, \
              inscriptions: {}]",
             self.block_count,
             self.rune_count,
+            self.purged_blocks_count,
             self.blocks.len(),
             self.txouts.len(),
             self.tx_state_changes.len(),

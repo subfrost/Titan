@@ -37,9 +37,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Create the index and set a panic hook that closes the DB
     let index = Arc::new(Index::new(db_arc.clone(), settings.clone()));
+    index.validate_index()?;
 
     // 5. Spawn background threads (indexer, ZMQ listener, etc.)
-    let (index_handle, zmq_handle) = spawn_background_threads(index.clone());
+    let index_handle = spawn_background_threads(index.clone());
 
     // 6. Start the HTTP server
     let handle = Handle::new();
@@ -50,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     wait_for_signals().await;
 
     // 8. Graceful shutdown
-    graceful_shutdown(index, db_arc, &handle, index_handle, zmq_handle);
+    graceful_shutdown(index, db_arc, &handle, index_handle);
 
     Ok(())
 }
@@ -110,7 +111,7 @@ fn set_panic_hook(db_arc: Arc<RocksDB>) {
 /// Spawn background threads: indexer loop, ZMQ listener, etc. Return their JoinHandles.
 fn spawn_background_threads(
     index: Arc<Index>,
-) -> (std::thread::JoinHandle<()>, std::thread::JoinHandle<()>) {
+) -> std::thread::JoinHandle<()> {
     // 1) Spawn the indexer loop
     let index_clone = index.clone();
     let index_handle = std::thread::spawn(move || {
@@ -118,11 +119,11 @@ fn spawn_background_threads(
     });
 
     // 2) Spawn the ZMQ listener
-    let zmq_handle = index.initialize_zmq_listener();
+    index.start_zmq_listener();
 
     info!("Spawned background threads");
 
-    (index_handle, zmq_handle)
+    index_handle
 }
 
 /// Block until either SIGINT or SIGTERM is received
@@ -146,7 +147,6 @@ fn graceful_shutdown(
     db_arc: Arc<RocksDB>,
     handle: &Handle,
     index_handle: std::thread::JoinHandle<()>,
-    zmq_handle: std::thread::JoinHandle<()>,
 ) {
     // 1) Signal the index and other threads to stop
     index.shutdown();
@@ -163,9 +163,6 @@ fn graceful_shutdown(
     // 4) Join background threads
     if let Err(e) = index_handle.join() {
         error!("Failed to join indexer thread: {:?}", e);
-    }
-    if let Err(e) = zmq_handle.join() {
-        error!("Failed to join ZMQ listener thread: {:?}", e);
     }
 
     // Dropping the index, makes dropping the remaining references to the db

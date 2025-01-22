@@ -38,9 +38,17 @@ impl From<RocksDBError> for StoreError {
 }
 
 pub trait Store {
+    // settings
+    fn is_index_spent_outputs(&self) -> Result<Option<bool>, StoreError>;
+    fn set_index_spent_outputs(&self, value: bool) -> Result<(), StoreError>;
+    fn is_index_addresses(&self) -> Result<Option<bool>, StoreError>;
+    fn set_index_addresses(&self, value: bool) -> Result<(), StoreError>;
+
     // block
     fn get_block_count(&self) -> Result<u64, StoreError>;
     fn set_block_count(&self, count: u64) -> Result<(), StoreError>;
+    fn get_purged_blocks_count(&self) -> Result<u64, StoreError>;
+    fn set_purged_blocks_count(&self, count: u64) -> Result<(), StoreError>;
 
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, StoreError>;
     fn set_block_hash(&self, height: u64, hash: &BlockHash) -> Result<(), StoreError>;
@@ -51,6 +59,7 @@ pub trait Store {
     fn delete_block(&self, hash: &BlockHash) -> Result<(), StoreError>;
 
     // mempool
+    fn is_tx_in_mempool(&self, txid: &Txid) -> Result<bool, StoreError>;
     fn get_mempool_txids(&self) -> Result<HashSet<Txid>, StoreError>;
     fn remove_mempool_tx(&self, txid: &Txid) -> Result<(), StoreError>;
     fn set_mempool_tx(&self, txid: Txid) -> Result<(), StoreError>;
@@ -129,12 +138,36 @@ pub trait Store {
 }
 
 impl Store for RocksDB {
+    fn is_index_spent_outputs(&self) -> Result<Option<bool>, StoreError> {
+        Ok(self.is_index_spent_outputs()?)
+    }
+
+    fn set_index_spent_outputs(&self, value: bool) -> Result<(), StoreError> {
+        Ok(self.set_index_spent_outputs(value)?)
+    }
+
+    fn is_index_addresses(&self) -> Result<Option<bool>, StoreError> {
+        Ok(self.is_index_addresses()?)
+    }
+
+    fn set_index_addresses(&self, value: bool) -> Result<(), StoreError> {
+        Ok(self.set_index_addresses(value)?)
+    }
+
     fn get_block_count(&self) -> Result<u64, StoreError> {
         Ok(self.get_block_count()?)
     }
 
     fn set_block_count(&self, count: u64) -> Result<(), StoreError> {
         Ok(self.set_block_count(count)?)
+    }
+
+    fn get_purged_blocks_count(&self) -> Result<u64, StoreError> {
+        Ok(self.get_purged_blocks_count()?)
+    }
+
+    fn set_purged_blocks_count(&self, count: u64) -> Result<(), StoreError> {
+        Ok(self.set_purged_blocks_count(count)?)
     }
 
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, StoreError> {
@@ -195,6 +228,10 @@ impl Store for RocksDB {
 
     fn set_mempool_tx(&self, txid: Txid) -> Result<(), StoreError> {
         Ok(self.set_mempool_tx(txid)?)
+    }
+
+    fn is_tx_in_mempool(&self, txid: &Txid) -> Result<bool, StoreError> {
+        Ok(self.is_tx_in_mempool(txid)?)
     }
 
     fn get_tx_out(

@@ -1,10 +1,10 @@
-use std::sync::{atomic::AtomicBool, Arc};
-
-use bitcoin::{consensus::encode, Block, BlockHash, Transaction};
-use tracing::{debug, error, info};
-use zmq::{Context, Error as ZmqError};
-
-use super::updater::Updater;
+use {
+    crate::index::updater::Updater,
+    bitcoin::{consensus::encode, Transaction},
+    std::sync::{atomic::AtomicBool, Arc},
+    tracing::{debug, error, info},
+    zmq::{Context, Error as ZmqError},
+};
 
 pub fn zmq_listener(
     updater: Arc<Updater>,
@@ -20,7 +20,6 @@ pub fn zmq_listener(
     subscriber.connect(endpoint)?;
 
     // 3. Subscribe to raw blocks and raw transactions
-    subscriber.set_subscribe(b"rawblock")?;
     subscriber.set_subscribe(b"rawtx")?;
     debug!("Subscribed to topics: rawblock, rawtx");
 
@@ -43,12 +42,6 @@ pub fn zmq_listener(
         let payload = payload_frame.as_ref();
 
         match topic {
-            "rawblock" => {
-                debug!("[ZMQ] Received raw block, size={} bytes", payload.len());
-                if let Err(e) = handle_raw_block(&updater, payload) {
-                    error!("Failed to handle raw block: {:?}", e);
-                }
-            }
             "rawtx" => {
                 debug!(
                     "[ZMQ] Received raw transaction, size={} bytes",
@@ -74,23 +67,6 @@ pub fn zmq_listener(
     Ok(())
 }
 
-/// Decode and store a raw block in RocksDB
-fn handle_raw_block(
-    updater: &Arc<Updater>,
-    block_bytes: &[u8],
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Parse the block using the `bitcoin` crate
-    let block: Block = encode::deserialize(block_bytes)?;
-    let block_hash: BlockHash = block.block_hash();
-
-    if !updater.is_halted() && updater.is_at_tip() {
-        updater.index_new_block(block, None)?;
-        debug!("[ZMQ] Indexed block {}", block_hash);
-    }
-
-    Ok(())
-}
-
 /// Decode and store a raw transaction in RocksDB
 fn handle_raw_tx(
     updater: &Arc<Updater>,
@@ -100,7 +76,7 @@ fn handle_raw_tx(
     let tx = encode::deserialize::<Transaction>(tx_bytes)?;
     let txid = tx.compute_txid();
 
-    if !updater.is_halted() && updater.is_at_tip() {
+    if updater.is_at_tip() {
         updater.index_new_tx(&txid, &tx)?;
         debug!("[ZMQ] Indexed tx {}", txid);
     }

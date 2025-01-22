@@ -9,8 +9,8 @@ use {
     },
     bitcoin::{BlockHash, OutPoint, Txid},
     ordinals::{Rune, RuneId},
-    std::{str::FromStr, sync::Arc},
-    tracing::debug,
+    std::{cmp, str::FromStr, sync::Arc},
+    tracing::{debug, info},
 };
 
 type Result<T> = std::result::Result<T, StoreError>;
@@ -37,19 +37,23 @@ pub(super) struct UpdaterCache {
     delete: BatchDelete,
     first_block_height: u64,
     last_block_height: Option<u64>,
-    settings: UpdaterCacheSettings,
+    pub settings: UpdaterCacheSettings,
 }
 
 impl UpdaterCache {
     pub fn new(db: Arc<StoreWithLock>, settings: UpdaterCacheSettings) -> Result<Self> {
-        let (rune_count, block_count) = {
+        let (rune_count, block_count, purged_blocks_count) = {
             let db = db.read();
-            (db.get_runes_count()?, db.get_block_count()?)
+            (
+                db.get_runes_count()?,
+                db.get_block_count()?,
+                db.get_purged_blocks_count()?,
+            )
         };
 
         Ok(Self {
             db,
-            update: BatchUpdate::new(rune_count, block_count),
+            update: BatchUpdate::new(rune_count, block_count, purged_blocks_count),
             delete: BatchDelete::new(),
             first_block_height: block_count,
             last_block_height: None,
@@ -63,6 +67,10 @@ impl UpdaterCache {
 
     pub fn get_block_count(&self) -> u64 {
         self.update.block_count
+    }
+
+    pub fn get_purged_blocks_count(&self) -> u64 {
+        self.update.purged_blocks_count
     }
 
     fn increment_block_count(&mut self) -> () {
@@ -130,6 +138,23 @@ impl UpdaterCache {
                 .get_tx_state_changes(&txid, Some(self.settings.mempool))?;
             return Ok(tx_state_changes);
         }
+    }
+
+    pub fn does_tx_exist(&self, txid: Txid) -> Result<bool> {
+        if self.update.tx_state_changes.contains_key(&txid) {
+            return Ok(true);
+        }
+
+        if self.settings.mempool {
+            return self.db.read().is_tx_in_mempool(&txid);
+        }
+
+        let tx_state_changes = self
+            .db
+            .read()
+            .get_tx_state_changes(&txid, Some(self.settings.mempool));
+
+        Ok(tx_state_changes.is_ok())
     }
 
     pub fn set_tx_state_changes(
@@ -201,9 +226,7 @@ impl UpdaterCache {
     }
 
     pub fn should_flush(&self, max_size: usize) -> bool {
-        self.update.txouts.len() >= max_size
-            || self.update.tx_state_changes.len() >= max_size
-            || self.update.blocks.len() >= max_size
+        self.update.blocks.len() >= max_size
     }
 
     pub fn flush(&mut self) -> Result<()> {
@@ -225,7 +248,11 @@ impl UpdaterCache {
         }
 
         // Clear the cache
-        self.update = BatchUpdate::new(self.update.rune_count, self.update.block_count);
+        self.update = BatchUpdate::new(
+            self.update.rune_count,
+            self.update.block_count,
+            self.update.purged_blocks_count,
+        );
         self.delete = BatchDelete::new();
         self.first_block_height = self.update.block_count;
         self.last_block_height = None;
@@ -239,7 +266,7 @@ impl UpdaterCache {
         index_spent_outputs: bool,
     ) -> Result<()> {
         if let Some(last_block_height) = self.last_block_height {
-            let from_block_height_to_purge = self
+            let mut from_block_height_to_purge = self
                 .first_block_height
                 .checked_sub(max_recoverable_reorg_depth + 1)
                 .unwrap_or(0);
@@ -248,9 +275,14 @@ impl UpdaterCache {
                 last_block_height.checked_sub(max_recoverable_reorg_depth);
 
             if let Some(to_block_height_to_purge) = to_block_height_to_purge {
-                debug!(
+                from_block_height_to_purge = cmp::max(
+                    from_block_height_to_purge,
+                    self.update.purged_blocks_count + 1,
+                );
+
+                info!(
                     "Purging blocks from {} to {}",
-                    from_block_height_to_purge, to_block_height_to_purge
+                    from_block_height_to_purge, to_block_height_to_purge,
                 );
 
                 for i in from_block_height_to_purge..to_block_height_to_purge {
@@ -277,6 +309,8 @@ impl UpdaterCache {
 
             self.delete.tx_state_changes.insert(txid);
         }
+
+        self.update.purged_blocks_count = height;
 
         Ok(())
     }

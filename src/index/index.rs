@@ -4,10 +4,15 @@ use {
         settings::Settings,
         store::{Store, StoreError},
         updater::Updater,
-        zmq::zmq_listener,
+        zmq::ZmqManager,
+        RpcClientError,
     },
-    crate::models::{
-        Block, Inscription, InscriptionId, Pagination, PaginationResponse, RuneEntry, TxOutEntry,
+    crate::{
+        index::updater::{ReorgError, UpdaterError},
+        models::{
+            Block, Inscription, InscriptionId, Pagination, PaginationResponse, RuneEntry,
+            TxOutEntry,
+        },
     },
     bitcoin::{BlockHash, OutPoint, Txid},
     ordinals::{Rune, RuneId},
@@ -16,16 +21,22 @@ use {
             atomic::{AtomicBool, Ordering},
             Arc,
         },
-        thread::{self, JoinHandle},
+        thread::{self},
         time::Duration,
     },
-    tracing::{error, info},
+    tracing::{error, info, warn},
 };
 
 #[derive(Debug, thiserror::Error)]
 pub enum IndexError {
     #[error("store error: {0}")]
     StoreError(#[from] StoreError),
+    #[error("invalid index: {0}")]
+    InvalidIndex(String),
+    #[error("rpc client error: {0}")]
+    RpcClientError(#[from] RpcClientError),
+    #[error("rpc api error: {0}")]
+    RpcApiError(#[from] bitcoincore_rpc::Error),
 }
 
 type Result<T> = std::result::Result<T, IndexError>;
@@ -35,6 +46,8 @@ pub struct Index {
     settings: Settings,
     updater: Arc<Updater>,
     shutdown_flag: Arc<AtomicBool>,
+
+    zmq_manager: Arc<ZmqManager>,
 }
 
 impl Index {
@@ -43,6 +56,7 @@ impl Index {
         let metrics = Metrics::new();
         metrics.start(shutdown_flag.clone());
 
+        let zmq_manager = ZmqManager::new(settings.zmq_endpoint.clone());
         Self {
             db: db.clone(),
             settings: settings.clone(),
@@ -53,26 +67,50 @@ impl Index {
                 shutdown_flag.clone(),
             )),
             shutdown_flag,
+            zmq_manager: Arc::new(zmq_manager),
         }
+    }
+
+    pub fn validate_index(&self) -> Result<()> {
+        let db_index_spent_outputs = self.db.is_index_spent_outputs()?;
+        match (self.settings.index_spent_outputs, db_index_spent_outputs) {
+            (true, Some(false)) => {
+                return Err(IndexError::InvalidIndex(
+                    "index_spent_outputs is not set. Disable index_spent_outputs in settings or clean up the database".to_string(),
+                ));
+            }
+            (true, None) => {
+                self.db.set_index_spent_outputs(true)?;
+            }
+            (false, Some(true)) | (false, None) => {
+                self.db.set_index_spent_outputs(false)?;
+            }
+            _ => {}
+        }
+
+        let db_index_addresses = self.db.is_index_addresses()?;
+        match (self.settings.index_addresses, db_index_addresses) {
+            (true, Some(false)) => {
+                return Err(IndexError::InvalidIndex(
+                    "index_addresses is not set. Disable index_addresses in settings or clean up the database".to_string(),
+                ));
+            }
+            (true, None) => {
+                self.db.set_index_addresses(true)?;
+            }
+            (false, Some(true)) | (false, None) => {
+                self.db.set_index_addresses(false)?;
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 
     pub fn shutdown(&self) {
         self.shutdown_flag
             .store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    pub fn initialize_zmq_listener(&self) -> JoinHandle<()> {
-        let zmq_endpoint = self.settings.zmq_endpoint.clone();
-        let updater = self.updater.clone();
-        let shutdown_flag = self.shutdown_flag.clone();
-
-        let zmq_listener_handle = thread::spawn(move || {
-            if let Err(e) = zmq_listener(updater, &zmq_endpoint, shutdown_flag) {
-                error!("ZMQ listener thread error: {:?}", e);
-            }
-        });
-
-        zmq_listener_handle
+        self.zmq_manager.shutdown();
     }
 
     pub fn index(&self) {
@@ -82,18 +120,29 @@ impl Index {
                 break;
             }
 
-            if self.updater.is_halted() {
-                info!("Updater is halted, stopping indexer loop.");
-                break;
+            match self.updater.update_to_tip() {
+                Ok(()) => (),
+                Err(UpdaterError::BitcoinReorg(ReorgError::Unrecoverable)) => {
+                    error!("Unrecoverable reorg detected. stopping indexer loop.");
+                    break;
+                }
+                Err(UpdaterError::BitcoinReorg(ReorgError::Recoverable {
+                    height: _,
+                    depth: _,
+                })) => {
+                    continue;
+                }
+                Err(UpdaterError::BitcoinRpc(_)) => {
+                    warn!("We're getting network connection issues, retrying...");
+                    continue;
+                }
+                Err(e) => {
+                    error!("Failed to update to tip: {}", e);
+                    break;
+                }
             }
 
-            if !self.updater.is_at_tip() {
-                self.updater
-                    .update_to_tip()
-                    .expect("Failed to update to tip");
-            }
-
-            if !self.updater.is_at_tip() && !self.shutdown_flag.load(Ordering::SeqCst) {
+            if self.updater.is_at_tip() && !self.shutdown_flag.load(Ordering::SeqCst) {
                 self.updater
                     .index_mempool()
                     .expect("Failed to index mempool");
@@ -102,7 +151,12 @@ impl Index {
             thread::sleep(Duration::from_millis(self.settings.main_loop_interval));
         }
 
+        self.zmq_manager.join_zmq_listener();
         info!("Closing indexer");
+    }
+
+    pub fn start_zmq_listener(&self) {
+        self.zmq_manager.start_zmq_listener(self.updater.clone());
     }
 
     pub fn get_block_count(&self) -> Result<u64> {

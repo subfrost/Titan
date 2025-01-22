@@ -92,6 +92,23 @@ pub struct Options {
     )]
     pub(super) index_spent_outputs: bool,
 
+    /// Index addresses. [default: false]
+    #[arg(
+        long,
+        short,
+        help = "Index addresses. [default: false]",
+        default_value = "false"
+    )]
+    pub(super) index_addresses: bool,
+
+    /// Commit interval in blocks. [default: 5000]
+    #[arg(
+        long,
+        help = "Commit interval in blocks. [default: 5000]",
+        default_value = "5000"
+    )]
+    pub(super) commit_interval: u64,
+
     /// HTTP Event destination.
     #[arg(long, help = "HTTP Event destination")]
     pub(super) http_event_destination: Option<String>,
@@ -156,6 +173,8 @@ impl From<Options> for Settings {
             chain: options.chain,
             no_index_inscriptions: options.no_index_inscriptions,
             index_spent_outputs: options.index_spent_outputs,
+            index_addresses: options.index_addresses,
+            commit_interval: options.commit_interval,
             http_event_destination: options.http_event_destination,
             main_loop_interval: options.main_loop_interval,
         }

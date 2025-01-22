@@ -10,7 +10,6 @@ use {
     ordinals::{Artifact, Edict, Height, Rune, RuneId, Runestone},
     std::collections::HashMap,
     thiserror::Error,
-    tracing::info,
 };
 
 #[derive(Debug, Error)]

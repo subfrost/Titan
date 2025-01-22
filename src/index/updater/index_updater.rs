@@ -14,6 +14,8 @@ use {
     block_fetcher::fetch_blocks_from,
     cache::{UpdaterCache, UpdaterCacheSettings},
     indicatif::{ProgressBar, ProgressStyle},
+    mempool::MempoolError,
+    mempool_debouncer::MempoolDebouncer,
     ordinals::{Rune, RuneId, SpacedRune, Terms},
     prometheus::HistogramVec,
     rayon::{iter::IntoParallelRefIterator, prelude::*},
@@ -25,9 +27,9 @@ use {
         str::FromStr,
         sync::{
             atomic::{AtomicBool, Ordering},
-            Arc,
+            Arc, Mutex, RwLock,
         },
-        time::{SystemTime, UNIX_EPOCH},
+        time::{Duration, SystemTime, UNIX_EPOCH},
     },
     store_lock::StoreWithLock,
     thiserror::Error,
@@ -74,6 +76,10 @@ pub enum UpdaterError {
     RuneParser(#[from] RuneParserError),
     #[error("txid error {0}")]
     Txid(#[from] HexToArrayError),
+    #[error("mempool error {0}")]
+    Mempool(#[from] MempoolError),
+    #[error("mutex error")]
+    Mutex,
 }
 
 impl UpdaterError {
@@ -88,8 +94,11 @@ pub struct Updater {
     db: Arc<StoreWithLock>,
     settings: Settings,
     is_at_tip: AtomicBool,
-    unrecoverable_reorg: AtomicBool,
+
     shutdown_flag: Arc<AtomicBool>,
+
+    mempool_indexing: Mutex<bool>,
+    mempool_debouncer: RwLock<MempoolDebouncer>,
 
     // monitoring
     latency: HistogramVec,
@@ -102,12 +111,14 @@ impl Updater {
         metrics: &Metrics,
         shutdown_flag: Arc<AtomicBool>,
     ) -> Self {
+        let debounce_duration = Duration::from_millis(settings.main_loop_interval * 2);
         Self {
             db: Arc::new(StoreWithLock::new(db)),
             settings,
             is_at_tip: AtomicBool::new(false),
-            unrecoverable_reorg: AtomicBool::new(false),
+            mempool_indexing: Mutex::new(false),
             shutdown_flag,
+            mempool_debouncer: RwLock::new(MempoolDebouncer::new(debounce_duration)),
             latency: metrics.histogram_vec(
                 prometheus::HistogramOpts::new("indexer_latency", "Indexer latency"),
                 &["method"],
@@ -115,19 +126,15 @@ impl Updater {
         }
     }
 
-    pub fn is_halted(&self) -> bool {
-        self.unrecoverable_reorg.load(Ordering::Relaxed)
-    }
-
     pub fn is_at_tip(&self) -> bool {
         self.is_at_tip.load(Ordering::Relaxed)
     }
 
     pub fn update_to_tip(&self) -> Result<()> {
-        info!("Updating to tip");
+        debug!("Updating to tip");
 
         // Every 1000 blocks, commit the changes to the database
-        let commit_interval = 1000;
+        let commit_interval = self.settings.commit_interval as usize;
         let mut cache = UpdaterCache::new(
             self.db.clone(),
             UpdaterCacheSettings::new(&self.settings, false),
@@ -135,18 +142,20 @@ impl Updater {
 
         // Get RPC client and get block height
         let bitcoin_block_client = self.settings.get_new_rpc_client()?;
-        let bitcoin_block_count = bitcoin_block_client.get_block_count()?;
+        let mut bitcoin_block_count = bitcoin_block_client.get_block_count()?;
 
         // Fetch new blocks if needed.
-        if bitcoin_block_count > cache.get_block_count() {
-            let progress_bar =
-                self.open_progress_bar(cache.get_block_count() - 1, bitcoin_block_count - 1);
+        while bitcoin_block_count > cache.get_block_count() {
+            let was_at_tip = self.is_at_tip.load(Ordering::Relaxed);
+            self.is_at_tip.store(false, Ordering::Release);
+
+            let progress_bar = self.open_progress_bar(cache.get_block_count(), bitcoin_block_count);
             let min_height = self.settings.chain.first_rune_height() as u64;
 
             let rx = fetch_blocks_from(
                 Arc::new(self.settings.clone()),
                 cache.get_block_count(),
-                bitcoin_block_count - 1,
+                bitcoin_block_count,
             )?;
 
             let rpc_client = self.settings.get_new_rpc_client()?;
@@ -155,6 +164,24 @@ impl Updater {
                 if self.shutdown_flag.load(Ordering::SeqCst) {
                     info!("Updater received shutdown signal, stopping...");
                     break;
+                }
+
+                if was_at_tip {
+                    match self.detect_reorg(
+                        &block,
+                        cache.get_block_count(),
+                        &rpc_client,
+                        self.settings.max_recoverable_reorg_depth(),
+                    ) {
+                        Ok(()) => (),
+                        Err(ReorgError::Recoverable { height, depth }) => {
+                            self.handle_reorg(&block, height, depth)?;
+                            return Err(ReorgError::Recoverable { height, depth }.into());
+                        }
+                        Err(e) => {
+                            return Err(e.into());
+                        }
+                    }
                 }
 
                 let block = if cache.get_block_count() < min_height {
@@ -175,22 +202,20 @@ impl Updater {
                 }
 
                 progress_bar.inc(1);
-
-                if progress_bar.position() > progress_bar.length().unwrap() {
-                    if let Ok(count) = bitcoin_block_client.get_block_count() {
-                        progress_bar.set_length(count + 1);
-                    } else {
-                        warn!("Failed to fetch latest block height");
-                    }
-                }
             }
 
-            // Flush the cache to the database
-            cache.flush()?;
+            if self.shutdown_flag.load(Ordering::SeqCst) {
+                info!("Updater received shutdown signal, stopping...");
+                break;
+            }
 
-            debug!("Finished fetching blocks");
+            info!("Synced to tip {}", bitcoin_block_count);
+            bitcoin_block_count = bitcoin_block_client.get_block_count()?;
             progress_bar.finish_and_clear();
         }
+
+        // Flush the cache to the database
+        cache.flush()?;
 
         if !self.shutdown_flag.load(Ordering::SeqCst) {
             self.is_at_tip.store(true, Ordering::Release);
@@ -228,69 +253,40 @@ impl Updater {
             .cloned()
             .collect();
 
-        let mut cache = UpdaterCache::new(
-            self.db.clone(),
-            UpdaterCacheSettings::new(&self.settings, true),
-        )?;
-
         // Index new transactions
         let new_txs_len = new_txs.len();
-        for txid in new_txs {
-            let tx = client.get_raw_transaction(&txid, None)?;
-            self.index_tx(&txid, &tx, &mut cache)?;
-        }
+        if new_txs_len > 0 {
+            let tx_map = mempool::fetch_transactions(&client, new_txs, self.shutdown_flag.clone());
+            let tx_order =
+                mempool::sort_transaction_order(&client, &tx_map, self.shutdown_flag.clone())?;
+            let _mempool_indexing = self
+                .mempool_indexing
+                .lock()
+                .map_err(|_| UpdaterError::Mutex)?;
 
-        cache.flush()?;
+            let mut cache = UpdaterCache::new(
+                self.db.clone(),
+                UpdaterCacheSettings::new(&self.settings, true),
+            )?;
+            for txid in tx_order {
+                let tx = tx_map.get(&txid).unwrap();
+                self.index_tx(&txid, &tx, &mut cache)?;
+            }
+
+            cache.flush()?;
+        }
 
         let removed_len = removed_txs.len();
-        self.remove_txs(removed_txs, true)?;
-
-        debug!(
-            "Mempool: New txs: {}. Removed txs: {}",
-            new_txs_len, removed_len
-        );
-
-        Ok(())
-    }
-
-    pub fn index_new_block(&self, bitcoin_block: BitcoinBlock, height: Option<u64>) -> Result<()> {
-        let height = height.unwrap_or(self.settings.get_new_rpc_client()?.get_block_count()?);
-
-        let rpc_client = self.settings.get_new_rpc_client()?;
-
-        match self.detect_reorg(
-            &bitcoin_block,
-            height,
-            &rpc_client,
-            self.settings.max_recoverable_reorg_depth(),
-        ) {
-            Ok(()) => (),
-            Err(ReorgError::Recoverable { height, depth }) => {
-                self.handle_reorg(&bitcoin_block, height, depth)?;
-                return Err(ReorgError::Recoverable { height, depth }.into());
-            }
-            Err(ReorgError::Unrecoverable) => {
-                error!("Unrecoverable reorg detected");
-
-                self.unrecoverable_reorg.store(true, Ordering::Release);
-                return Err(ReorgError::Unrecoverable.into());
-            }
-            Err(e) => {
-                return Err(e.into());
-            }
+        if removed_len > 0 {
+            self.remove_txs(removed_txs, true)?;
         }
 
-        let rpc_client = self.settings.get_new_rpc_client()?;
-        let mut cache = UpdaterCache::new(
-            self.db.clone(),
-            UpdaterCacheSettings::new(&self.settings, false),
-        )?;
-
-        let block = self.index_block(bitcoin_block.clone(), height, &rpc_client, &mut cache)?;
-        cache.set_new_block(block);
-        cache.flush()?;
-
-        info!("New tip {}:{}", height, bitcoin_block.header.block_hash());
+        if new_txs_len > 0 || removed_len > 0 {
+            info!(
+                "Mempool: New txs: {}. Removed txs: {}",
+                new_txs_len, removed_len
+            );
+        }
 
         Ok(())
     }
@@ -362,16 +358,36 @@ impl Updater {
     }
 
     pub fn index_new_tx(&self, txid: &Txid, tx: &Transaction) -> Result<()> {
+        let _mempool_indexing = self
+            .mempool_indexing
+            .lock()
+            .map_err(|_| UpdaterError::Mutex)?;
+
         let mut cache = UpdaterCache::new(
             self.db.clone(),
             UpdaterCacheSettings::new(&self.settings, true),
         )?;
+
         self.index_tx(txid, tx, &mut cache)?;
         cache.flush()?;
         Ok(())
     }
 
     fn index_tx(&self, txid: &Txid, tx: &Transaction, cache: &mut UpdaterCache) -> Result<()> {
+        if cache.does_tx_exist(*txid)? {
+            warn!(
+                "Skipping tx {} in {} because it already exists",
+                txid,
+                if cache.settings.mempool {
+                    "mempool"
+                } else {
+                    "block"
+                }
+            );
+
+            return Ok(());
+        }
+
         let _timer = self.latency.with_label_values(&["index_tx"]).start_timer();
 
         let height = cache.get_block_count();
@@ -388,11 +404,14 @@ impl Updater {
 
         let result = rune_parser.index_runes(0, tx, *txid)?;
         if result.has_rune_updates() {
+            info!("Indexing tx {}", txid);
             let mut transaction_updater = TransactionUpdater::new(cache, None, true)?;
             transaction_updater.save(now as u32, height as u32, txid.clone(), tx, &result)?;
         }
 
-        cache.set_mempool_tx(txid.clone());
+        if cache.settings.mempool {
+            cache.set_mempool_tx(txid.clone());
+        }
 
         Ok(())
     }
@@ -403,10 +422,19 @@ impl Updater {
 
         // Remove transactions that are no longer in mempool
         for txid in txids {
+            info!("Removing tx {}", txid);
             db.remove_mempool_tx(&txid)?;
-            let tx_state_changes: crate::models::TransactionStateChange =
-                db.get_tx_state_changes(&txid, Some(mempool))?;
-            rollback_updater.revert_transaction(&txid, &tx_state_changes)?;
+            match db.get_tx_state_changes(&txid, Some(mempool)) {
+                Ok(tx_state_changes) => {
+                    rollback_updater.revert_transaction(&txid, &tx_state_changes)?;
+                }
+                Err(StoreError::NotFound(_)) => {
+                    // Silently ignore txs that are not in the db
+                }
+                Err(e) => {
+                    error!("Failed to get tx state changes for tx {}: {}", txid, e);
+                }
+            }
         }
 
         Ok(())
@@ -432,19 +460,17 @@ impl Updater {
         let db = self.db.read();
         let bitcoind_prev_blockhash = block.header.prev_blockhash;
 
-        let mut prev_height = height.checked_sub(1).ok_or(ReorgError::Unrecoverable)?;
+        let prev_height = height.checked_sub(1).ok_or(ReorgError::Unrecoverable)?;
         match db.get_block_hash(prev_height as u64) {
             Ok(index_prev_blockhash) if index_prev_blockhash == bitcoind_prev_blockhash => Ok(()),
             Ok(index_prev_blockhash) if index_prev_blockhash != bitcoind_prev_blockhash => {
                 for depth in 1..max_recoverable_reorg_depth {
-                    prev_height = prev_height
-                        .checked_sub(1)
-                        .ok_or(ReorgError::Unrecoverable)?;
-                    let index_block_hash = db.get_block_hash(prev_height as u64)?;
-                    let bitcoind_block_hash =
-                        client.get_block_hash(u64::from(prev_height.saturating_sub(depth)))?;
+                    let height_to_check = height.saturating_sub(depth);
+                    let index_block_hash = db.get_block_hash(height_to_check)?;
+                    let bitcoind_block_hash = client.get_block_hash(height_to_check)?;
 
                     if index_block_hash == bitcoind_block_hash {
+                        info!("Reorg until height {}. Depth: {}", height_to_check, depth);
                         return Err(ReorgError::Recoverable { height, depth });
                     }
                 }
@@ -468,7 +494,7 @@ impl Updater {
             let db = self.db.write();
 
             // rollback block count indexed.
-            db.set_block_count(height - depth + 1)?;
+            db.set_block_count(height - depth)?;
         }
 
         // Find rolled back blocks and revert those txs.
@@ -495,12 +521,22 @@ impl Updater {
 
         for tx in block.tx_ids.iter().rev() {
             let txid = Txid::from_str(tx)?;
-            let tx_state_changes = db.get_tx_state_changes(&txid, Some(false))?;
-            rollback_updater.revert_transaction(&txid, &tx_state_changes)?;
+            match db.get_tx_state_changes(&txid, Some(false)) {
+                Ok(tx_state_changes) => {
+                    rollback_updater.revert_transaction(&txid, &tx_state_changes)?;
+                }
+                Err(StoreError::NotFound(_)) => {
+                    // Silently ignore txs that are not in the db
+                }
+                Err(e) => {
+                    error!("Failed to get tx state changes for tx {}: {}", txid, e);
+                }
+            }
         }
 
         info!(
-            "Reverted block {} with {} txs",
+            "Reverted block {}:{} with {} txs",
+            height,
             block.header.block_hash(),
             block.tx_ids.len()
         );

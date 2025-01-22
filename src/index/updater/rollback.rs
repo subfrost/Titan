@@ -5,7 +5,7 @@ use {
     },
     bitcoin::{OutPoint, Txid},
     ordinals::RuneId,
-    std::sync::Arc,
+    std::{fmt::format, sync::Arc},
     thiserror::Error,
 };
 
@@ -57,16 +57,10 @@ impl<'a> Rollback<'a> {
         let mut rune_entry = self.store.get_rune(rune_id)?;
 
         if self.mempool {
-            let result = rune_entry
-                .pending_mints
-                .checked_add_signed(amount)
-                .ok_or(RollbackError::Overflow("mints".to_string()))?;
+            let result = rune_entry.pending_mints.saturating_add_signed(amount);
             rune_entry.pending_mints = result;
         } else {
-            let result = rune_entry
-                .mints
-                .checked_add_signed(amount)
-                .ok_or(RollbackError::Overflow("mints".to_string()))?;
+            let result = rune_entry.mints.saturating_add_signed(amount);
 
             rune_entry.mints = result;
         }
@@ -151,6 +145,9 @@ impl<'a> Rollback<'a> {
         for (rune_id, amount) in transaction.burned.iter() {
             self.update_burn_balance(rune_id, -(amount.n() as i128))?;
         }
+
+        // Finally remove the transaction state change.
+        self.store.delete_tx_state_changes(txid, self.mempool)?;
 
         Ok(())
     }

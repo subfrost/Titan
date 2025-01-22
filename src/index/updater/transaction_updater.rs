@@ -148,16 +148,10 @@ impl<'a> TransactionUpdater<'a> {
         let mut rune_entry = self.cache.get_rune(rune_id)?;
 
         if self.mempool {
-            let result = rune_entry
-                .pending_mints
-                .checked_add_signed(amount)
-                .ok_or(TransactionUpdaterError::Overflow("mints".to_string()))?;
+            let result = rune_entry.pending_mints.saturating_add_signed(amount);
             rune_entry.pending_mints = result;
         } else {
-            let result = rune_entry
-                .mints
-                .checked_add_signed(amount)
-                .ok_or(TransactionUpdaterError::Overflow("mints".to_string()))?;
+            let result = rune_entry.mints.saturating_add_signed(amount);
 
             rune_entry.mints = result;
         }

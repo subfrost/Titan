@@ -16,6 +16,7 @@ use {
         collections::HashSet,
         sync::{Arc, RwLock},
     },
+    tracing::info,
     wrapper::RuneIdWrapper,
 };
 
@@ -51,8 +52,13 @@ const INSCRIPTIONS_CF: &str = "inscriptions";
 
 const MEMPOOL_CF: &str = "mempool";
 const STATS_CF: &str = "stats";
+const SETTINGS_CF: &str = "settings";
+
+const INDEX_SPENT_OUTPUTS_KEY: &str = "index_spent_outputs";
+const INDEX_ADDRESSES_KEY: &str = "index_addresses";
 
 const BLOCK_COUNT_KEY: &str = "block_count";
+const PURGED_BLOCKS_COUNT_KEY: &str = "purged_blocks_count";
 
 impl RocksDB {
     pub fn open(file_path: &str) -> DBResult<Self> {
@@ -93,6 +99,8 @@ impl RocksDB {
             ColumnFamilyDescriptor::new(TRANSACTION_RUNE_INDEX_CF, cf_opts.clone());
         let transaction_rune_index_mempool_cfd: ColumnFamilyDescriptor =
             ColumnFamilyDescriptor::new(TRANSACTION_RUNE_INDEX_MEMPOOL_CF, cf_opts.clone());
+        let settings_cfd: ColumnFamilyDescriptor =
+            ColumnFamilyDescriptor::new(SETTINGS_CF, cf_opts.clone());
 
         let mut db_opts = Options::default();
         db_opts.create_if_missing(true);
@@ -132,6 +140,7 @@ impl RocksDB {
                 rune_transactions_mempool_cfd,
                 transaction_rune_index_cfd,
                 transaction_rune_index_mempool_cfd,
+                settings_cfd,
             ],
         )?;
 
@@ -163,6 +172,44 @@ impl RocksDB {
         }
     }
 
+    pub fn is_index_spent_outputs(&self) -> DBResult<Option<bool>> {
+        let cf_handle = self.cf_handle(SETTINGS_CF)?;
+        let val: Option<u64> = self
+            .get_option_vec_data(&cf_handle, INDEX_SPENT_OUTPUTS_KEY)
+            .mapped()?;
+
+        Ok(val.map(|v| v == 1))
+    }
+
+    pub fn set_index_spent_outputs(&self, value: bool) -> DBResult<()> {
+        let cf_handle = self.cf_handle(SETTINGS_CF)?;
+        self.db.put_cf(
+            &cf_handle,
+            INDEX_SPENT_OUTPUTS_KEY,
+            (value as u64).to_le_bytes().to_vec(),
+        )?;
+        Ok(())
+    }
+
+    pub fn is_index_addresses(&self) -> DBResult<Option<bool>> {
+        let cf_handle = self.cf_handle(SETTINGS_CF)?;
+        let val: Option<u64> = self
+            .get_option_vec_data(&cf_handle, INDEX_ADDRESSES_KEY)
+            .mapped()?;
+
+        Ok(val.map(|v| v == 1))
+    }
+
+    pub fn set_index_addresses(&self, value: bool) -> DBResult<()> {
+        let cf_handle = self.cf_handle(SETTINGS_CF)?;
+        self.db.put_cf(
+            &cf_handle,
+            INDEX_ADDRESSES_KEY,
+            (value as u64).to_le_bytes().to_vec(),
+        )?;
+        Ok(())
+    }
+
     pub fn get_block_count(&self) -> DBResult<u64> {
         let cf_handle = self.cf_handle(STATS_CF)?;
         Ok(self
@@ -175,6 +222,24 @@ impl RocksDB {
         let cf_handle = self.cf_handle(STATS_CF)?;
         self.db
             .put_cf(&cf_handle, BLOCK_COUNT_KEY, count.to_le_bytes().to_vec())?;
+        Ok(())
+    }
+
+    pub fn get_purged_blocks_count(&self) -> DBResult<u64> {
+        let cf_handle = self.cf_handle(STATS_CF)?;
+        Ok(self
+            .get_option_vec_data(&cf_handle, PURGED_BLOCKS_COUNT_KEY)
+            .mapped()?
+            .unwrap_or(0))
+    }
+
+    pub fn set_purged_blocks_count(&self, count: u64) -> DBResult<()> {
+        let cf_handle = self.cf_handle(STATS_CF)?;
+        self.db.put_cf(
+            &cf_handle,
+            PURGED_BLOCKS_COUNT_KEY,
+            count.to_le_bytes().to_vec(),
+        )?;
         Ok(())
     }
 
@@ -655,7 +720,8 @@ impl RocksDB {
     pub fn set_mempool_tx(&self, txid: Txid) -> DBResult<()> {
         // Write to DB
         let cf_handle = self.cf_handle(MEMPOOL_CF)?;
-        self.db.put_cf(&cf_handle, txid.to_string(), vec![1])?;
+        self.db
+            .put_cf(&cf_handle, consensus::serialize(&txid), vec![1])?;
 
         // Update cache
         self.mempool_cache
@@ -666,10 +732,20 @@ impl RocksDB {
         Ok(())
     }
 
+    pub fn is_tx_in_mempool(&self, txid: &Txid) -> DBResult<bool> {
+        let exists = self
+            .mempool_cache
+            .read()
+            .map_err(|_| RocksDBError::LockPoisoned)?
+            .contains(txid);
+
+        Ok(exists)
+    }
+
     pub fn remove_mempool_tx(&self, txid: &Txid) -> DBResult<()> {
         // Write to DB
         let cf_handle = self.cf_handle(MEMPOOL_CF)?;
-        self.db.delete_cf(&cf_handle, txid.to_string())?;
+        self.db.delete_cf(&cf_handle, consensus::serialize(txid))?;
 
         // Update cache
         self.mempool_cache
@@ -795,7 +871,7 @@ impl RocksDB {
         {
             let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(MEMPOOL_CF)?;
             for txid in update.mempool_txs {
-                batch.put_cf(&cf_handle, txid.to_string(), vec![1]);
+                batch.put_cf(&cf_handle, consensus::serialize(&txid), vec![1]);
 
                 self.mempool_cache
                     .write()
@@ -805,7 +881,7 @@ impl RocksDB {
         }
 
         // 10. Update runes_count
-        {
+        if !mempool {
             let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(STATS_CF)?;
             batch.put_cf(
                 &cf_handle,
@@ -815,12 +891,22 @@ impl RocksDB {
         }
 
         // 11. Update block_count
-        {
+        if !mempool {
             let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(STATS_CF)?;
             batch.put_cf(
                 &cf_handle,
                 BLOCK_COUNT_KEY,
                 update.block_count.to_le_bytes().to_vec(),
+            );
+        }
+
+        // 12. Update purged_blocks_count
+        if !mempool {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(STATS_CF)?;
+            batch.put_cf(
+                &cf_handle,
+                PURGED_BLOCKS_COUNT_KEY,
+                update.purged_blocks_count.to_le_bytes().to_vec(),
             );
         }
 
