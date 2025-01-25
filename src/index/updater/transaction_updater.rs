@@ -1,8 +1,8 @@
 use {
     super::{address::AddressUpdater, cache::UpdaterCache},
     crate::{
-        index::{event::Event, Chain, Settings, StoreError},
-        models::{TransactionStateChange, TxOutEntry},
+        index::{Chain, Settings, StoreError},
+        models::{Event, TransactionStateChange, TxOutEntry},
     },
     bitcoin::{OutPoint, ScriptBuf, Transaction, Txid},
     ordinals::RuneId,
@@ -38,7 +38,7 @@ impl From<Settings> for TransactionUpdaterSettings {
 
 pub(super) struct TransactionUpdater<'a> {
     pub(super) address_updater: Option<&'a mut AddressUpdater>,
-    pub(super) event_sender: Option<&'a mpsc::Sender<Event>>,
+    pub(super) event_sender: &'a Option<mpsc::Sender<Event>>,
     pub(super) cache: &'a mut UpdaterCache,
 
     pub(super) settings: TransactionUpdaterSettings,
@@ -48,7 +48,7 @@ pub(super) struct TransactionUpdater<'a> {
 impl<'a> TransactionUpdater<'a> {
     pub(super) fn new(
         cache: &'a mut UpdaterCache,
-        event_sender: Option<&'a mpsc::Sender<Event>>,
+        event_sender: &'a Option<mpsc::Sender<Event>>,
         settings: TransactionUpdaterSettings,
         address_updater: Option<&'a mut AddressUpdater>,
     ) -> Result<Self> {
@@ -136,7 +136,8 @@ impl<'a> TransactionUpdater<'a> {
                     Ok(address) => {
                         sender.blocking_send(Event::AddressModified {
                             block_height: height,
-                            address,
+                            address: address.to_string(),
+                            in_mempool: self.cache.settings.mempool,
                         })?;
                     }
                     Err(_) => {

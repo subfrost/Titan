@@ -4,7 +4,7 @@ use {
         index::{
             metrics::Metrics, store::Store, RpcClientError, RpcClientProvider, Settings, StoreError,
         },
-        models::{Block, RuneEntry},
+        models::{Block, Event, RuneEntry},
     },
     address::AddressUpdater,
     bitcoin::{
@@ -33,6 +33,7 @@ use {
     },
     store_lock::StoreWithLock,
     thiserror::Error,
+    tokio::sync::mpsc::Sender,
     tracing::{debug, error, info, warn},
     transaction_updater::TransactionUpdater,
 };
@@ -100,6 +101,8 @@ pub struct Updater {
     mempool_indexing: Mutex<bool>,
     mempool_debouncer: RwLock<MempoolDebouncer>,
 
+    sender: Option<Sender<Event>>,
+
     // monitoring
     latency: HistogramVec,
 }
@@ -110,6 +113,7 @@ impl Updater {
         settings: Settings,
         metrics: &Metrics,
         shutdown_flag: Arc<AtomicBool>,
+        sender: Option<Sender<Event>>,
     ) -> Self {
         let debounce_duration = Duration::from_millis(settings.main_loop_interval * 2);
         Self {
@@ -119,6 +123,7 @@ impl Updater {
             mempool_indexing: Mutex::new(false),
             shutdown_flag,
             mempool_debouncer: RwLock::new(MempoolDebouncer::new(debounce_duration)),
+            sender,
             latency: metrics.histogram_vec(
                 prometheus::HistogramOpts::new("indexer_latency", "Indexer latency"),
                 &["method"],
@@ -355,7 +360,7 @@ impl Updater {
         let mut address_updater = AddressUpdater::new();
         let mut transaction_updater = TransactionUpdater::new(
             cache,
-            None,
+            &self.sender,
             self.settings.clone().into(),
             Some(&mut address_updater),
         )?;
@@ -450,7 +455,7 @@ impl Updater {
             // Create a TransactionUpdater that references the optional address_updater
             let mut transaction_updater = TransactionUpdater::new(
                 cache,
-                None,
+                &self.sender,
                 self.settings.clone().into(),
                 address_updater,
             )?;

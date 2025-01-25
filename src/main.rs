@@ -2,10 +2,16 @@ use axum_server::Handle;
 use clap::Parser;
 use db::RocksDB;
 use index::{validate_rpc_connection, Index, RpcClientProvider, Settings};
+use models::Event;
 use options::Options;
 use server::{Server, ServerConfig};
-use std::{panic, sync::Arc};
-use tokio::signal::unix::{signal, SignalKind};
+use std::{panic, sync::Arc, time::Duration};
+use subscription::{cleanup_inactive_subscriptions, event_dispatcher, SubscriptionManager};
+use tokio::{
+    signal::unix::{signal, SignalKind},
+    sync::{mpsc, watch},
+    task,
+};
 use tracing::{error, info};
 
 mod api;
@@ -14,44 +20,65 @@ mod index;
 mod models;
 mod options;
 mod server;
+mod subscription;
 mod util;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Set up the global tracing subscriber for logging
+    // 1. Set up the global tracing subscriber for logging
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    // 1. Parse command-line options
+    // 2. Parse command-line options
     let options = parse_options()?;
 
-    // 2. Prepare and validate configurations
+    // 3. Prepare and validate configurations
     let settings = setup_settings(&options)?;
     let server_config = setup_server_config(&options)?;
     validate_rpc(&settings)?;
 
-    // 3. Open RocksDB
+    // 4. Open RocksDB
     let db_arc = open_rocks_db(&settings)?;
     set_panic_hook(db_arc.clone());
 
-    // 4. Create the index and set a panic hook that closes the DB
-    let index = Arc::new(Index::new(db_arc.clone(), settings.clone()));
+    // 5. If subscriptions are enabled, spawn the dispatcher + cleanup tasks
+    let (event_sender, dispatcher_jh, cleanup_jh, shutdown_tx) = if options.enable_subscriptions {
+        let (sender, dispatcher_jh, cleanup_jh, shutdown_tx) = spawn_subscription_tasks(
+            db_arc.clone(),
+            Duration::from_secs(3600), // run cleanup once an hour
+            86400,                     // 24 hours in seconds
+        );
+        (
+            Some(sender),
+            Some(dispatcher_jh),
+            Some(cleanup_jh),
+            Some(shutdown_tx),
+        )
+    } else {
+        (None, None, None, None)
+    };
+
+    let subscription_manager = Arc::new(SubscriptionManager::new(db_arc.clone()));
+
+    // 6. Create the index
+    let index = Arc::new(Index::new(db_arc.clone(), settings.clone(), event_sender));
     index.validate_index()?;
 
-    // 5. Spawn background threads (indexer, ZMQ listener, etc.)
+    // 7. Spawn background threads (indexer, ZMQ listener, etc.)
     let index_handle = spawn_background_threads(index.clone());
 
-    // 6. Start the HTTP server
+    // 8. Start the HTTP server
     let handle = Handle::new();
     let server = Server;
     let http_server_jh = server.start(
         index.clone(),
+        subscription_manager.clone(),
         Arc::new(server_config),
         handle.clone(),
     )?;
 
-    // 7. Wait for SIGINT (Ctrl-C) or SIGTERM
+    // 9. Wait for SIGINT (Ctrl-C) or SIGTERM
     wait_for_signals().await;
 
     // 10. Graceful shutdown (async)
@@ -61,8 +88,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         db_arc,
         &handle,
         index_handle,
+        dispatcher_jh,
+        cleanup_jh,
+        shutdown_tx,
         http_server_jh,
-    );
+    )
+    .await;
 
     Ok(())
 }
@@ -95,8 +126,7 @@ fn open_rocks_db(settings: &Settings) -> Result<Arc<RocksDB>, Box<dyn std::error
     let file = settings.chain.to_string();
     let db_path = settings.data_dir.join(file);
     let db_instance = RocksDB::open(db_path.to_str().unwrap())?;
-    let db_arc = Arc::new(db_instance);
-    Ok(db_arc)
+    Ok(Arc::new(db_instance))
 }
 
 /// Set a panic hook that closes or flushes the DB on panic
@@ -104,37 +134,79 @@ fn set_panic_hook(db_arc: Arc<RocksDB>) {
     let db_for_panic = db_arc.clone();
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |panic_info| {
-        // Default hook prints the backtrace
+        // Print the panic using the original hook
         original_hook(panic_info);
-        error!("Panic occurred: {:?}, shutting down...", panic_info);
 
-        // Doing best effort to flush the db and close it
-        match db_for_panic.flush() {
-            Ok(_) => (),
-            Err(e) => error!("Failed to flush RocksDB in panic hook: {:?}", e),
+        if let Some(message) = panic_info.payload().downcast_ref::<String>() {
+            error!("Panic occurred: {}, shutting down...", message);
+        } else {
+            error!("Panic occurred: {:?}, shutting down...", panic_info);
         }
 
-        // Exit process.
+        // Attempt to flush DB
+        if let Err(e) = db_for_panic.flush() {
+            error!("Failed to flush RocksDB in panic hook: {:?}", e);
+        }
         std::process::exit(1);
     }));
 }
 
-/// Spawn background threads: indexer loop, ZMQ listener, etc. Return their JoinHandles.
-fn spawn_background_threads(
-    index: Arc<Index>,
-) -> std::thread::JoinHandle<()> {
-    // 1) Spawn the indexer loop
+/// Spawn background threads: indexer loop, ZMQ listener, etc. Return their JoinHandle.
+fn spawn_background_threads(index: Arc<Index>) -> std::thread::JoinHandle<()> {
+    // 1) Spawn the indexer loop in a blocking thread
     let index_clone = index.clone();
     let index_handle = std::thread::spawn(move || {
         index_clone.index();
     });
 
-    // 2) Spawn the ZMQ listener
+    // 2) Spawn the ZMQ listener (also likely blocking)
     index.start_zmq_listener();
 
     info!("Spawned background threads");
-
     index_handle
+}
+
+/// Spawns the subscription-related background tasks (dispatcher + cleanup).
+fn spawn_subscription_tasks(
+    db: Arc<RocksDB>,
+    cleanup_interval: Duration,
+    cleanup_expiry_secs: u64,
+) -> (
+    mpsc::Sender<Event>,
+    task::JoinHandle<()>,
+    task::JoinHandle<()>,
+    watch::Sender<()>,
+) {
+    let (event_sender, event_receiver) = mpsc::channel::<Event>(100);
+
+    // Create a watch channel for shutdown signaling
+    let (shutdown_tx, shutdown_rx) = watch::channel(());
+
+    // Clone the receiver for the dispatcher
+    let dispatcher_rx = shutdown_rx.clone();
+    let dispatcher_db = db.clone();
+
+    let dispatcher_handle = tokio::spawn(async move {
+        event_dispatcher(event_receiver, dispatcher_db, dispatcher_rx).await;
+    });
+
+    // Clone again for the cleanup
+    let cleanup_rx = shutdown_rx.clone();
+    let cleanup_db = db.clone();
+
+    let cleanup_handle = tokio::spawn(async move {
+        cleanup_inactive_subscriptions(
+            cleanup_db,
+            cleanup_interval,
+            cleanup_expiry_secs,
+            cleanup_rx,
+        )
+        .await;
+    });
+
+    info!("Spawned subscription tasks (dispatcher + cleanup).");
+
+    (event_sender, dispatcher_handle, cleanup_handle, shutdown_tx)
 }
 
 /// Block until either SIGINT or SIGTERM is received
@@ -152,27 +224,31 @@ async fn wait_for_signals() {
     }
 }
 
-/// Perform graceful shutdown, then close RocksDB if possible
-fn graceful_shutdown(
+/// Perform graceful shutdown **asynchronously**, then close RocksDB if possible.
+async fn graceful_shutdown(
     index: Arc<Index>,
+    subscription_manager: Arc<SubscriptionManager>,
     db_arc: Arc<RocksDB>,
     handle: &Handle,
     index_handle: std::thread::JoinHandle<()>,
+    dispatcher_jh: Option<task::JoinHandle<()>>,
+    cleanup_jh: Option<task::JoinHandle<()>>,
+    shutdown_tx: Option<watch::Sender<()>>,
     http_server_jh: task::JoinHandle<io::Result<()>>,
 ) {
-    // 1) Signal the index and other threads to stop
+    // 1) Signal the subscription tasks to stop
+    if let Some(tx) = shutdown_tx {
+        // Just sending () triggers watch::Receiver changed()
+        let _ = tx.send(());
+    }
+
+    // 2) Tell the Index to shut down
     index.shutdown();
 
-    // 2) Graceful HTTP shutdown
+    // 3) Graceful HTTP shutdown (axum_server)
     handle.graceful_shutdown(Some(std::time::Duration::from_secs(2)));
 
-    // 3) Reset the panic hook to drop the RocksDB reference
-    panic::set_hook(Box::new(|panic_info| {
-        // Restore the default hook
-        eprintln!("Panic occurred: {:?}", panic_info);
-    }));
-
-    // 4) Join background threads
+    // 4) Join the indexer background thread (blocking)
     if let Err(e) = index_handle.join() {
         error!("Failed to join indexer thread: {:?}", e);
     }
@@ -184,10 +260,27 @@ fn graceful_shutdown(
         Err(e) => error!("Failed to join Axum server task: {:?}", e),
     };
 
-    // Dropping the index, makes dropping the remaining references to the db
-    drop(index);
+    // 5) Await the dispatcher + cleanup tasks
+    if let Some(jh) = dispatcher_jh {
+        if let Err(e) = jh.await {
+            error!("Dispatcher task join error: {:?}", e);
+        } else {
+            info!("Dispatcher task ended cleanly.");
+        }
+    }
+    if let Some(jh) = cleanup_jh {
+        if let Err(e) = jh.await {
+            error!("Cleanup task join error: {:?}", e);
+        } else {
+            info!("Cleanup task ended cleanly.");
+        }
+    }
 
-    // 5) Once threads are done, attempt to close RocksDB
+    // 6) Drop the index so RocksDB references can possibly be unwrapped
+    drop(index);
+    drop(subscription_manager);
+
+    // 7) Attempt to close RocksDB
     match Arc::try_unwrap(db_arc) {
         Ok(db) => {
             if let Err(e) = db.close() {
@@ -196,18 +289,15 @@ fn graceful_shutdown(
                 info!("RocksDB closed successfully (normal shutdown).");
             }
         }
-        Err(db) => {
+        Err(db_ref) => {
+            // If there are still outstanding references, flush as fallback
             error!(
-                "Still references {} to RocksDB exist, flushing before exit...",
-                Arc::strong_count(&db)
+                "Still {} references to RocksDB exist, flushing before exit...",
+                Arc::strong_count(&db_ref)
             );
-            // fallback flush:
-            match db.flush() {
-                Ok(_) => (),
-                Err(e) => error!("Failed to flush RocksDB in graceful shutdown: {:?}", e),
-            }
+            let _ = db_ref.flush();
         }
     }
 
-    info!("All threads have shut down. Exiting.");
+    info!("Graceful shutdown complete. Exiting.");
 }

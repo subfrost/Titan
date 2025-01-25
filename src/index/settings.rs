@@ -18,7 +18,6 @@ pub struct Settings {
     pub(crate) index_addresses: bool,
     pub(crate) commit_interval: u64,
     pub(crate) main_loop_interval: u64,
-    pub(crate) http_event_destination: Option<String>,
 }
 
 impl RpcClientProvider for Settings {

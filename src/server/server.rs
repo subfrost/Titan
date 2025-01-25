@@ -7,7 +7,8 @@ use {
     crate::{
         api::{self, content::AcceptEncoding},
         index::{Index, RpcClientProvider},
-        models::{InscriptionId, Pagination},
+        models::{InscriptionId, Pagination, Subscription},
+        subscription::SubscriptionManager,
     },
     axum::{
         extract::{DefaultBodyLimit, Extension, FromRef, Json, Path, Query},
@@ -25,6 +26,7 @@ use {
         cors::{Any, CorsLayer},
     },
     tracing::{error, info},
+    uuid::Uuid,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -45,6 +47,7 @@ impl Server {
     pub fn start(
         &self,
         index: Arc<Index>,
+        subscription_manager: Arc<SubscriptionManager>,
         config: Arc<ServerConfig>,
         handle: Handle,
     ) -> SpawnResult<task::JoinHandle<io::Result<()>>> {
@@ -67,7 +70,10 @@ impl Server {
             .route("/rune/{rune}/transactions", get(Self::rune_transactions))
             // Mempool
             .route("/mempool/txids", get(Self::mempool_txids))
+            // Subscriptions
+            .route("/subscriptions", get(Self::subscriptions))
             .layer(Extension(index))
+            .layer(Extension(subscription_manager))
             .layer(Extension(config.clone()))
             .layer(
                 CorsLayer::new()
@@ -199,6 +205,67 @@ impl Server {
             .map_err(|err| ServerError::BadRequest(err.to_string()))?;
 
         task::block_in_place(|| Ok(Json(api::address(index, &address)?).into_response()))
+    }
+
+    async fn subscriptions(
+        Extension(subscription_manager): Extension<Arc<SubscriptionManager>>,
+        Extension(config): Extension<Arc<ServerConfig>>,
+    ) -> ServerResult {
+        if !config.enable_subscriptions {
+            return Err(ServerError::BadRequest(
+                "subscriptions are not enabled".to_string(),
+            ));
+        }
+
+        task::block_in_place(|| Ok(Json(api::subscriptions(subscription_manager)?).into_response()))
+    }
+
+    async fn add_subscription(
+        Extension(subscription_manager): Extension<Arc<SubscriptionManager>>,
+        Extension(config): Extension<Arc<ServerConfig>>,
+        Json(subscription): Json<Subscription>,
+    ) -> ServerResult {
+        if !config.enable_subscriptions {
+            return Err(ServerError::BadRequest(
+                "subscriptions are not enabled".to_string(),
+            ));
+        }
+
+        task::block_in_place(|| {
+            Ok(Json(api::add_subscription(subscription_manager, subscription)?).into_response())
+        })
+    }
+
+    async fn delete_subscription(
+        Extension(subscription_manager): Extension<Arc<SubscriptionManager>>,
+        Extension(config): Extension<Arc<ServerConfig>>,
+        Path(id): Path<Uuid>,
+    ) -> ServerResult {
+        if !config.enable_subscriptions {
+            return Err(ServerError::BadRequest(
+                "subscriptions are not enabled".to_string(),
+            ));
+        }
+
+        task::block_in_place(|| {
+            Ok(Json(api::delete_subscription(subscription_manager, id)?).into_response())
+        })
+    }
+
+    async fn get_subscription(
+        Extension(subscription_manager): Extension<Arc<SubscriptionManager>>,
+        Extension(config): Extension<Arc<ServerConfig>>,
+        Path(id): Path<Uuid>,
+    ) -> ServerResult {
+        if !config.enable_subscriptions {
+            return Err(ServerError::BadRequest(
+                "subscriptions are not enabled".to_string(),
+            ));
+        }
+
+        task::block_in_place(|| {
+            Ok(Json(api::get_subscription(subscription_manager, id)?).into_response())
+        })
     }
 }
 

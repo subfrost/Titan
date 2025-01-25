@@ -8,13 +8,18 @@ use {
     },
     crate::{
         index::{Index, IndexError, StoreError},
-        models::{AddressData, Block, InscriptionId, Pagination, PaginationResponse, TxOutEntry},
+        models::{
+            AddressData, Block, InscriptionId, Pagination, PaginationResponse, Subscription,
+            TxOutEntry,
+        },
+        subscription::{self, SubscriptionManager},
     },
     bitcoin::{Address, OutPoint, Txid},
     bitcoincore_rpc::{Client, RpcApi},
     http::HeaderMap,
     std::sync::Arc,
     tracing::error,
+    uuid::Uuid,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -25,6 +30,8 @@ pub enum ApiError {
     RpcError(#[from] bitcoincore_rpc::Error),
     #[error("content error: {0}")]
     ContentError(#[from] ContentError),
+    #[error("subscription error: {0}")]
+    SubscriptionError(#[from] subscription::StoreError),
 }
 
 pub type Result<T> = std::result::Result<T, ApiError>;
@@ -150,4 +157,26 @@ pub fn address(index: Arc<Index>, address: &Address) -> Result<AddressData> {
     let script_pubkey = address.script_pubkey();
     let outpoints = index.get_script_pubkey_outpoints(&script_pubkey)?;
     Ok(outpoints)
+}
+
+pub fn subscriptions(subscription_manager: Arc<SubscriptionManager>) -> Result<Vec<Subscription>> {
+    Ok(subscription_manager.get_subscriptions()?)
+}
+
+pub fn add_subscription(
+    subscription_manager: Arc<SubscriptionManager>,
+    subscription: Subscription,
+) -> Result<()> {
+    Ok(subscription_manager.add_subscription(&subscription)?)
+}
+
+pub fn delete_subscription(subscription_manager: Arc<SubscriptionManager>, id: Uuid) -> Result<()> {
+    Ok(subscription_manager.delete_subscription(&id)?)
+}
+
+pub fn get_subscription(
+    subscription_manager: Arc<SubscriptionManager>,
+    id: Uuid,
+) -> Result<Subscription> {
+    Ok(subscription_manager.get_subscription(&id)?)
 }

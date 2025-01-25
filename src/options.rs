@@ -109,11 +109,7 @@ pub struct Options {
     )]
     pub(super) commit_interval: u64,
 
-    /// HTTP Event destination.
-    #[arg(long, help = "HTTP Event destination")]
-    pub(super) http_event_destination: Option<String>,
-
-    /// ZeroMQ endpoint for raw blocks/transactions from bitcoind
+    /// ZeroMQ endpoint for raw transactions from bitcoind
     #[arg(long, default_value = "tcp://127.0.0.1:28332")]
     pub(super) zmq_endpoint: String,
 
@@ -140,6 +136,10 @@ pub struct Options {
         help = "Main loop interval in milliseconds. [default: 500]"
     )]
     pub(super) main_loop_interval: u64,
+
+    /// Enable subscription service
+    #[arg(long, default_value = "false")]
+    pub(super) enable_subscriptions: bool,
 }
 
 impl Options {
@@ -175,7 +175,6 @@ impl From<Options> for Settings {
             index_spent_outputs: options.index_spent_outputs,
             index_addresses: options.index_addresses,
             commit_interval: options.commit_interval,
-            http_event_destination: options.http_event_destination,
             main_loop_interval: options.main_loop_interval,
         }
     }
@@ -192,6 +191,8 @@ impl From<Options> for ServerConfig {
             http_listen: options.http_listen,
             bitcoin_rpc_url: options.bitcoin_rpc_url,
             bitcoin_rpc_auth,
+
+            enable_subscriptions: options.enable_subscriptions,
         }
     }
 }

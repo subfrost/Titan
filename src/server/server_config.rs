@@ -13,6 +13,8 @@ pub struct ServerConfig {
 
     pub(crate) bitcoin_rpc_url: String,
     pub(crate) bitcoin_rpc_auth: Auth,
+
+    pub(crate) enable_subscriptions: bool,
 }
 
 impl RpcClientProvider for ServerConfig {

@@ -2,8 +2,8 @@ use {
     super::*,
     crate::models::{
         BatchDelete, BatchUpdate, Block, Inscription, InscriptionId, Pagination,
-        PaginationResponse, RuneEntry, ScriptPubkeyEntry, TransactionStateChange, TxOutEntry,
-        TxRuneIndexRef,
+        PaginationResponse, RuneEntry, ScriptPubkeyEntry, Subscription, TransactionStateChange,
+        TxOutEntry, TxRuneIndexRef,
     },
     bitcoin::{consensus, hashes::Hash, BlockHash, OutPoint, ScriptBuf, Txid},
     helpers::{rune_index_key, rune_transaction_key},
@@ -18,11 +18,11 @@ use {
         str::FromStr,
         sync::{Arc, RwLock},
     },
-    tracing::{debug, info},
     util::{
         inscription_id_to_bytes, outpoint_to_bytes, rune_id_to_bytes, txid_from_bytes,
         txid_to_bytes,
     },
+    uuid::Uuid,
     wrapper::RuneIdWrapper,
 };
 
@@ -67,6 +67,8 @@ const MEMPOOL_CF: &str = "mempool";
 const STATS_CF: &str = "stats";
 
 const SETTINGS_CF: &str = "settings";
+
+const SUBSCRIPTIONS_CF: &str = "subscriptions";
 
 const INDEX_SPENT_OUTPUTS_KEY: &str = "index_spent_outputs";
 const INDEX_ADDRESSES_KEY: &str = "index_addresses";
@@ -125,6 +127,8 @@ impl RocksDB {
             ColumnFamilyDescriptor::new(SPENT_OUTPOINTS_MEMPOOL_CF, cf_opts.clone());
         let settings_cfd: ColumnFamilyDescriptor =
             ColumnFamilyDescriptor::new(SETTINGS_CF, cf_opts.clone());
+        let subscriptions_cfd: ColumnFamilyDescriptor =
+            ColumnFamilyDescriptor::new(SUBSCRIPTIONS_CF, cf_opts.clone());
 
         let mut db_opts = Options::default();
         db_opts.create_if_missing(true);
@@ -170,6 +174,7 @@ impl RocksDB {
                 outpoint_to_script_pubkey_mempool_cfd,
                 spent_outpoints_mempool_cfd,
                 settings_cfd,
+                subscriptions_cfd,
             ],
         )?;
 
@@ -1331,6 +1336,55 @@ impl RocksDB {
 
         self.db.write(batch)?;
         Ok(())
+    }
+
+    pub fn set_subscription(&self, sub: &Subscription) -> DBResult<()> {
+        let cf_handle = self.cf_handle(SUBSCRIPTIONS_CF)?;
+        self.db
+            .put_cf(&cf_handle, sub.id.as_bytes(), sub.clone().store())?;
+        Ok(())
+    }
+
+    pub fn get_subscription(&self, id: &Uuid) -> DBResult<Subscription> {
+        let cf_handle = self.cf_handle(SUBSCRIPTIONS_CF)?;
+        let key = id.as_bytes();
+        let data =
+            self.get_option_vec_data(&cf_handle, key)
+                .mapped()?
+                .ok_or(RocksDBError::NotFound(format!(
+                    "Subscription not found: {}",
+                    id
+                )))?;
+        Ok(data)
+    }
+
+    pub fn get_subscriptions(&self) -> DBResult<Vec<Subscription>> {
+        let cf_handle = self.cf_handle(SUBSCRIPTIONS_CF)?;
+        let iter = self.db.iterator_cf(&cf_handle, IteratorMode::Start);
+        let mut subs = Vec::new();
+        for item in iter {
+            let (_key, value) = item?;
+            subs.push(Subscription::load(value.to_vec()));
+        }
+
+        Ok(subs)
+    }
+
+    pub fn delete_subscription(&self, id: &Uuid) -> DBResult<()> {
+        let cf_handle = self.cf_handle(SUBSCRIPTIONS_CF)?;
+        let key = id.as_bytes();
+        self.db.delete_cf(&cf_handle, key)?;
+        Ok(())
+    }
+
+    pub fn update_subscription_last_success(
+        &self,
+        subscription_id: &Uuid,
+        new_time_secs: u64,
+    ) -> DBResult<()> {
+        let mut sub = self.get_subscription(subscription_id)?;
+        sub.last_success_epoch_secs = new_time_secs;
+        self.set_subscription(&sub)
     }
 
     pub fn flush(&self) -> DBResult<()> {

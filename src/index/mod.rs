@@ -8,7 +8,6 @@ pub use {
 
 mod bitcoin_rpc;
 mod chain;
-mod event;
 mod index;
 mod inscription;
 mod metrics;

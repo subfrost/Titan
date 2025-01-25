@@ -1,7 +1,4 @@
-use bitcoin::{
-    hashes::{sha256d, Hash},
-    BlockHash,
-};
+use bitcoin::{hashes::Hash, BlockHash};
 use rocks::DBResult;
 
 use super::*;

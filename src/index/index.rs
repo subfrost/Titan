@@ -10,7 +10,7 @@ use {
     crate::{
         index::updater::{ReorgError, UpdaterError},
         models::{
-            AddressData, AddressTxOut, Block, Inscription, InscriptionId, Pagination,
+            AddressData, AddressTxOut, Block, Event, Inscription, InscriptionId, Pagination,
             PaginationResponse, RuneAmount, RuneEntry, TxOutEntry,
         },
     },
@@ -25,6 +25,7 @@ use {
         thread::{self},
         time::Duration,
     },
+    tokio::sync::mpsc::Sender,
     tracing::{error, info, warn},
 };
 
@@ -52,7 +53,11 @@ pub struct Index {
 }
 
 impl Index {
-    pub fn new(db: Arc<dyn Store + Send + Sync>, settings: Settings) -> Self {
+    pub fn new(
+        db: Arc<dyn Store + Send + Sync>,
+        settings: Settings,
+        sender: Option<Sender<Event>>,
+    ) -> Self {
         let shutdown_flag = Arc::new(AtomicBool::new(false));
         let metrics = Metrics::new();
         metrics.start(shutdown_flag.clone());
@@ -66,6 +71,7 @@ impl Index {
                 settings.clone(),
                 &metrics,
                 shutdown_flag.clone(),
+                sender,
             )),
             shutdown_flag,
             zmq_manager: Arc::new(zmq_manager),
