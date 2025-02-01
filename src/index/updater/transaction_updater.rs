@@ -1,15 +1,14 @@
 use {
     super::{address::AddressUpdater, cache::UpdaterCache},
     crate::{
-        index::{event::Event, inscription::index_rune_icon, Chain, Settings, StoreError},
-        models::{RuneEntry, TransactionStateChange},
+        index::{event::Event, Chain, Settings, StoreError},
+        models::{TransactionStateChange, TxOutEntry},
     },
     bitcoin::{OutPoint, ScriptBuf, Transaction, Txid},
-    ordinals::{Artifact, Etching, Rune, RuneId, Runestone, SpacedRune},
+    ordinals::RuneId,
     std::collections::HashSet,
     thiserror::Error,
     tokio::sync::mpsc::{self, error::SendError},
-    tracing::info,
 };
 
 #[derive(Debug, Error)]
@@ -18,10 +17,6 @@ pub enum TransactionUpdaterError {
     Store(#[from] StoreError),
     #[error("event sender error {0}")]
     EventSender(#[from] SendError<Event>),
-    #[error("overflow in {0}")]
-    Overflow(String),
-    #[error("no artifact found: {0}: {1}")]
-    NoArtifactFound(Txid, TransactionStateChange),
 }
 
 type Result<T> = std::result::Result<T, TransactionUpdaterError>;
@@ -68,7 +63,6 @@ impl<'a> TransactionUpdater<'a> {
 
     pub(super) fn save(
         &mut self,
-        block_time: u32,
         height: u32,
         txid: Txid,
         transaction: &Transaction,
@@ -85,20 +79,7 @@ impl<'a> TransactionUpdater<'a> {
         }
 
         if let Some((id, rune)) = transaction_state_change.etched {
-            let artifact = Runestone::decipher(transaction).ok_or(
-                TransactionUpdaterError::NoArtifactFound(txid, transaction_state_change.clone()),
-            )?;
-
-            self.create_rune_entry(block_time, txid, transaction, id, rune, &artifact)?;
-
-            if let Some(sender) = self.event_sender {
-                sender.blocking_send(Event::RuneEtched {
-                    block_height: height,
-                    txid,
-                    rune_id: id,
-                    in_mempool: false,
-                })?;
-            }
+            self.etched_rune(height, txid, &id)?;
         }
 
         for tx_in in transaction_state_change.inputs.iter() {
@@ -120,18 +101,7 @@ impl<'a> TransactionUpdater<'a> {
 
             self.cache.set_tx_out(outpoint, output.clone());
 
-            if let Some(sender) = self.event_sender {
-                for rune_amount in output.runes.iter() {
-                    sender.blocking_send(Event::RuneTransferred {
-                        block_height: height,
-                        txid,
-                        outpoint,
-                        rune_id: rune_amount.rune_id,
-                        amount: rune_amount.amount,
-                        in_mempool: self.cache.settings.mempool,
-                    })?;
-                }
-            }
+            self.transfer_rune(height, txid, outpoint, output)?;
         }
 
         // Save transaction state change
@@ -227,49 +197,7 @@ impl<'a> TransactionUpdater<'a> {
         }
     }
 
-    fn update_mints(&mut self, rune_id: &RuneId, amount: i128) -> Result<()> {
-        let mut rune_entry = self.cache.get_rune(rune_id)?;
-
-        if self.cache.settings.mempool {
-            let result = rune_entry.pending_mints.saturating_add_signed(amount);
-            rune_entry.pending_mints = result;
-        } else {
-            let result = rune_entry.mints.saturating_add_signed(amount);
-
-            rune_entry.mints = result;
-        }
-
-        self.cache.set_rune(*rune_id, rune_entry);
-
-        Ok(())
-    }
-
-    fn update_burn_balance(&mut self, rune_id: &RuneId, amount: i128) -> Result<()> {
-        let mut rune_entry = self.cache.get_rune(rune_id)?;
-
-        if self.cache.settings.mempool {
-            let result = rune_entry
-                .pending_burns
-                .checked_add_signed(amount)
-                .ok_or(TransactionUpdaterError::Overflow("burn".to_string()))?;
-            rune_entry.pending_burns = result;
-        } else {
-            let result = rune_entry
-                .pending_burns
-                .checked_add_signed(amount)
-                .ok_or(TransactionUpdaterError::Overflow("burn".to_string()))?;
-
-            rune_entry.burned = result;
-        }
-
-        self.cache.set_rune(*rune_id, rune_entry);
-
-        Ok(())
-    }
-
     fn burn_rune(&mut self, height: u32, txid: Txid, rune_id: &RuneId, amount: u128) -> Result<()> {
-        self.update_burn_balance(rune_id, amount as i128)?;
-
         if let Some(sender) = self.event_sender {
             sender.blocking_send(Event::RuneBurned {
                 block_height: height,
@@ -284,8 +212,6 @@ impl<'a> TransactionUpdater<'a> {
     }
 
     fn mint_rune(&mut self, height: u32, txid: Txid, rune_id: &RuneId, amount: u128) -> Result<()> {
-        self.update_mints(rune_id, 1)?;
-
         if let Some(sender) = self.event_sender {
             sender.blocking_send(Event::RuneMinted {
                 block_height: height,
@@ -299,79 +225,38 @@ impl<'a> TransactionUpdater<'a> {
         Ok(())
     }
 
-    fn create_rune_entry(
-        &mut self,
-        block_time: u32,
-        txid: Txid,
-        transaction: &Transaction,
-        id: RuneId,
-        rune: Rune,
-        artifact: &Artifact,
-    ) -> Result<()> {
-        self.cache.increment_runes_count();
-
-        let inscription = index_rune_icon(transaction, txid);
-
-        if let Some((id, inscription)) = inscription.as_ref() {
-            self.cache.set_inscription(id.clone(), inscription.clone());
+    fn etched_rune(&mut self, height: u32, txid: Txid, id: &RuneId) -> Result<()> {
+        if let Some(sender) = self.event_sender {
+            sender.blocking_send(Event::RuneEtched {
+                block_height: height,
+                txid,
+                rune_id: *id,
+                in_mempool: false,
+            })?;
         }
 
-        let entry = match artifact {
-            Artifact::Cenotaph(_) => RuneEntry {
-                block: id.block,
-                burned: 0,
-                divisibility: 0,
-                etching: txid,
-                terms: None,
-                mints: 0,
-                number: self.cache.get_runes_count(),
-                premine: 0,
-                spaced_rune: SpacedRune { rune, spacers: 0 },
-                symbol: None,
-                pending_burns: 0,
-                pending_mints: 0,
-                inscription_id: inscription.map(|(id, _)| id),
-                timestamp: block_time.into(),
-                turbo: false,
-            },
-            Artifact::Runestone(Runestone { etching, .. }) => {
-                let Etching {
-                    divisibility,
-                    terms,
-                    premine,
-                    spacers,
-                    symbol,
-                    turbo,
-                    ..
-                } = etching.unwrap();
+        Ok(())
+    }
 
-                RuneEntry {
-                    block: id.block,
-                    burned: 0,
-                    divisibility: divisibility.unwrap_or_default(),
-                    etching: txid,
-                    terms,
-                    mints: 0,
-                    number: self.cache.get_runes_count(),
-                    premine: premine.unwrap_or_default(),
-                    spaced_rune: SpacedRune {
-                        rune,
-                        spacers: spacers.unwrap_or_default(),
-                    },
-                    symbol,
-                    pending_burns: 0,
-                    pending_mints: 0,
-                    inscription_id: inscription.map(|(id, _)| id),
-                    timestamp: block_time.into(),
-                    turbo,
-                }
+    fn transfer_rune(
+        &mut self,
+        height: u32,
+        txid: Txid,
+        outpoint: OutPoint,
+        output: &TxOutEntry,
+    ) -> Result<()> {
+        if let Some(sender) = self.event_sender {
+            for rune_amount in output.runes.iter() {
+                sender.blocking_send(Event::RuneTransferred {
+                    block_height: height,
+                    txid,
+                    outpoint,
+                    rune_id: rune_amount.rune_id,
+                    amount: rune_amount.amount,
+                    in_mempool: self.cache.settings.mempool,
+                })?;
             }
-        };
-
-        self.cache.set_rune(id, entry);
-        self.cache
-            .set_rune_id_number(self.cache.get_runes_count(), id);
-        self.cache.set_rune_id(rune, id);
+        }
 
         Ok(())
     }

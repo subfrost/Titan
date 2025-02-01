@@ -1,13 +1,15 @@
 use {
     super::cache::UpdaterCache,
     crate::{
-        index::{bitcoin_rpc::BitcoinCoreRpcResultExt, Chain, StoreError},
-        models::{Lot, RuneAmount, TransactionStateChange, TxOutEntry},
+        index::{
+            bitcoin_rpc::BitcoinCoreRpcResultExt, inscription::index_rune_icon, Chain, StoreError,
+        },
+        models::{Lot, RuneAmount, RuneEntry, TransactionStateChange, TxOutEntry},
         util::IntoUsize,
     },
-    bitcoin::{consensus::encode, transaction, OutPoint, Transaction, Txid},
+    bitcoin::{consensus::encode, OutPoint, Transaction, Txid},
     bitcoincore_rpc::{Client, RpcApi},
-    ordinals::{Artifact, Edict, Height, Rune, RuneId, Runestone},
+    ordinals::{Artifact, Edict, Etching, Height, Rune, RuneId, Runestone, SpacedRune},
     std::collections::HashMap,
     thiserror::Error,
 };
@@ -20,6 +22,8 @@ pub enum RuneParserError {
     BitcoinRpc(#[from] bitcoincore_rpc::Error),
     #[error("encode error {0}")]
     Encode(#[from] encode::Error),
+    #[error("overflow in {0}")]
+    Overflow(String),
 }
 
 type Result<T> = std::result::Result<T, RuneParserError>;
@@ -27,7 +31,7 @@ type Result<T> = std::result::Result<T, RuneParserError>;
 pub(super) struct RuneParser<'a, 'client> {
     pub(super) client: &'client Client,
     pub(super) height: u32,
-    pub(super) cache: &'a UpdaterCache,
+    pub(super) cache: &'a mut UpdaterCache,
     pub(super) minimum: Rune,
     pub(super) mempool: bool,
 }
@@ -38,7 +42,7 @@ impl<'a, 'client> RuneParser<'a, 'client> {
         chain: Chain,
         height: u32,
         mempool: bool,
-        cache: &'a UpdaterCache,
+        cache: &'a mut UpdaterCache,
     ) -> Result<Self> {
         let minimum = Rune::minimum_at_height(chain.into(), Height(height));
 
@@ -51,11 +55,27 @@ impl<'a, 'client> RuneParser<'a, 'client> {
         })
     }
 
+    pub(super) fn pre_cache_tx_outs(&mut self, tx: &Vec<Transaction>) -> Result<()> {
+        let outpoints: Vec<_> = tx
+            .iter()
+            .flat_map(|tx| tx.input.iter().map(|input| input.previous_output.into()))
+            .collect();
+
+        let tx_outs = self.cache.get_tx_outs(&outpoints)?;
+
+        for (outpoint, tx_out) in tx_outs {
+            self.cache.set_tx_out(outpoint, tx_out);
+        }
+
+        Ok(())
+    }
+
     pub(super) fn index_runes(
-        &self,
+        &mut self,
+        block_time: u32,
         tx_index: u32,
         tx: &Transaction,
-        _txid: Txid,
+        txid: Txid,
     ) -> Result<TransactionStateChange> {
         let artifact = Runestone::decipher(tx);
 
@@ -76,7 +96,7 @@ impl<'a, 'client> RuneParser<'a, 'client> {
                 }
             }
 
-            etched = self.etched(tx_index, tx, artifact)?;
+            etched = self.etched(block_time, txid, tx_index, tx, artifact)?;
 
             if let Artifact::Runestone(runestone) = artifact {
                 if let Some((id, ..)) = etched {
@@ -232,6 +252,10 @@ impl<'a, 'client> RuneParser<'a, 'client> {
             tx_outs.push(tx_out);
         }
 
+        for (id, balance) in burned.iter() {
+            self.update_burn_balance(&id, balance.0 as i128)?;
+        }
+
         let transaction_state_change = TransactionStateChange {
             burned,
             inputs: tx
@@ -252,7 +276,9 @@ impl<'a, 'client> RuneParser<'a, 'client> {
     }
 
     fn etched(
-        &self,
+        &mut self,
+        block_time: u32,
+        txid: Txid,
         tx_index: u32,
         tx: &Transaction,
         artifact: &Artifact,
@@ -291,16 +317,94 @@ impl<'a, 'client> RuneParser<'a, 'client> {
             Rune::reserved(self.height.into(), tx_index)
         };
 
-        Ok(Some((
-            RuneId {
-                block: self.height.into(),
-                tx: tx_index,
-            },
-            rune,
-        )))
+        let rune_id = RuneId {
+            block: self.height.into(),
+            tx: tx_index,
+        };
+
+        self.create_rune_entry(block_time, txid, tx, rune_id, rune, artifact)?;
+
+        Ok(Some((rune_id, rune)))
     }
 
-    fn mint(&self, id: RuneId) -> Result<Option<Lot>> {
+    fn create_rune_entry(
+        &mut self,
+        block_time: u32,
+        txid: Txid,
+        transaction: &Transaction,
+        id: RuneId,
+        rune: Rune,
+        artifact: &Artifact,
+    ) -> Result<()> {
+        self.cache.increment_runes_count();
+
+        let inscription = index_rune_icon(transaction, txid);
+
+        if let Some((id, inscription)) = inscription.as_ref() {
+            self.cache.set_inscription(id.clone(), inscription.clone());
+        }
+
+        let entry = match artifact {
+            Artifact::Cenotaph(_) => RuneEntry {
+                block: id.block,
+                burned: 0,
+                divisibility: 0,
+                etching: txid,
+                terms: None,
+                mints: 0,
+                number: self.cache.get_runes_count(),
+                premine: 0,
+                spaced_rune: SpacedRune { rune, spacers: 0 },
+                symbol: None,
+                pending_burns: 0,
+                pending_mints: 0,
+                inscription_id: inscription.map(|(id, _)| id),
+                timestamp: block_time.into(),
+                turbo: false,
+            },
+            Artifact::Runestone(Runestone { etching, .. }) => {
+                let Etching {
+                    divisibility,
+                    terms,
+                    premine,
+                    spacers,
+                    symbol,
+                    turbo,
+                    ..
+                } = etching.unwrap();
+
+                RuneEntry {
+                    block: id.block,
+                    burned: 0,
+                    divisibility: divisibility.unwrap_or_default(),
+                    etching: txid,
+                    terms,
+                    mints: 0,
+                    number: self.cache.get_runes_count(),
+                    premine: premine.unwrap_or_default(),
+                    spaced_rune: SpacedRune {
+                        rune,
+                        spacers: spacers.unwrap_or_default(),
+                    },
+                    symbol,
+                    pending_burns: 0,
+                    pending_mints: 0,
+                    inscription_id: inscription.map(|(id, _)| id),
+                    timestamp: block_time.into(),
+                    turbo,
+                }
+            }
+        };
+
+        self.cache.set_rune(id, entry);
+        self.cache
+            .set_rune_id_number(self.cache.get_runes_count(), id);
+        self.cache.set_rune_id(rune, id);
+
+        Ok(())
+    }
+
+    fn mint(&mut self, id: RuneId) -> Result<Option<Lot>> {
         let rune_entry = match self.cache.get_rune(&id) {
             Ok(rune_entry) => rune_entry,
             Err(err) => {
@@ -316,7 +420,49 @@ impl<'a, 'client> RuneParser<'a, 'client> {
             return Ok(None);
         };
 
+        self.update_mints(&id, amount as i128)?;
+
         Ok(Some(Lot(amount)))
+    }
+
+    fn update_mints(&mut self, rune_id: &RuneId, amount: i128) -> Result<()> {
+        let mut rune_entry = self.cache.get_rune(rune_id)?;
+
+        if self.cache.settings.mempool {
+            let result = rune_entry.pending_mints.saturating_add_signed(amount);
+            rune_entry.pending_mints = result;
+        } else {
+            let result = rune_entry.mints.saturating_add_signed(amount);
+
+            rune_entry.mints = result;
+        }
+
+        self.cache.set_rune(*rune_id, rune_entry);
+
+        Ok(())
+    }
+
+    fn update_burn_balance(&mut self, rune_id: &RuneId, amount: i128) -> Result<()> {
+        let mut rune_entry = self.cache.get_rune(rune_id)?;
+
+        if self.cache.settings.mempool {
+            let result = rune_entry
+                .pending_burns
+                .checked_add_signed(amount)
+                .ok_or(RuneParserError::Overflow("burn".to_string()))?;
+            rune_entry.pending_burns = result;
+        } else {
+            let result = rune_entry
+                .pending_burns
+                .checked_add_signed(amount)
+                .ok_or(RuneParserError::Overflow("burn".to_string()))?;
+
+            rune_entry.burned = result;
+        }
+
+        self.cache.set_rune(*rune_id, rune_entry);
+
+        Ok(())
     }
 
     fn tx_commits_to_rune(&self, tx: &Transaction, rune: Rune) -> Result<bool> {

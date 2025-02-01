@@ -19,7 +19,6 @@ use {
     mempool_debouncer::MempoolDebouncer,
     ordinals::{Rune, RuneId, SpacedRune, Terms},
     prometheus::HistogramVec,
-    rayon::{iter::IntoParallelRefIterator, prelude::*},
     rollback::{Rollback, RollbackError},
     rune_parser::RuneParser,
     std::{
@@ -309,7 +308,7 @@ impl Updater {
             .with_label_values(&["index_block"])
             .start_timer();
 
-        let rune_parser = RuneParser::new(
+        let mut rune_parser = RuneParser::new(
             &rpc_client,
             self.settings.chain,
             height as u32,
@@ -317,18 +316,26 @@ impl Updater {
             cache,
         )?;
 
+        let block_header: bitcoin::block::Header = bitcoin_block.header.clone();
+        let block_height = height as u32;
+
+        let block_tx_timer = self
+            .latency
+            .with_label_values(&["parse_block"])
+            .start_timer();
+        rune_parser.pre_cache_tx_outs(&bitcoin_block.txdata)?;
         let block_data = bitcoin_block
             .txdata
-            .par_iter()
+            .iter()
             .enumerate()
             .filter_map(|(i, tx)| {
-                let _timer = self
-                    .latency
-                    .with_label_values(&["index_runes"])
-                    .start_timer();
-
                 let txid = tx.compute_txid();
-                match rune_parser.index_runes(u32::try_from(i).unwrap(), tx, txid) {
+                match rune_parser.index_runes(
+                    block_header.time,
+                    u32::try_from(i).unwrap(),
+                    tx,
+                    txid,
+                ) {
                     Ok(result) => {
                         if result.has_rune_updates() || self.settings.index_addresses {
                             Some((i, txid, result))
@@ -343,6 +350,7 @@ impl Updater {
                 }
             })
             .collect::<Vec<_>>();
+        drop(block_tx_timer);
 
         let mut address_updater = AddressUpdater::new();
         let mut transaction_updater = TransactionUpdater::new(
@@ -351,9 +359,6 @@ impl Updater {
             self.settings.clone().into(),
             Some(&mut address_updater),
         )?;
-
-        let block_header: bitcoin::block::Header = bitcoin_block.header.clone();
-        let block_height = height as u32;
 
         let mut block = Block::empty_block(height as u32, bitcoin_block.header);
 
@@ -364,13 +369,7 @@ impl Updater {
                 .start_timer();
 
             for (i, txid, result) in block_data {
-                transaction_updater.save(
-                    block_header.time,
-                    block_height,
-                    txid,
-                    &bitcoin_block.txdata[i],
-                    &result,
-                )?;
+                transaction_updater.save(block_height, txid, &bitcoin_block.txdata[i], &result)?;
                 block.tx_ids.push(txid.to_string());
                 if let Some((id, ..)) = result.etched {
                     block.etched_runes.push(id);
@@ -441,10 +440,10 @@ impl Updater {
             .as_secs();
 
         let rpc_client = self.settings.get_new_rpc_client()?;
-        let rune_parser =
+        let mut rune_parser =
             RuneParser::new(&rpc_client, self.settings.chain, height as u32, true, cache)?;
 
-        let result = rune_parser.index_runes(0, tx, *txid)?;
+        let result = rune_parser.index_runes(now as u32, 0, tx, *txid)?;
         if result.has_rune_updates() || self.settings.index_addresses {
             info!("Indexing tx {}", txid);
 
@@ -457,7 +456,7 @@ impl Updater {
             )?;
 
             // The same "save" logic as before
-            transaction_updater.save(now as u32, height as u32, *txid, tx, &result)?;
+            transaction_updater.save(height as u32, *txid, tx, &result)?;
         }
 
         if cache.settings.mempool {
