@@ -13,7 +13,7 @@ use {
     axum::{
         extract::{DefaultBodyLimit, Extension, FromRef, Json, Path, Query},
         response::IntoResponse,
-        routing::get,
+        routing::{get, post},
         Router,
     },
     axum_server::Handle,
@@ -71,6 +71,11 @@ impl Server {
             // Mempool
             .route("/mempool/txids", get(Self::mempool_txids))
             // Subscriptions
+            .route("/subscription/{id}", get(Self::get_subscription))
+            .route(
+                "/subscription",
+                post(Self::add_subscription).delete(Self::delete_subscription),
+            )
             .route("/subscriptions", get(Self::subscriptions))
             .layer(Extension(index))
             .layer(Extension(subscription_manager))
