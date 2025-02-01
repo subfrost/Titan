@@ -382,6 +382,8 @@ impl Updater {
             }
         }
 
+        transaction_updater.notify_script_pubkeys_updated(height as u32)?;
+
         // 5) If index_addresses is enabled, do one big pass
         if self.settings.index_addresses {
             let _timer = self
@@ -462,6 +464,7 @@ impl Updater {
 
             // The same "save" logic as before
             transaction_updater.save(height as u32, *txid, tx, &result)?;
+            transaction_updater.notify_script_pubkeys_updated(height as u32)?;
         }
 
         if cache.settings.mempool {
