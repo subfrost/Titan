@@ -71,11 +71,11 @@ impl Server {
             // Mempool
             .route("/mempool/txids", get(Self::mempool_txids))
             // Subscriptions
-            .route("/subscription/{id}", get(Self::get_subscription))
             .route(
-                "/subscription",
-                post(Self::add_subscription).delete(Self::delete_subscription),
+                "/subscription/{id}",
+                get(Self::get_subscription).delete(Self::delete_subscription),
             )
+            .route("/subscription", post(Self::add_subscription))
             .route("/subscriptions", get(Self::subscriptions))
             .layer(Extension(index))
             .layer(Extension(subscription_manager))
