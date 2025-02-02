@@ -5,7 +5,7 @@ use index::{validate_rpc_connection, Index, RpcClientProvider, Settings};
 use models::Event;
 use options::Options;
 use server::{Server, ServerConfig};
-use std::{panic, sync::Arc, time::Duration};
+use std::{io, panic, sync::Arc, time::Duration};
 use subscription::{cleanup_inactive_subscriptions, event_dispatcher, SubscriptionManager};
 use tokio::{
     signal::unix::{signal, SignalKind},
