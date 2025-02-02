@@ -207,7 +207,7 @@ impl<'a> Rollback<'a> {
 
             script_pubkey_entry
                 .utxos
-                .retain(|outpoint| *outpoint != *outpoint);
+                .retain(|pubkey_outpoint| *pubkey_outpoint != outpoint);
 
             // Update script pubkey entries.
             self.store.set_script_pubkey_entry(
@@ -226,7 +226,7 @@ impl<'a> Rollback<'a> {
             // Remove spent outpoints.
             self.store
                 .delete_spent_outpoints_in_mempool(&transaction.inputs)?;
-        } else if transaction.is_coinbase {
+        } else if !transaction.is_coinbase {
             let input_outpoints_to_script_pubkeys =
                 self.store
                     .get_outpoints_to_script_pubkey(&transaction.inputs, None, false)?;
@@ -235,6 +235,7 @@ impl<'a> Rollback<'a> {
                 .values()
                 .cloned()
                 .collect();
+            
             let mut input_script_pubkeys_entries = self
                 .store
                 .get_script_pubkey_entries(&input_script_pubkeys, self.mempool)?;
