@@ -47,7 +47,7 @@ impl Server {
         index: Arc<Index>,
         config: Arc<ServerConfig>,
         handle: Handle,
-    ) -> SpawnResult<()> {
+    ) -> SpawnResult<task::JoinHandle<io::Result<()>>> {
         let router = Router::new()
             // Status
             .route("/status", get(Self::status))
@@ -78,9 +78,9 @@ impl Server {
             .layer(CompressionLayer::new())
             .with_state(config.clone());
 
-        self.spawn(&config, router, handle)?;
+        let jh = self.spawn(&config, router, handle)?;
 
-        Ok(())
+        Ok(jh)
     }
 
     fn spawn(

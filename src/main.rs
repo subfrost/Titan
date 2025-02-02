@@ -45,13 +45,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 6. Start the HTTP server
     let handle = Handle::new();
     let server = Server;
-    server.start(index.clone(), Arc::new(server_config), handle.clone())?;
+    let http_server_jh = server.start(
+        index.clone(),
+        Arc::new(server_config),
+        handle.clone(),
+    )?;
 
     // 7. Wait for SIGINT (Ctrl-C) or SIGTERM
     wait_for_signals().await;
 
-    // 8. Graceful shutdown
-    graceful_shutdown(index, db_arc, &handle, index_handle);
+    // 10. Graceful shutdown (async)
+    graceful_shutdown(
+        index,
+        subscription_manager,
+        db_arc,
+        &handle,
+        index_handle,
+        http_server_jh,
+    );
 
     Ok(())
 }
@@ -147,6 +158,7 @@ fn graceful_shutdown(
     db_arc: Arc<RocksDB>,
     handle: &Handle,
     index_handle: std::thread::JoinHandle<()>,
+    http_server_jh: task::JoinHandle<io::Result<()>>,
 ) {
     // 1) Signal the index and other threads to stop
     index.shutdown();
@@ -164,6 +176,13 @@ fn graceful_shutdown(
     if let Err(e) = index_handle.join() {
         error!("Failed to join indexer thread: {:?}", e);
     }
+
+    // 5) Await the Axum server
+    match http_server_jh.await {
+        Ok(Ok(_)) => info!("Axum server finished cleanly."),
+        Ok(Err(e)) => error!("Server error: {:?}", e),
+        Err(e) => error!("Failed to join Axum server task: {:?}", e),
+    };
 
     // Dropping the index, makes dropping the remaining references to the db
     drop(index);
