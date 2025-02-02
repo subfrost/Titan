@@ -150,9 +150,17 @@ impl Index {
             }
 
             if self.updater.is_at_tip() && !self.shutdown_flag.load(Ordering::SeqCst) {
-                self.updater
-                    .index_mempool()
-                    .expect("Failed to index mempool");
+                match self.updater.index_mempool() {
+                    Ok(_) => (),
+                    Err(UpdaterError::BitcoinRpc(_)) => {
+                        warn!("We're getting network connection issues, retrying...");
+                        continue;
+                    }
+                    Err(e) => {
+                        error!("Failed to index mempool: {}", e);
+                        break;
+                    }
+                }
             }
 
             thread::sleep(Duration::from_millis(self.settings.main_loop_interval));
