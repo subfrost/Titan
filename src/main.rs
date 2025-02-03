@@ -245,22 +245,28 @@ async fn graceful_shutdown(
     // 2) Tell the Index to shut down
     index.shutdown();
 
-    // 3) Graceful HTTP shutdown (axum_server)
+    // 3) Reset the panic hook to drop the RocksDB reference
+    panic::set_hook(Box::new(|panic_info| {
+        // Restore the default hook
+        eprintln!("Panic occurred: {:?}", panic_info);
+    }));
+
+    // 4) Graceful HTTP shutdown (axum_server)
     handle.graceful_shutdown(Some(std::time::Duration::from_secs(2)));
 
-    // 4) Join the indexer background thread (blocking)
+    // 5) Join the indexer background thread (blocking)
     if let Err(e) = index_handle.join() {
         error!("Failed to join indexer thread: {:?}", e);
     }
 
-    // 5) Await the Axum server
+    // 6) Await the Axum server
     match http_server_jh.await {
         Ok(Ok(_)) => info!("Axum server finished cleanly."),
         Ok(Err(e)) => error!("Server error: {:?}", e),
         Err(e) => error!("Failed to join Axum server task: {:?}", e),
     };
 
-    // 5) Await the dispatcher + cleanup tasks
+    // 7) Await the dispatcher + cleanup tasks
     if let Some(jh) = dispatcher_jh {
         if let Err(e) = jh.await {
             error!("Dispatcher task join error: {:?}", e);
@@ -276,11 +282,11 @@ async fn graceful_shutdown(
         }
     }
 
-    // 6) Drop the index so RocksDB references can possibly be unwrapped
+    // 8) Drop the index so RocksDB references can possibly be unwrapped
     drop(index);
     drop(subscription_manager);
 
-    // 7) Attempt to close RocksDB
+    // 9) Attempt to close RocksDB
     match Arc::try_unwrap(db_arc) {
         Ok(db) => {
             if let Err(e) = db.close() {
