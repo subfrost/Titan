@@ -1,5 +1,3 @@
+pub use updater::AddressUpdater;
 
-pub use { updater::AddressUpdater };
-
-mod rollback;
 mod updater;
