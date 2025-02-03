@@ -1083,8 +1083,11 @@ impl RocksDB {
         let results = self.db.multi_get_cf(keys);
 
         for (i, result) in results.iter().enumerate() {
-            if result.is_ok() {
-                spent_outpoints.push(outpoints[i].clone());
+            match result {
+                Ok(Some(_)) => {
+                    spent_outpoints.push(outpoints[i].clone());
+                }
+                _ => {}
             }
         }
 
@@ -1248,7 +1251,11 @@ impl RocksDB {
             };
 
             for (script_pubkey, script_pubkey_entry) in update.script_pubkeys {
-                batch.put_cf(&cf_handle, script_pubkey, script_pubkey_entry.store());
+                batch.put_cf(
+                    &cf_handle,
+                    script_pubkey.as_bytes(),
+                    script_pubkey_entry.store(),
+                );
             }
         }
 
