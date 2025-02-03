@@ -47,7 +47,9 @@ impl BorshDeserialize for ScriptPubkeyEntry {
             let txid_bytes = <[u8; 32]>::deserialize_reader(reader)?;
             let vout = u32::deserialize_reader(reader)?;
             utxos.push(OutPoint {
-                txid: bitcoin::Txid::from_byte_array(txid_bytes),
+                txid: bitcoin::Txid::from_raw_hash(
+                    bitcoin::hashes::sha256d::Hash::from_byte_array(txid_bytes),
+                ),
                 vout,
             });
         }

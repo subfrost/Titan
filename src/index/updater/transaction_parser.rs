@@ -15,7 +15,7 @@ use {
 };
 
 #[derive(Debug, Error)]
-pub enum RuneParserError {
+pub enum TransactionParserError {
     #[error("store error {0}")]
     Store(#[from] StoreError),
     #[error("bitcoin rpc error {0}")]
@@ -26,17 +26,18 @@ pub enum RuneParserError {
     Overflow(String),
 }
 
-type Result<T> = std::result::Result<T, RuneParserError>;
+type Result<T> = std::result::Result<T, TransactionParserError>;
 
-pub(super) struct RuneParser<'a, 'client> {
+pub(super) struct TransactionParser<'a, 'client> {
     pub(super) client: &'client Client,
     pub(super) height: u32,
     pub(super) cache: &'a mut UpdaterCache,
-    pub(super) minimum: Rune,
+    pub(super) minimum_rune: Rune,
+    pub(super) should_index_runes: bool,
     pub(super) mempool: bool,
 }
 
-impl<'a, 'client> RuneParser<'a, 'client> {
+impl<'a, 'client> TransactionParser<'a, 'client> {
     pub(super) fn new(
         client: &'client Client,
         chain: Chain,
@@ -44,13 +45,17 @@ impl<'a, 'client> RuneParser<'a, 'client> {
         mempool: bool,
         cache: &'a mut UpdaterCache,
     ) -> Result<Self> {
-        let minimum = Rune::minimum_at_height(chain.into(), Height(height));
+        let minimum_rune = Rune::minimum_at_height(chain.into(), Height(height));
+
+        let min_rune_height = Rune::first_rune_height(chain.into());
+        let should_index_runes = height >= min_rune_height;
 
         Ok(Self {
             client,
             height,
             cache,
-            minimum,
+            minimum_rune,
+            should_index_runes,
             mempool,
         })
     }
@@ -70,13 +75,78 @@ impl<'a, 'client> RuneParser<'a, 'client> {
         Ok(())
     }
 
-    pub(super) fn index_runes(
+    pub(super) fn parse(
         &mut self,
         block_time: u32,
         tx_index: u32,
         tx: &Transaction,
         txid: Txid,
     ) -> Result<TransactionStateChange> {
+        let (allocated, minted, etched, burned) = if self.should_index_runes {
+            self.parse_runes(block_time, tx_index, tx, txid)?
+        } else {
+            (vec![HashMap::new(); tx.output.len()], None, None, HashMap::new())
+        };
+
+        // update outpoint balances
+        let mut tx_outs: Vec<TxOutEntry> = vec![];
+        for (vout, balances) in allocated.into_iter().enumerate() {
+            let mut balances = balances.into_iter().collect::<Vec<(RuneId, Lot)>>();
+
+            // Sort balances by id so tests can assert balances in a fixed order
+            balances.sort();
+
+            let mut tx_out = TxOutEntry {
+                runes: vec![],
+                spent: false,
+                value: tx.output[vout].value.to_sat(),
+            };
+
+            for (id, balance) in balances {
+                tx_out.runes.push(RuneAmount {
+                    rune_id: id,
+                    amount: balance.0,
+                });
+            }
+
+            tx_outs.push(tx_out);
+        }
+
+        for (id, balance) in burned.iter() {
+            self.update_burn_balance(&id, balance.0 as i128)?;
+        }
+
+        let transaction_state_change = TransactionStateChange {
+            burned,
+            inputs: tx
+                .input
+                .iter()
+                .map(|txin| OutPoint {
+                    txid: txin.previous_output.txid,
+                    vout: txin.previous_output.vout,
+                })
+                .collect(),
+            outputs: tx_outs,
+            etched,
+            minted,
+            is_coinbase: tx.is_coinbase(),
+        };
+
+        Ok(transaction_state_change)
+    }
+
+    fn parse_runes(
+        &mut self,
+        block_time: u32,
+        tx_index: u32,
+        tx: &Transaction,
+        txid: Txid,
+    ) -> Result<(
+        Vec<HashMap<RuneId, Lot>>,
+        Option<RuneAmount>,
+        Option<(RuneId, Rune)>,
+        HashMap<RuneId, Lot>,
+    )> {
         let artifact = Runestone::decipher(tx);
 
         let mut unallocated = self.unallocated(tx)?;
@@ -220,59 +290,16 @@ impl<'a, 'client> RuneParser<'a, 'client> {
             }
         }
 
-        // update outpoint balances
-        let mut tx_outs: Vec<TxOutEntry> = vec![];
-        for (vout, balances) in allocated.into_iter().enumerate() {
+        for (vout, balances) in allocated.iter().enumerate() {
             // increment burned balances
             if tx.output[vout].script_pubkey.is_op_return() {
-                for (id, balance) in &balances {
+                for (id, balance) in balances {
                     *burned.entry(*id).or_default() += *balance;
                 }
-                continue;
             }
-
-            let mut balances = balances.into_iter().collect::<Vec<(RuneId, Lot)>>();
-
-            // Sort balances by id so tests can assert balances in a fixed order
-            balances.sort();
-
-            let mut tx_out = TxOutEntry {
-                runes: vec![],
-                spent: false,
-                value: tx.output[vout].value.to_sat(),
-            };
-
-            for (id, balance) in balances {
-                tx_out.runes.push(RuneAmount {
-                    rune_id: id,
-                    amount: balance.0,
-                });
-            }
-
-            tx_outs.push(tx_out);
         }
 
-        for (id, balance) in burned.iter() {
-            self.update_burn_balance(&id, balance.0 as i128)?;
-        }
-
-        let transaction_state_change = TransactionStateChange {
-            burned,
-            inputs: tx
-                .input
-                .iter()
-                .map(|txin| OutPoint {
-                    txid: txin.previous_output.txid,
-                    vout: txin.previous_output.vout,
-                })
-                .collect(),
-            outputs: tx_outs,
-            etched,
-            minted,
-            is_coinbase: tx.is_coinbase(),
-        };
-
-        Ok(transaction_state_change)
+        Ok((allocated, minted, etched, burned))
     }
 
     fn etched(
@@ -309,7 +336,10 @@ impl<'a, 'client> RuneParser<'a, 'client> {
                 }
             }
 
-            if rune < self.minimum || rune.is_reserved() || !self.tx_commits_to_rune(tx, rune)? {
+            if rune < self.minimum_rune
+                || rune.is_reserved()
+                || !self.tx_commits_to_rune(tx, rune)?
+            {
                 return Ok(None);
             }
             rune
@@ -449,13 +479,13 @@ impl<'a, 'client> RuneParser<'a, 'client> {
             let result = rune_entry
                 .pending_burns
                 .checked_add_signed(amount)
-                .ok_or(RuneParserError::Overflow("burn".to_string()))?;
+                .ok_or(TransactionParserError::Overflow("burn".to_string()))?;
             rune_entry.pending_burns = result;
         } else {
             let result = rune_entry
                 .pending_burns
                 .checked_add_signed(amount)
-                .ok_or(RuneParserError::Overflow("burn".to_string()))?;
+                .ok_or(TransactionParserError::Overflow("burn".to_string()))?;
 
             rune_entry.burned = result;
         }

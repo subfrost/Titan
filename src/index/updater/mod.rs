@@ -1,6 +1,6 @@
 pub use {
     index_updater::{ReorgError, Updater, UpdaterError},
-    rune_parser::RuneParserError,
+    transaction_parser::TransactionParserError,
     transaction_updater::TransactionUpdaterError,
 };
 
@@ -11,6 +11,6 @@ mod index_updater;
 mod mempool;
 mod mempool_debouncer;
 mod rollback;
-mod rune_parser;
 mod store_lock;
+mod transaction_parser;
 mod transaction_updater;

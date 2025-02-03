@@ -20,7 +20,6 @@ use {
     ordinals::{Rune, RuneId, SpacedRune, Terms},
     prometheus::HistogramVec,
     rollback::{Rollback, RollbackError},
-    rune_parser::RuneParser,
     std::{
         collections::HashSet,
         fmt::{self, Display, Formatter},
@@ -35,6 +34,7 @@ use {
     thiserror::Error,
     tokio::sync::mpsc::Sender,
     tracing::{debug, error, info, warn},
+    transaction_parser::TransactionParser,
     transaction_updater::TransactionUpdater,
 };
 
@@ -74,7 +74,7 @@ pub enum UpdaterError {
     #[error("rollback error {0}")]
     Rollback(#[from] RollbackError),
     #[error("rune parser error {0}")]
-    RuneParser(#[from] RuneParserError),
+    RuneParser(#[from] TransactionParserError),
     #[error("txid error {0}")]
     Txid(#[from] HexToArrayError),
     #[error("mempool error {0}")]
@@ -155,7 +155,6 @@ impl Updater {
             self.is_at_tip.store(false, Ordering::Release);
 
             let progress_bar = self.open_progress_bar(cache.get_block_count(), bitcoin_block_count);
-            let min_height = self.settings.chain.first_rune_height() as u64;
 
             let rx = fetch_blocks_from(
                 Arc::new(self.settings.clone()),
@@ -189,16 +188,12 @@ impl Updater {
                     }
                 }
 
-                let block = if cache.get_block_count() < min_height {
-                    Block::empty_block(cache.get_block_count() as u32, block.header)
-                } else {
-                    self.index_block(
-                        block,
-                        cache.get_block_count() as u64,
-                        &rpc_client,
-                        &mut cache,
-                    )?
-                };
+                let block = self.index_block(
+                    block,
+                    cache.get_block_count() as u64,
+                    &rpc_client,
+                    &mut cache,
+                )?;
 
                 cache.set_new_block(block);
 
@@ -313,7 +308,7 @@ impl Updater {
             .with_label_values(&["index_block"])
             .start_timer();
 
-        let mut rune_parser = RuneParser::new(
+        let mut transaction_parser = TransactionParser::new(
             &rpc_client,
             self.settings.chain,
             height as u32,
@@ -328,19 +323,14 @@ impl Updater {
             .latency
             .with_label_values(&["parse_block"])
             .start_timer();
-        rune_parser.pre_cache_tx_outs(&bitcoin_block.txdata)?;
+        transaction_parser.pre_cache_tx_outs(&bitcoin_block.txdata)?;
         let block_data = bitcoin_block
             .txdata
             .iter()
             .enumerate()
             .filter_map(|(i, tx)| {
                 let txid = tx.compute_txid();
-                match rune_parser.index_runes(
-                    block_header.time,
-                    u32::try_from(i).unwrap(),
-                    tx,
-                    txid,
-                ) {
+                match transaction_parser.parse(block_header.time, u32::try_from(i).unwrap(), tx, txid) {
                     Ok(result) => {
                         if result.has_rune_updates() || self.settings.index_addresses {
                             Some((i, txid, result))
@@ -447,10 +437,10 @@ impl Updater {
             .as_secs();
 
         let rpc_client = self.settings.get_new_rpc_client()?;
-        let mut rune_parser =
-            RuneParser::new(&rpc_client, self.settings.chain, height as u32, true, cache)?;
+        let mut transaction_parser =
+            TransactionParser::new(&rpc_client, self.settings.chain, height as u32, true, cache)?;
 
-        let result = rune_parser.index_runes(now as u32, 0, tx, *txid)?;
+        let result = transaction_parser.parse(now as u32, 0, tx, *txid)?;
         if result.has_rune_updates() || self.settings.index_addresses {
             info!("Indexing tx {}", txid);
 
