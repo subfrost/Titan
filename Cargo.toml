@@ -1,9 +1,16 @@
-[package]
-name = "light-ord"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+version = "0.3.2"
+resolver = "2"
 
-[dependencies]
+members = ["indexer", "sdk", "client"]
+
+[workspace.package]
+version = "0.1.0"
+
+[workspace.dependencies]
+# workspace
+sdk = { path = "sdk" }
+
 axum = "0.8.1"
 axum-server = "0.7.1"
 bitcoin = "0.32.5"
@@ -30,5 +37,5 @@ tokio = { version = "1.42.0", features = ["rt-multi-thread", "macros", "signal"]
 tower-http = { version = "0.6.2", features = ["compression-br", "compression-gzip", "cors"] }
 tracing = "0.1.40"
 tracing-subscriber = "0.3.19"
-uuid = { version = "1.12.1", features = ["borsh", "serde"] }
+uuid = { version = "1.12.1", features = ["borsh", "serde", "v4"] }
 zmq = "0.10"

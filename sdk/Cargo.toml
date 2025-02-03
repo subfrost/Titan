@@ -1,0 +1,14 @@
+[package]
+name = "sdk"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitcoin = { workspace = true }
+borsh = { workspace = true }
+brotli = { workspace = true }
+http = { workspace = true }
+ordinals = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }

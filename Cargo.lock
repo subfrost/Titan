@@ -543,6 +543,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
 
 [[package]]
+name = "client"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "reqwest",
+ "sdk",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "colorchoice"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1233,6 +1244,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "indexer"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "axum-server",
+ "bitcoin",
+ "bitcoincore-rpc",
+ "borsh",
+ "brotli",
+ "clap",
+ "derive_more",
+ "hex",
+ "http",
+ "indicatif",
+ "lazy_static",
+ "ordinals",
+ "prometheus",
+ "rayon",
+ "regex",
+ "reqwest",
+ "rocksdb",
+ "sdk",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "thiserror 2.0.9",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "zmq",
+]
+
+[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1388,40 +1434,6 @@ dependencies = [
  "cc",
  "pkg-config",
  "vcpkg",
-]
-
-[[package]]
-name = "light-ord"
-version = "0.1.0"
-dependencies = [
- "axum",
- "axum-server",
- "bitcoin",
- "bitcoincore-rpc",
- "borsh",
- "brotli",
- "clap",
- "derive_more",
- "hex",
- "http",
- "indicatif",
- "lazy_static",
- "ordinals",
- "prometheus",
- "rayon",
- "regex",
- "reqwest",
- "rocksdb",
- "serde",
- "serde_json",
- "serde_with",
- "thiserror 2.0.9",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "zmq",
 ]
 
 [[package]]
@@ -2045,6 +2057,20 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "sdk"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "borsh",
+ "brotli",
+ "http",
+ "ordinals",
+ "serde",
+ "thiserror 2.0.9",
+ "uuid",
+]
 
 [[package]]
 name = "secp256k1"
@@ -2714,6 +2740,7 @@ checksum = "b3758f5e68192bb96cc8f9b7e2c2cfdabb435499a28499a42f8f984092adad4b"
 dependencies = [
  "borsh",
  "borsh-derive",
+ "getrandom 0.2.15",
  "serde",
 ]
 
