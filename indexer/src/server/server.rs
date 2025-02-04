@@ -18,7 +18,6 @@ use {
     axum_server::Handle,
     bitcoin::{address::NetworkUnchecked, Address, OutPoint, Txid},
     http::StatusCode,
-    types::{InscriptionId, Pagination, Subscription},
     std::{io, net::ToSocketAddrs, sync::Arc},
     tokio::task,
     tower_http::{
@@ -26,6 +25,7 @@ use {
         cors::{Any, CorsLayer},
     },
     tracing::{error, info},
+    types::{InscriptionId, Pagination, Subscription},
     uuid::Uuid,
 };
 
@@ -60,6 +60,7 @@ impl Server {
             // Addresses
             .route("/address/{address}", get(Self::address))
             // Transactions
+            .route("/tx/broadcast", post(Self::broadcast_transaction))
             .route("/tx/{txid}", get(Self::transaction))
             .route("/output/{outpoint}", get(Self::output))
             // Inscriptions
@@ -129,6 +130,21 @@ impl Server {
         Path(DeserializeFromStr(query)): Path<DeserializeFromStr<api::query::Block>>,
     ) -> ServerResult {
         task::block_in_place(|| Ok(Json(api::block(index, &query)?).into_response()))
+    }
+
+    async fn broadcast_transaction(
+        Extension(index): Extension<Arc<Index>>,
+        Extension(config): Extension<Arc<ServerConfig>>,
+        Json(hex): Json<String>,
+    ) -> ServerResult {
+        task::block_in_place(|| {
+            Ok(Json(api::broadcast_transaction(
+                index,
+                config.get_new_rpc_client()?,
+                &hex,
+            )?)
+            .into_response())
+        })
     }
 
     async fn transaction(

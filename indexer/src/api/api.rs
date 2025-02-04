@@ -7,15 +7,15 @@ use {
         index::{Index, IndexError, StoreError},
         subscription::{self, WebhookSubscriptionManager},
     },
-    bitcoin::{Address, OutPoint, Txid},
+    bitcoin::{consensus, Address, OutPoint, Txid},
     bitcoincore_rpc::{Client, RpcApi},
     http::HeaderMap,
+    std::sync::Arc,
+    tracing::error,
     types::{
         AddressData, Block, BlockTip, InscriptionId, Pagination, PaginationResponse, RuneResponse,
         Status, Subscription, Transaction, TxOut, TxOutEntry,
     },
-    std::sync::Arc,
-    tracing::error,
     uuid::Uuid,
 };
 
@@ -29,6 +29,10 @@ pub enum ApiError {
     ContentError(#[from] ContentError),
     #[error("subscription error: {0}")]
     SubscriptionError(#[from] subscription::WebhookStoreError),
+    #[error("hex error: {0}")]
+    HexError(#[from] hex::FromHexError),
+    #[error("consensus error: {0}")]
+    ConsensusError(#[from] consensus::encode::Error),
 }
 
 pub type Result<T> = std::result::Result<T, ApiError>;
@@ -111,6 +115,13 @@ pub fn last_rune_transactions(
     let rune_id = rune_query.to_rune_id(&index)?;
     let transactions = index.get_last_rune_transactions(&rune_id, pagination, None)?;
     Ok(transactions)
+}
+
+pub fn broadcast_transaction(index: Arc<Index>, client: Client, hex: &str) -> Result<()> {
+    let txid = client.send_raw_transaction(hex)?;
+    let transaction = consensus::deserialize(&hex::decode(hex)?)?;
+    index.index_new_transaction(&txid, &transaction);
+    Ok(())
 }
 
 pub fn transaction(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Transaction> {

@@ -11,12 +11,8 @@ use {
         index::updater::{ReorgError, UpdaterError},
         models::{Inscription, RuneEntry},
     },
-    bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
+    bitcoin::{BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
     ordinals::{Rune, RuneId},
-    types::{
-        AddressData, AddressTxOut, Block, Event, InscriptionId, Pagination, PaginationResponse,
-        RuneAmount, TxOutEntry,
-    },
     std::{
         collections::HashMap,
         sync::{
@@ -28,6 +24,10 @@ use {
     },
     tokio::sync::mpsc::Sender,
     tracing::{error, info, warn},
+    types::{
+        AddressData, AddressTxOut, Block, Event, InscriptionId, Pagination, PaginationResponse,
+        RuneAmount, TxOutEntry,
+    },
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -260,5 +260,14 @@ impl Index {
                 .collect(),
             outputs,
         })
+    }
+
+    pub fn index_new_transaction(&self, txid: &Txid, tx: &Transaction) {
+        match self.updater.index_new_tx(txid, tx) {
+            Ok(_) => (),
+            Err(e) => {
+                error!("Failed to index new transaction after broadcast: {}", e);
+            }
+        }
     }
 }
