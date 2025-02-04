@@ -1,7 +1,7 @@
 use {
     super::store::Store,
     reqwest::Client,
-    sdk::{Event, EventType},
+    types::{Event, EventType},
     std::{
         sync::Arc,
         time::{Duration, SystemTime, UNIX_EPOCH},

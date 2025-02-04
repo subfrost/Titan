@@ -13,7 +13,7 @@ use {
     },
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
     ordinals::{Rune, RuneId},
-    sdk::{
+    types::{
         AddressData, AddressTxOut, Block, Event, InscriptionId, Pagination, PaginationResponse,
         RuneAmount, TxOutEntry,
     },

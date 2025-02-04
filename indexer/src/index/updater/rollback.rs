@@ -3,7 +3,7 @@ use {
     crate::models::TransactionStateChange,
     bitcoin::{OutPoint, Txid},
     ordinals::RuneId,
-    sdk::InscriptionId,
+    types::InscriptionId,
     std::sync::Arc,
     thiserror::Error,
 };

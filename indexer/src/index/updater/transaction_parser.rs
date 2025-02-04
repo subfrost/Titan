@@ -10,7 +10,7 @@ use {
     bitcoin::{consensus::encode, OutPoint, Transaction, Txid},
     bitcoincore_rpc::{Client, RpcApi},
     ordinals::{Artifact, Edict, Etching, Height, Rune, RuneId, Runestone, SpacedRune},
-    sdk::{RuneAmount, TxOutEntry},
+    types::{RuneAmount, TxOutEntry},
     std::collections::HashMap,
     thiserror::Error,
 };

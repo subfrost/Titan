@@ -6,7 +6,7 @@ use std::{
 use bitcoin::Txid;
 use borsh::{BorshDeserialize, BorshSerialize};
 use ordinals::{Rune, RuneId, SpacedRune, Terms};
-use sdk::{InscriptionId, MintResponse, RuneResponse};
+use types::{InscriptionId, MintResponse, RuneResponse};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

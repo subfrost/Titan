@@ -9,7 +9,7 @@ use {
     },
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
     ordinals::{Rune, RuneId},
-    sdk::{Block, InscriptionId, TxOutEntry},
+    types::{Block, InscriptionId, TxOutEntry},
     std::{
         cmp,
         collections::{HashMap, HashSet},

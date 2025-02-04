@@ -12,3 +12,11 @@ pub struct Subscription {
     pub event_types: Vec<EventType>,
     pub last_success_epoch_secs: u64,
 }
+
+/// The expected subscription request from the TCP client.
+/// For example, the client should send:
+///   {"subscribe": ["RuneEtched", "RuneMinted"]}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TcpSubscriptionRequest {
+    pub subscribe: Vec<String>,
+}

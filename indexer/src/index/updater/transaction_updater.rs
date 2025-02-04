@@ -6,7 +6,7 @@ use {
     },
     bitcoin::{OutPoint, ScriptBuf, Transaction, Txid},
     ordinals::RuneId,
-    sdk::{Event, TxOutEntry},
+    types::{Event, TxOutEntry},
     std::collections::HashSet,
     thiserror::Error,
     tokio::sync::mpsc::{self, error::SendError},

@@ -4,7 +4,7 @@ use {
         store::{Store, StoreError},
     },
     reqwest::Client,
-    sdk::{Event, Subscription},
+    types::{Event, Subscription},
     std::sync::Arc,
     uuid::Uuid,
 };

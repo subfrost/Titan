@@ -3,7 +3,7 @@ use {
     bitcoin::{hashes::Hash, OutPoint},
     borsh::{BorshDeserialize, BorshSerialize},
     ordinals::{Rune, RuneId},
-    sdk::{RuneAmount, TxOutEntry},
+    types::{RuneAmount, TxOutEntry},
     std::{
         collections::{HashMap, HashSet},
         fmt::Display,

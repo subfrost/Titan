@@ -2,7 +2,7 @@ use {
     super::{Inscription, RuneEntry, ScriptPubkeyEntry, TransactionStateChange},
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
     ordinals::RuneId,
-    sdk::{Block, InscriptionId, TxOutEntry},
+    types::{Block, InscriptionId, TxOutEntry},
     std::{
         collections::{HashMap, HashSet},
         fmt::Display,

@@ -1,5 +1,4 @@
-use sdk::{Event, EventType};
-use serde::Deserialize;
+use types::{Event, EventType, TcpSubscriptionRequest};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -61,14 +60,6 @@ impl TcpSubscriptionManager {
             }
         }
     }
-}
-
-/// The expected subscription request from the TCP client.
-/// For example, the client should send:
-///   {"subscribe": ["RuneEtched", "RuneMinted"]}
-#[derive(Debug, Deserialize)]
-pub struct TcpSubscriptionRequest {
-    pub subscribe: Vec<String>,
 }
 
 /// Run the TCP subscription server on the given address.

@@ -2,14 +2,14 @@
 version = "0.3.2"
 resolver = "2"
 
-members = ["indexer", "sdk", "client"]
+members = ["indexer", "types", "client"]
 
 [workspace.package]
 version = "0.1.0"
 
 [workspace.dependencies]
 # workspace
-sdk = { path = "sdk" }
+types = { path = "types" }
 
 axum = "0.8.1"
 axum-server = "0.7.1"

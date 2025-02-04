@@ -1,6 +1,6 @@
 use {
     crate::db::{RocksDB, RocksDBError},
-    sdk::Subscription,
+    types::Subscription,
     thiserror::Error,
     uuid::Uuid,
 };

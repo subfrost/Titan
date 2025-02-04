@@ -7,7 +7,7 @@ use {
             webhook::cleanup_inactive_subscriptions,
         },
     },
-    sdk::Event,
+    types::Event,
     std::{sync::Arc, time::Duration},
     tokio::{
         sync::{mpsc, watch},

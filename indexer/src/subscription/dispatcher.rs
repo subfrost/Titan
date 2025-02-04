@@ -1,7 +1,7 @@
 use {
     super::tcp_subscription::TcpSubscriptionManager,
     crate::subscription::WebhookSubscriptionManager,
-    sdk::Event,
+    types::Event,
     std::sync::Arc,
     tokio::{
         select,

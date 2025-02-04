@@ -20,7 +20,7 @@ use {
     ordinals::{Rune, RuneId, SpacedRune, Terms},
     prometheus::HistogramVec,
     rollback::{Rollback, RollbackError},
-    sdk::{Block, Event},
+    types::{Block, Event},
     std::{
         collections::HashSet,
         fmt::{self, Display, Formatter},

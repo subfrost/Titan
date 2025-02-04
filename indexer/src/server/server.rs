@@ -18,7 +18,7 @@ use {
     axum_server::Handle,
     bitcoin::{address::NetworkUnchecked, Address, OutPoint, Txid},
     http::StatusCode,
-    sdk::{InscriptionId, Pagination, Subscription},
+    types::{InscriptionId, Pagination, Subscription},
     std::{io, net::ToSocketAddrs, sync::Arc},
     tokio::task,
     tower_http::{

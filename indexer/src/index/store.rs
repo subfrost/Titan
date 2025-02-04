@@ -8,7 +8,7 @@ use {
     },
     bitcoin::{hex::HexToArrayError, BlockHash, OutPoint, ScriptBuf, Txid},
     ordinals::{Rune, RuneId},
-    sdk::{Block, InscriptionId, Pagination, PaginationResponse, TxOutEntry},
+    types::{Block, InscriptionId, Pagination, PaginationResponse, TxOutEntry},
     std::collections::{HashMap, HashSet},
     thiserror::Error,
 };

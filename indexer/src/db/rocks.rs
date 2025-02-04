@@ -12,7 +12,7 @@ use {
         BlockBasedOptions, BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode,
         IteratorMode, MultiThreaded, Options, WriteBatch,
     },
-    sdk::{Block, InscriptionId, Pagination, PaginationResponse, Subscription, TxOutEntry},
+    types::{Block, InscriptionId, Pagination, PaginationResponse, Subscription, TxOutEntry},
     std::{
         collections::{HashMap, HashSet},
         str::FromStr,

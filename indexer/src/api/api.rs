@@ -10,7 +10,7 @@ use {
     bitcoin::{Address, OutPoint, Txid},
     bitcoincore_rpc::{Client, RpcApi},
     http::HeaderMap,
-    sdk::{
+    types::{
         AddressData, Block, BlockTip, InscriptionId, Pagination, PaginationResponse, RuneResponse,
         Status, Subscription, Transaction, TxOut, TxOutEntry,
     },

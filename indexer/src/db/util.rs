@@ -2,7 +2,7 @@ use bitcoin::{hashes::Hash, OutPoint, Txid};
 use ordinals::RuneId;
 use std::convert::TryInto;
 
-use sdk::InscriptionId;
+use types::InscriptionId;
 
 /// Converts an `Txid` to a 32-byte Vec<u8>.
 pub fn txid_to_bytes(txid: &Txid) -> [u8; 32] {

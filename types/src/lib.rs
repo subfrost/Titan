@@ -7,7 +7,7 @@ pub use {
     pagination::{Pagination, PaginationResponse},
     rune::{MintResponse, RuneAmount, RuneResponse},
     stats::{BlockTip, Status},
-    subscription::Subscription,
+    subscription::{Subscription, TcpSubscriptionRequest},
     transaction::{Transaction, TxOut, TxOutEntry},
 };
 

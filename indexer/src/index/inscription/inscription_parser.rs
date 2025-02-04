@@ -2,7 +2,7 @@ use {
     super::*,
     crate::models::Inscription,
     bitcoin::{Transaction, Txid},
-    sdk::InscriptionId,
+    types::InscriptionId,
 };
 
 pub fn index_rune_icon(tx: &Transaction, txid: Txid) -> Option<(InscriptionId, Inscription)> {
