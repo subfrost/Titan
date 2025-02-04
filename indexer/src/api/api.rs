@@ -117,11 +117,11 @@ pub fn last_rune_transactions(
     Ok(transactions)
 }
 
-pub fn broadcast_transaction(index: Arc<Index>, client: Client, hex: &str) -> Result<()> {
+pub fn broadcast_transaction(index: Arc<Index>, client: Client, hex: &str) -> Result<Txid> {
     let txid = client.send_raw_transaction(hex)?;
     let transaction = consensus::deserialize(&hex::decode(hex)?)?;
     index.index_new_transaction(&txid, &transaction);
-    Ok(())
+    Ok(txid)
 }
 
 pub fn bitcoin_transaction_raw(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Vec<u8>> {

@@ -1,10 +1,10 @@
 use bitcoin::Txid;
 use reqwest::{header::HeaderMap, Client as HttpClient, Response};
+use std::{error::Error, str::FromStr};
 use types::{
     AddressData, Block, BlockTip, Pagination, PaginationResponse, RuneResponse, Status,
     Subscription, Transaction, TxOutEntry,
 };
-use std::error::Error;
 
 /// A client for your HTTP server.
 pub struct Client {
@@ -20,6 +20,10 @@ impl Client {
             base_url: base_url.trim_end_matches('/').to_string(),
         }
     }
+
+    // ------------------------------------------------------------------------
+    // Status, blocks, addresses
+    // ------------------------------------------------------------------------
 
     /// GET /status
     pub async fn get_status(&self) -> Result<Status, Box<dyn Error>> {
@@ -53,12 +57,79 @@ impl Client {
         Ok(address_data)
     }
 
+    // ------------------------------------------------------------------------
+    // Transactions
+    // ------------------------------------------------------------------------
+
     /// GET /tx/{txid}
-    pub async fn get_tx(&self, txid: &str) -> Result<Transaction, Box<dyn Error>> {
+    /// Returns a structured bitcoin `Transaction` (JSON).
+    pub async fn get_transaction(
+        &self,
+        txid: &str,
+    ) -> Result<bitcoin::Transaction, Box<dyn Error>> {
         let url = format!("{}/tx/{}", self.base_url, txid);
+        let resp = self.http_client.get(&url).send().await?;
+        let tx = resp.json::<bitcoin::Transaction>().await?;
+        Ok(tx)
+    }
+
+    /// Same as `get_transaction` but always requests runes (`with_runes=true`).
+    pub async fn get_transaction_with_runes(
+        &self,
+        txid: &str,
+    ) -> Result<Transaction, Box<dyn Error>> {
+        // Build query-string for the `with_runes` parameter.
+        let url = format!("{}/tx/{}?with_runes=true", self.base_url, txid);
         let resp = self.http_client.get(&url).send().await?;
         let tx = resp.json::<Transaction>().await?;
         Ok(tx)
+    }
+
+    /// GET /tx/{txid}/raw
+    /// Returns the raw transaction bytes (content-type: application/octet-stream).
+    pub async fn get_transaction_raw(&self, txid: &str) -> Result<Vec<u8>, Box<dyn Error>> {
+        let url = format!("{}/tx/{txid}/raw", self.base_url);
+        let resp = self.http_client.get(&url).send().await?;
+        // Read the raw bytes directly
+        let bytes = resp.bytes().await?.to_vec();
+        Ok(bytes)
+    }
+
+    /// GET /tx/{txid}/hex
+    /// Returns a text/plain body containing hex-encoded raw transaction.
+    pub async fn get_transaction_hex(&self, txid: &str) -> Result<String, Box<dyn Error>> {
+        let url = format!("{}/tx/{txid}/hex", self.base_url);
+        let resp = self.http_client.get(&url).send().await?;
+        let hex = resp.text().await?; // text/plain
+        Ok(hex)
+    }
+
+    /// POST /tx/broadcast
+    /// Broadcast a raw transaction (in hex form) to the network.
+    pub async fn broadcast_transaction(&self, tx_hex: String) -> Result<Txid, Box<dyn Error>> {
+        let url = format!("{}/tx/broadcast", self.base_url);
+
+        // 1) Build the request, consuming our owned `tx_hex`.
+        let resp = self
+            .http_client
+            .post(&url)
+            .body(tx_hex) // note: we pass the owned string here
+            .send()
+            .await?;
+
+        // 2) Extract status and body text. We can't read `resp.text()` twice,
+        //    so we store them now before checking the status.
+        let status = resp.status();
+        let body_text = resp.text().await?;
+
+        // 3) If not successful, return an error with the body as context.
+        if !status.is_success() {
+            return Err(format!("Broadcast failed: HTTP {} - {}", status, body_text).into());
+        }
+
+        // 4) At this point, we know it's success. The response body is the txid as text.
+        let txid = Txid::from_str(&body_text)?;
+        Ok(txid)
     }
 
     /// GET /output/{outpoint}
@@ -69,17 +140,34 @@ impl Client {
         Ok(output)
     }
 
+    // ------------------------------------------------------------------------
+    // Inscriptions
+    // ------------------------------------------------------------------------
+
     /// GET /inscription/{inscription_id}
+    /// Returns `(Headers, Bytes)`. The server sets content-type and possibly compression,
+    /// and the body is the raw inscription content.
     pub async fn get_inscription(
         &self,
         inscription_id: &str,
     ) -> Result<(HeaderMap, Vec<u8>), Box<dyn Error>> {
         let url = format!("{}/inscription/{}", self.base_url, inscription_id);
         let resp: Response = self.http_client.get(&url).send().await?;
+
+        let status = resp.status();
+
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("Inscription request failed: HTTP {} - {}", status, body).into());
+        }
         let headers = resp.headers().clone();
         let body = resp.bytes().await?.to_vec();
         Ok((headers, body))
     }
+
+    // ------------------------------------------------------------------------
+    // Runes
+    // ------------------------------------------------------------------------
 
     /// GET /runes?skip=&limit=
     pub async fn get_runes(
@@ -128,7 +216,9 @@ impl Client {
         Ok(txids)
     }
 
-    // Subscription endpoints:
+    // ------------------------------------------------------------------------
+    // Subscription endpoints
+    // ------------------------------------------------------------------------
 
     /// GET /subscription/{id}
     pub async fn get_subscription(&self, id: &str) -> Result<Subscription, Box<dyn Error>> {
@@ -165,7 +255,12 @@ impl Client {
     /// DELETE /subscription/{id}
     pub async fn delete_subscription(&self, id: &str) -> Result<(), Box<dyn Error>> {
         let url = format!("{}/subscription/{}", self.base_url, id);
-        self.http_client.delete(&url).send().await?;
+        let resp = self.http_client.delete(&url).send().await?;
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(format!("Delete subscription failed: HTTP {} - {}", status, body).into());
+        }
         Ok(())
     }
 }

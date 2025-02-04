@@ -138,15 +138,17 @@ impl Server {
     async fn broadcast_transaction(
         Extension(index): Extension<Arc<Index>>,
         Extension(config): Extension<Arc<ServerConfig>>,
-        Json(hex): Json<String>,
+        hex: String,
     ) -> ServerResult {
         task::block_in_place(|| {
-            Ok(Json(api::broadcast_transaction(
-                index,
-                config.get_new_rpc_client()?,
-                &hex,
-            )?)
-            .into_response())
+            let txid = api::broadcast_transaction(index, config.get_new_rpc_client()?, &hex)?;
+
+            Ok((
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/plain")],
+                txid.to_string(),
+            )
+                .into_response())
         })
     }
 
