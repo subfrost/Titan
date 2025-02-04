@@ -1,4 +1,3 @@
-use types::{Event, TcpSubscriptionRequest};
 use serde_json;
 use std::error::Error;
 use tokio::{
@@ -7,10 +6,13 @@ use tokio::{
     sync::{mpsc, watch},
 };
 use tracing::{error, info, warn};
+#[cfg(feature = "tcp_client")]
+use types::{Event, TcpSubscriptionRequest};
 
 /// Connect to the TCP subscription server at `addr` and subscribe
 /// using the given request. Returns a receiver for incoming events.
 /// The provided shutdown_rx receiver is used to signal a graceful shutdown.
+#[cfg(feature = "tcp_client")]
 pub async fn subscribe(
     addr: &str,
     subscription_request: TcpSubscriptionRequest,
@@ -32,6 +34,9 @@ pub async fn subscribe(
 
     // Spawn a task to read events from the TCP connection.
     tokio::spawn(async move {
+        // placeholder to keep it alive
+        let _writer_guard = writer;
+
         let mut line = String::new();
         loop {
             line.clear();
