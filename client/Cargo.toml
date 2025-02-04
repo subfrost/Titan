@@ -3,6 +3,9 @@ name = "client"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+tcp_client = []
+
 [dependencies]
 types = { workspace = true }
 
