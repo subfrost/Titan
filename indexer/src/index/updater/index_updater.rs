@@ -492,7 +492,7 @@ impl Updater {
 
         let result = transaction_parser.parse(now as u32, 0, tx, *txid)?;
         if result.has_rune_updates() || self.settings.index_addresses {
-            trace!("Indexing tx {}", txid);
+            info!("Indexing tx {}", txid);
 
             // Create a TransactionUpdater that references the optional address_updater
             let mut transaction_updater = TransactionUpdater::new(
@@ -520,7 +520,7 @@ impl Updater {
 
         // Remove transactions that are no longer in mempool
         for txid in txids {
-            trace!("Removing tx {}", txid);
+            info!("Removing tx {}", txid);
             db.remove_mempool_tx(&txid)?;
             match db.get_tx_state_changes(&txid, Some(mempool)) {
                 Ok(tx_state_changes) => {

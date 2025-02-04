@@ -7,8 +7,29 @@ use {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Transaction {
+    pub version: i32,
+    pub lock_time: u32,
     pub input: Vec<TxIn>,
     pub output: Vec<TxOut>,
+}
+
+impl From<bitcoin::Transaction> for Transaction {
+    fn from(transaction: bitcoin::Transaction) -> Self {
+        Transaction {
+            version: transaction.version.0,
+            lock_time: transaction.lock_time.to_consensus_u32(),
+            input: transaction.input,
+            output: transaction
+                .output
+                .iter()
+                .map(|tx_out| TxOut {
+                    value: tx_out.value.to_sat(),
+                    script_pubkey: tx_out.script_pubkey.clone(),
+                    runes: vec![],
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

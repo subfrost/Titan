@@ -1,7 +1,8 @@
 use {
     crate::{
         index::{Chain, Settings},
-        server::ServerConfig, subscription::SubscriptionConfig,
+        server::ServerConfig,
+        subscription::SubscriptionConfig,
     },
     bitcoincore_rpc::Auth,
     clap::{
@@ -92,6 +93,15 @@ pub struct Options {
     )]
     pub(super) index_spent_outputs: bool,
 
+    /// Index bitcoin transactions
+    #[arg(
+        long,
+        short,
+        help = "Index bitcoin transactions. [default: true]",
+        default_value = "true"
+    )]
+    pub(super) index_bitcoin_transactions: bool,
+
     /// Index addresses. [default: false]
     #[arg(
         long,
@@ -181,6 +191,7 @@ impl From<Options> for Settings {
             chain: options.chain,
             no_index_inscriptions: options.no_index_inscriptions,
             index_spent_outputs: options.index_spent_outputs,
+            index_bitcoin_transactions: options.index_bitcoin_transactions,
             index_addresses: options.index_addresses,
             commit_interval: options.commit_interval,
             main_loop_interval: options.main_loop_interval,

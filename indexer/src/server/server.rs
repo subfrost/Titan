@@ -62,6 +62,8 @@ impl Server {
             // Transactions
             .route("/tx/broadcast", post(Self::broadcast_transaction))
             .route("/tx/{txid}", get(Self::transaction))
+            .route("/tx/{txid}/raw", get(Self::transaction_raw))
+            .route("/tx/{txid}/hex", get(Self::transaction_hex))
             .route("/output/{outpoint}", get(Self::output))
             // Inscriptions
             .route("/inscription/{inscription_id}", get(Self::inscription))
@@ -151,9 +153,44 @@ impl Server {
         Extension(index): Extension<Arc<Index>>,
         Extension(config): Extension<Arc<ServerConfig>>,
         Path(txid): Path<Txid>,
+        Query(query): Query<api::query::Transaction>,
     ) -> ServerResult {
         task::block_in_place(|| {
-            Ok(Json(api::transaction(
+            if query.with_runes {
+                let transaction = api::transaction(index, config.get_new_rpc_client()?, &txid)?;
+
+                Ok(Json(transaction).into_response())
+            } else {
+                let transaction =
+                    api::bitcoin_transaction(index, config.get_new_rpc_client()?, &txid)?;
+
+                Ok(Json(transaction).into_response())
+            }
+        })
+    }
+
+    async fn transaction_raw(
+        Extension(index): Extension<Arc<Index>>,
+        Extension(config): Extension<Arc<ServerConfig>>,
+        Path(txid): Path<Txid>,
+    ) -> ServerResult {
+        task::block_in_place(|| {
+            Ok(Json(api::bitcoin_transaction_raw(
+                index,
+                config.get_new_rpc_client()?,
+                &txid,
+            )?)
+            .into_response())
+        })
+    }
+
+    async fn transaction_hex(
+        Extension(index): Extension<Arc<Index>>,
+        Extension(config): Extension<Arc<ServerConfig>>,
+        Path(txid): Path<Txid>,
+    ) -> ServerResult {
+        task::block_in_place(|| {
+            Ok(Json(api::bitcoin_transaction_hex(
                 index,
                 config.get_new_rpc_client()?,
                 &txid,

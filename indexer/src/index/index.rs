@@ -262,6 +262,18 @@ impl Index {
         })
     }
 
+    pub fn is_indexing_bitcoin_transactions(&self) -> bool {
+        self.settings.index_bitcoin_transactions
+    }
+
+    pub fn get_transaction_raw(&self, txid: &Txid) -> Result<Vec<u8>> {
+        Ok(self.db.get_transaction_raw(txid, None)?)
+    }
+
+    pub fn get_transaction(&self, txid: &Txid) -> Result<Transaction> {
+        Ok(self.db.get_transaction(txid, None)?)
+    }
+
     pub fn index_new_transaction(&self, txid: &Txid, tx: &Transaction) {
         match self.updater.index_new_tx(txid, tx) {
             Ok(_) => (),

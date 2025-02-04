@@ -3,9 +3,9 @@ use {
     crate::models::TransactionStateChange,
     bitcoin::{OutPoint, Txid},
     ordinals::RuneId,
-    types::InscriptionId,
     std::sync::Arc,
     thiserror::Error,
+    types::InscriptionId,
 };
 
 #[derive(Debug, Error)]
@@ -157,6 +157,7 @@ impl<'a> Rollback<'a> {
 
         // Finally remove the transaction state change.
         self.store.delete_tx_state_changes(txid, self.mempool)?;
+        self.store.delete_transaction(txid, self.mempool)?;
 
         Ok(())
     }

@@ -6,11 +6,11 @@ use {
             TransactionStateChange,
         },
     },
-    bitcoin::{hex::HexToArrayError, BlockHash, OutPoint, ScriptBuf, Txid},
+    bitcoin::{hex::HexToArrayError, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
     ordinals::{Rune, RuneId},
-    types::{Block, InscriptionId, Pagination, PaginationResponse, TxOutEntry},
     std::collections::{HashMap, HashSet},
     thiserror::Error,
+    types::{Block, InscriptionId, Pagination, PaginationResponse, TxOutEntry},
 };
 
 #[derive(Debug, Error)]
@@ -87,6 +87,19 @@ pub trait Store {
         mempool: Option<bool>,
     ) -> Result<TransactionStateChange, StoreError>;
     fn delete_tx_state_changes(&self, txid: &Txid, mempool: bool) -> Result<(), StoreError>;
+
+    // bitcoin transactions
+    fn get_transaction_raw(
+        &self,
+        txid: &Txid,
+        mempool: Option<bool>,
+    ) -> Result<Vec<u8>, StoreError>;
+    fn get_transaction(
+        &self,
+        txid: &Txid,
+        mempool: Option<bool>,
+    ) -> Result<Transaction, StoreError>;
+    fn delete_transaction(&self, txid: &Txid, mempool: bool) -> Result<(), StoreError>;
 
     // rune transactions
     fn get_last_rune_transactions(
@@ -315,6 +328,46 @@ impl Store for RocksDB {
 
     fn delete_tx_state_changes(&self, txid: &Txid, mempool: bool) -> Result<(), StoreError> {
         Ok(self.delete_tx_state_changes(txid, mempool)?)
+    }
+
+    fn get_transaction(
+        &self,
+        txid: &Txid,
+        mempool: Option<bool>,
+    ) -> Result<Transaction, StoreError> {
+        if let Some(mempool) = mempool {
+            Ok(self.get_transaction(txid, mempool)?)
+        } else {
+            match self.get_transaction(txid, false) {
+                Ok(transaction) => return Ok(transaction),
+                Err(err) => match err {
+                    RocksDBError::NotFound(_) => Ok(self.get_transaction(txid, true)?),
+                    other => Err(StoreError::DB(other)),
+                },
+            }
+        }
+    }
+
+    fn get_transaction_raw(
+        &self,
+        txid: &Txid,
+        mempool: Option<bool>,
+    ) -> Result<Vec<u8>, StoreError> {
+        if let Some(mempool) = mempool {
+            Ok(self.get_transaction_raw(txid, mempool)?)
+        } else {
+            match self.get_transaction_raw(txid, false) {
+                Ok(transaction) => return Ok(transaction),
+                Err(err) => match err {
+                    RocksDBError::NotFound(_) => Ok(self.get_transaction_raw(txid, true)?),
+                    other => Err(StoreError::DB(other)),
+                },
+            }
+        }
+    }
+
+    fn delete_transaction(&self, txid: &Txid, mempool: bool) -> Result<(), StoreError> {
+        Ok(self.delete_transaction(txid, mempool)?)
     }
 
     fn get_runes_count(&self) -> Result<u64, StoreError> {

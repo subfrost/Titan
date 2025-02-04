@@ -1,4 +1,4 @@
-use bitcoin::{hashes::Hash, BlockHash};
+use bitcoin::{consensus, hashes::Hash, BlockHash, Transaction};
 use rocks::DBResult;
 
 use super::{entry::Entry, *};
@@ -64,6 +64,15 @@ impl DBResultMapper<BlockHash> for DBResult<Option<Vec<u8>>> {
                 Hash::from_slice(&vec).map_err(|_| RocksDBError::InvalidBlockHash)?,
             ))
         };
+
+        map_db_type(self, &func)
+    }
+}
+
+impl DBResultMapper<Transaction> for DBResult<Option<Vec<u8>>> {
+    fn mapped(self) -> DBResult<Option<Transaction>> {
+        let func =
+            |vec: &[u8]| -> DBResult<Transaction> { Ok(consensus::deserialize(&vec).unwrap()) };
 
         map_db_type(self, &func)
     }

@@ -6,10 +6,10 @@ use {
     },
     bitcoin::{OutPoint, ScriptBuf, Transaction, Txid},
     ordinals::RuneId,
-    types::{Event, TxOutEntry},
     std::collections::HashSet,
     thiserror::Error,
     tokio::sync::mpsc::{self, error::SendError},
+    types::{Event, TxOutEntry},
 };
 
 #[derive(Debug, Error)]
@@ -25,6 +25,7 @@ type Result<T> = std::result::Result<T, TransactionUpdaterError>;
 #[derive(Debug)]
 pub(super) struct TransactionUpdaterSettings {
     pub(super) index_addresses: bool,
+    pub(super) index_bitcoin_transactions: bool,
     pub(super) chain: Chain,
 }
 
@@ -32,6 +33,7 @@ impl From<Settings> for TransactionUpdaterSettings {
     fn from(settings: Settings) -> Self {
         Self {
             index_addresses: settings.index_addresses,
+            index_bitcoin_transactions: settings.index_bitcoin_transactions,
             chain: settings.chain,
         }
     }
@@ -115,6 +117,10 @@ impl<'a> TransactionUpdater<'a> {
 
         for rune_id in rune_ids {
             self.cache.add_rune_transaction(rune_id, txid);
+        }
+
+        if self.settings.index_bitcoin_transactions {
+            self.cache.set_transaction(txid, transaction.clone());
         }
 
         if self.settings.index_addresses {

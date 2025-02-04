@@ -2,6 +2,7 @@ use {
     crate::index::{Index, IndexError},
     bitcoin::BlockHash,
     ordinals::{RuneId, SpacedRune},
+    serde::{Deserialize, Serialize},
     std::{str::FromStr, sync::Arc},
 };
 
@@ -75,4 +76,14 @@ impl FromStr for Rune {
             ))
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Transaction {
+    #[serde(default = "default_with_runes")]
+    pub with_runes: bool,
+}
+
+fn default_with_runes() -> bool {
+    false
 }

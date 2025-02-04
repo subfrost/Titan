@@ -4,7 +4,7 @@ use {
         BatchDelete, BatchUpdate, Inscription, RuneEntry, ScriptPubkeyEntry,
         TransactionStateChange, TxRuneIndexRef,
     },
-    bitcoin::{consensus, hashes::Hash, BlockHash, OutPoint, ScriptBuf, Txid},
+    bitcoin::{consensus, hashes::Hash, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
     helpers::{rune_index_key, rune_transaction_key},
     mapper::DBResultMapper,
     ordinals::RuneId,
@@ -12,12 +12,12 @@ use {
         BlockBasedOptions, BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode,
         IteratorMode, MultiThreaded, Options, WriteBatch,
     },
-    types::{Block, InscriptionId, Pagination, PaginationResponse, Subscription, TxOutEntry},
     std::{
         collections::{HashMap, HashSet},
         str::FromStr,
         sync::{Arc, RwLock},
     },
+    types::{Block, InscriptionId, Pagination, PaginationResponse, Subscription, TxOutEntry},
     util::{
         inscription_id_to_bytes, outpoint_to_bytes, rune_id_to_bytes, txid_from_bytes,
         txid_to_bytes,
@@ -62,6 +62,9 @@ const SCRIPT_PUBKEYS_MEMPOOL_CF: &str = "script_pubkeys_mempool";
 const OUTPOINT_TO_SCRIPT_PUBKEY_CF: &str = "outpoint_to_script_pubkey";
 const OUTPOINT_TO_SCRIPT_PUBKEY_MEMPOOL_CF: &str = "outpoint_to_script_pubkey_mempool";
 const SPENT_OUTPOINTS_MEMPOOL_CF: &str = "spent_outpoints_mempool";
+
+const TRANSACTIONS_CF: &str = "transactions";
+const TRANSACTIONS_MEMPOOL_CF: &str = "transactions_mempool";
 
 const MEMPOOL_CF: &str = "mempool";
 const STATS_CF: &str = "stats";
@@ -125,6 +128,10 @@ impl RocksDB {
             ColumnFamilyDescriptor::new(OUTPOINT_TO_SCRIPT_PUBKEY_MEMPOOL_CF, cf_opts.clone());
         let spent_outpoints_mempool_cfd: ColumnFamilyDescriptor =
             ColumnFamilyDescriptor::new(SPENT_OUTPOINTS_MEMPOOL_CF, cf_opts.clone());
+        let transactions_cfd: ColumnFamilyDescriptor =
+            ColumnFamilyDescriptor::new(TRANSACTIONS_CF, cf_opts.clone());
+        let transactions_mempool_cfd: ColumnFamilyDescriptor =
+            ColumnFamilyDescriptor::new(TRANSACTIONS_MEMPOOL_CF, cf_opts.clone());
         let settings_cfd: ColumnFamilyDescriptor =
             ColumnFamilyDescriptor::new(SETTINGS_CF, cf_opts.clone());
         let subscriptions_cfd: ColumnFamilyDescriptor =
@@ -173,6 +180,8 @@ impl RocksDB {
                 outpoint_to_script_pubkey_cfd,
                 outpoint_to_script_pubkey_mempool_cfd,
                 spent_outpoints_mempool_cfd,
+                transactions_cfd,
+                transactions_mempool_cfd,
                 settings_cfd,
                 subscriptions_cfd,
             ],
@@ -1104,6 +1113,51 @@ impl RocksDB {
         Ok(())
     }
 
+    pub fn get_transaction_raw(&self, txid: &Txid, mempool: bool) -> DBResult<Vec<u8>> {
+        let cf_handle = if mempool {
+            self.cf_handle(TRANSACTIONS_MEMPOOL_CF)?
+        } else {
+            self.cf_handle(TRANSACTIONS_CF)?
+        };
+
+        self.get_option_vec_data(&cf_handle, txid_to_bytes(txid))
+            .transpose()
+            .ok_or(RocksDBError::NotFound(format!(
+                "transaction not found: {}",
+                txid
+            )))?
+    }
+
+    pub fn get_transaction(&self, txid: &Txid, mempool: bool) -> DBResult<Transaction> {
+        let cf_handle = if mempool {
+            self.cf_handle(TRANSACTIONS_MEMPOOL_CF)?
+        } else {
+            self.cf_handle(TRANSACTIONS_CF)?
+        };
+
+        let transaction = self
+            .get_option_vec_data(&cf_handle, txid_to_bytes(txid))
+            .mapped()?
+            .ok_or(RocksDBError::NotFound(format!(
+                "transaction not found: {}",
+                txid
+            )))?;
+
+        Ok(transaction)
+    }
+
+    pub fn delete_transaction(&self, txid: &Txid, mempool: bool) -> DBResult<()> {
+        let cf_handle = if mempool {
+            self.cf_handle(TRANSACTIONS_MEMPOOL_CF)?
+        } else {
+            self.cf_handle(TRANSACTIONS_CF)?
+        };
+
+        self.db.delete_cf(&cf_handle, txid_to_bytes(txid))?;
+
+        Ok(())
+    }
+
     pub fn batch_update(&self, update: BatchUpdate, mempool: bool) -> DBResult<()> {
         let mut batch = WriteBatch::default();
 
@@ -1278,6 +1332,23 @@ impl RocksDB {
                 self.cf_handle(SPENT_OUTPOINTS_MEMPOOL_CF)?;
             for outpoint in update.spent_outpoints_in_mempool {
                 batch.put_cf(&cf_handle, outpoint_to_bytes(&outpoint), vec![1]);
+            }
+        }
+
+        // 16. Update transactions
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = if mempool {
+                self.cf_handle(TRANSACTIONS_MEMPOOL_CF)?
+            } else {
+                self.cf_handle(TRANSACTIONS_CF)?
+            };
+
+            for (txid, transaction) in update.transactions {
+                batch.put_cf(
+                    &cf_handle,
+                    txid_to_bytes(&txid),
+                    consensus::serialize(&transaction),
+                );
             }
         }
 

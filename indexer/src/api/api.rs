@@ -14,7 +14,7 @@ use {
     tracing::error,
     types::{
         AddressData, Block, BlockTip, InscriptionId, Pagination, PaginationResponse, RuneResponse,
-        Status, Subscription, Transaction, TxOut, TxOutEntry,
+        Status, Subscription, Transaction, TxOutEntry,
     },
     uuid::Uuid,
 };
@@ -124,28 +124,50 @@ pub fn broadcast_transaction(index: Arc<Index>, client: Client, hex: &str) -> Re
     Ok(())
 }
 
-pub fn transaction(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Transaction> {
-    let transaction = client.get_raw_transaction(txid, None)?;
+pub fn bitcoin_transaction_raw(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Vec<u8>> {
+    if index.is_indexing_bitcoin_transactions() {
+        Ok(index.get_transaction_raw(txid)?)
+    } else {
+        Ok(consensus::serialize(
+            &client.get_raw_transaction(txid, None)?,
+        ))
+    }
+}
 
-    let mut tx_outs: Vec<TxOut> = Vec::new();
-    for (vout, tx_out) in transaction.output.iter().enumerate() {
+pub fn bitcoin_transaction_hex(index: Arc<Index>, client: Client, txid: &Txid) -> Result<String> {
+    let transaction = bitcoin_transaction_raw(index, client, txid)?;
+    Ok(hex::encode(transaction))
+}
+
+pub fn bitcoin_transaction(
+    index: Arc<Index>,
+    client: Client,
+    txid: &Txid,
+) -> Result<bitcoin::Transaction> {
+    if index.is_indexing_bitcoin_transactions() {
+        Ok(index.get_transaction(txid)?)
+    } else {
+        Ok(client.get_raw_transaction(txid, None)?)
+    }
+}
+
+pub fn transaction(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Transaction> {
+    let mut transaction = Transaction::from(if index.is_indexing_bitcoin_transactions() {
+        index.get_transaction(txid)?
+    } else {
+        client.get_raw_transaction(txid, None)?
+    });
+
+    for (vout, tx_out) in transaction.output.iter_mut().enumerate() {
         match index.get_tx_out(&OutPoint {
             txid: txid.clone(),
             vout: vout as u32,
         }) {
             Ok(tx_out_entry) => {
-                tx_outs.push(TxOut {
-                    value: tx_out.value.to_sat(),
-                    script_pubkey: tx_out.script_pubkey.clone(),
-                    runes: tx_out_entry.runes,
-                });
+                tx_out.runes = tx_out_entry.runes;
             }
             Err(IndexError::StoreError(StoreError::NotFound(_))) => {
-                tx_outs.push(TxOut {
-                    value: tx_out.value.to_sat(),
-                    script_pubkey: tx_out.script_pubkey.clone(),
-                    runes: vec![],
-                });
+                // Ignore.
             }
             Err(e) => {
                 error!("Error getting tx out: {}", e);
@@ -153,10 +175,7 @@ pub fn transaction(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Tra
         }
     }
 
-    Ok(Transaction {
-        input: transaction.input,
-        output: tx_outs,
-    })
+    Ok(transaction)
 }
 
 pub fn mempool_txids(index: Arc<Index>) -> Result<Vec<Txid>> {

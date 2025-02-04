@@ -7,7 +7,7 @@ use {
             TransactionStateChange,
         },
     },
-    bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
+    bitcoin::{BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
     ordinals::{Rune, RuneId},
     std::{
         cmp,
@@ -193,6 +193,10 @@ impl UpdaterCache {
         tx_state_changes: TransactionStateChange,
     ) -> () {
         self.update.tx_state_changes.insert(txid, tx_state_changes);
+    }
+
+    pub fn set_transaction(&mut self, txid: Txid, transaction: Transaction) -> () {
+        self.update.transactions.insert(txid, transaction);
     }
 
     pub fn add_rune_transaction(&mut self, rune_id: RuneId, txid: Txid) -> () {
