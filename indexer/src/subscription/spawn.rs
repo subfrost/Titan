@@ -108,7 +108,7 @@ pub fn spawn_subscription_tasks(
     };
 
     // Create the event sender
-    let (event_sender, event_receiver) = mpsc::channel::<Event>(100);
+    let (event_sender, event_receiver) = mpsc::channel::<Event>(10000);
 
     // Clone the receiver for the dispatcher
     let dispatcher_rx = shutdown_rx.clone();

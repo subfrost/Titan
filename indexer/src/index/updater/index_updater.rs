@@ -36,7 +36,7 @@ use {
     store_lock::StoreWithLock,
     thiserror::Error,
     tokio::sync::mpsc::{error::SendError, Sender},
-    tracing::{debug, error, info, trace, warn},
+    tracing::{debug, error, info, trace},
     transaction_parser::TransactionParser,
     transaction_updater::TransactionUpdater,
     types::{Block, Event},
@@ -204,17 +204,17 @@ impl Updater {
                     &mut cache,
                 )?;
 
-                if let Some(sender) = &self.sender {
-                    sender.blocking_send(Event::NewBlock {
-                        block_height: cache.get_block_count(),
-                        block_hash: block.header.block_hash(),
-                    })?;
-                }
+                cache.add_event(Event::NewBlock {
+                    block_height: cache.get_block_count(),
+                    block_hash: block.header.block_hash(),
+                });
 
                 cache.set_new_block(block);
 
                 if cache.should_flush(commit_interval) {
+                    cache.add_address_events();
                     cache.flush()?;
+                    cache.send_events(&self.sender)?;
                 }
 
                 progress_bar.inc(1);
@@ -231,7 +231,9 @@ impl Updater {
         }
 
         // Flush the cache to the database
+        cache.add_address_events();
         cache.flush()?;
+        cache.send_events(&self.sender)?;
 
         if !self.shutdown_flag.load(Ordering::SeqCst) {
             self.is_at_tip.store(true, Ordering::Release);
@@ -296,7 +298,9 @@ impl Updater {
                 address_updater.batch_update_script_pubkey(&mut cache)?;
             }
 
+            cache.add_address_events();
             cache.flush()?;
+            cache.send_events(&self.sender)?;
         }
 
         let removed_txns = {
@@ -414,8 +418,6 @@ impl Updater {
             }
         }
 
-        transaction_updater.notify_script_pubkeys_updated(height as u32)?;
-
         // 5) If index_addresses is enabled, do one big pass
         if self.settings.index_addresses {
             let _timer = self
@@ -443,18 +445,18 @@ impl Updater {
         if self.index_tx(txid, tx, &mut cache, Some(&mut address_updater))? {
             self.mempool_debouncer.write().unwrap().mark_as_added(*txid);
 
-            if let Some(sender) = &self.sender {
-                sender.blocking_send(Event::TransactionsAdded {
-                    txids: vec![*txid].into_iter().collect(),
-                })?;
-            }
+            cache.add_event(Event::TransactionsAdded {
+                txids: vec![*txid].into_iter().collect(),
+            });
         }
 
         if self.settings.index_addresses {
             address_updater.batch_update_script_pubkey(&mut cache)?;
         }
 
+        cache.add_address_events();
         cache.flush()?;
+        cache.send_events(&self.sender)?;
         Ok(())
     }
 
@@ -504,7 +506,6 @@ impl Updater {
 
             // The same "save" logic as before
             transaction_updater.save(height as u32, *txid, tx, &result)?;
-            transaction_updater.notify_script_pubkeys_updated(height as u32)?;
         }
 
         if cache.settings.mempool {

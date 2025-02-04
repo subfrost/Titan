@@ -15,8 +15,9 @@ use {
         str::FromStr,
         sync::Arc,
     },
+    tokio::sync::mpsc,
     tracing::{info, trace},
-    types::{Block, InscriptionId, TxOutEntry},
+    types::{Block, Event, InscriptionId, TxOutEntry},
 };
 
 type Result<T> = std::result::Result<T, StoreError>;
@@ -41,6 +42,7 @@ pub(super) struct UpdaterCache {
     db: Arc<StoreWithLock>,
     update: BatchUpdate,
     delete: BatchDelete,
+    events: Vec<Event>,
     first_block_height: u64,
     last_block_height: Option<u64>,
     pub settings: UpdaterCacheSettings,
@@ -61,6 +63,7 @@ impl UpdaterCache {
             db,
             update: BatchUpdate::new(rune_count, block_count, purged_blocks_count),
             delete: BatchDelete::new(),
+            events: vec![],
             first_block_height: block_count,
             last_block_height: None,
             settings,
@@ -329,6 +332,10 @@ impl UpdaterCache {
         self.update.spent_outpoints_in_mempool.extend(outpoints);
     }
 
+    pub fn add_event(&mut self, event: Event) {
+        self.events.push(event);
+    }
+
     pub fn should_flush(&self, max_size: usize) -> bool {
         self.update.blocks.len() >= max_size
     }
@@ -362,6 +369,31 @@ impl UpdaterCache {
         self.delete = BatchDelete::new();
         self.first_block_height = self.update.block_count;
         self.last_block_height = None;
+
+        Ok(())
+    }
+
+    pub fn add_address_events(&mut self) {
+        for script_pubkey in self.update.script_pubkeys.keys() {
+            self.events.push(Event::AddressModified {
+                address: script_pubkey.to_string(),
+                block_height: self.get_block_count() as u32,
+                in_mempool: self.settings.mempool,
+            });
+        }
+    }
+
+    pub fn send_events(
+        &mut self,
+        event_sender: &Option<mpsc::Sender<Event>>,
+    ) -> std::result::Result<(), mpsc::error::SendError<Event>> {
+        if let Some(sender) = event_sender {
+            for event in self.events.iter() {
+                sender.blocking_send(event.clone())?;
+            }
+        }
+
+        self.events = vec![];
 
         Ok(())
     }
