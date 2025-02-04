@@ -38,7 +38,6 @@ impl Client {
     }
 
     /// GET /block/{query}
-    /// For simplicity, we deserialize into serde_json::Value.
     pub async fn get_block(&self, query: &str) -> Result<Block, Box<dyn Error>> {
         let url = format!("{}/block/{}", self.base_url, query);
         let resp = self.http_client.get(&url).send().await?;

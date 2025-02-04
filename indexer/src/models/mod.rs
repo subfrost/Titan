@@ -11,5 +11,4 @@ mod lot;
 mod media;
 mod rune;
 mod script_pubkey;
-mod transaction;
 mod transaction_state_change;
