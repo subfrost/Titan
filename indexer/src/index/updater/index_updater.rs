@@ -19,7 +19,7 @@ use {
     cache::{UpdaterCache, UpdaterCacheSettings},
     indicatif::{ProgressBar, ProgressStyle},
     mempool::MempoolError,
-    mempool_debouncer::MempoolDebouncer,
+    mempool_removal_grace::MempoolRemovalGrace,
     ordinals::{Rune, RuneId, SpacedRune, Terms},
     prometheus::HistogramVec,
     rollback::{Rollback, RollbackError},
@@ -105,7 +105,7 @@ pub struct Updater {
     shutdown_flag: Arc<AtomicBool>,
 
     mempool_indexing: Mutex<bool>,
-    mempool_debouncer: RwLock<MempoolDebouncer>,
+    mempool_debouncer: RwLock<MempoolRemovalGrace>,
 
     transaction_update: RwLock<TransactionUpdate>,
 
@@ -123,14 +123,14 @@ impl Updater {
         shutdown_flag: Arc<AtomicBool>,
         sender: Option<Sender<Event>>,
     ) -> Self {
-        let debounce_duration = Duration::from_millis(settings.main_loop_interval * 2);
+        let debounce_duration = Duration::from_millis(settings.main_loop_interval);
         Self {
             db: Arc::new(StoreWithLock::new(db)),
             settings,
             is_at_tip: AtomicBool::new(false),
             mempool_indexing: Mutex::new(false),
             shutdown_flag,
-            mempool_debouncer: RwLock::new(MempoolDebouncer::new(debounce_duration)),
+            mempool_debouncer: RwLock::new(MempoolRemovalGrace::new(debounce_duration)),
             transaction_update: RwLock::new(TransactionUpdate::default()),
             sender,
             latency: metrics.histogram_vec(
@@ -287,7 +287,9 @@ impl Updater {
             let mut address_updater = AddressUpdater::new();
             for txid in tx_order {
                 let tx = tx_map.get(&txid).unwrap();
-                self.index_tx(&txid, &tx, &mut cache, Some(&mut address_updater))?;
+                if self.index_tx(&txid, &tx, &mut cache, Some(&mut address_updater))? {
+                    self.mempool_debouncer.write().unwrap().mark_as_added(txid);
+                }
             }
 
             if self.settings.index_addresses {
@@ -297,9 +299,15 @@ impl Updater {
             cache.flush()?;
         }
 
-        let removed_len = removed_txs.len();
-        if removed_len > 0 {
-            self.remove_txs(&removed_txs, true)?;
+        let removed_txns = {
+            let mut debouncer = self.mempool_debouncer.write().unwrap();
+            debouncer.expire_old_entries();
+            debouncer.filter_removable_txs(&removed_txs)
+        };
+
+        let removed_len = removed_txns.len();
+        if removed_txns.len() > 0 {
+            self.remove_txs(&removed_txns, true)?;
         }
 
         if new_txs_len > 0 || removed_len > 0 {
@@ -433,6 +441,8 @@ impl Updater {
 
         let mut address_updater = AddressUpdater::new();
         if self.index_tx(txid, tx, &mut cache, Some(&mut address_updater))? {
+            self.mempool_debouncer.write().unwrap().mark_as_added(*txid);
+
             if let Some(sender) = &self.sender {
                 sender.blocking_send(Event::TransactionsAdded {
                     txids: vec![*txid].into_iter().collect(),
