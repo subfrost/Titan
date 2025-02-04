@@ -48,7 +48,7 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
     ) -> Result<Self> {
         let minimum_rune = Rune::minimum_at_height(chain.into(), Height(height));
 
-        let min_rune_height = Rune::first_rune_height(chain.into());
+        let min_rune_height = chain.first_rune_height();
         let should_index_runes = height >= min_rune_height;
 
         Ok(Self {

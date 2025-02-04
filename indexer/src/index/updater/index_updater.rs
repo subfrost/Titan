@@ -180,7 +180,7 @@ impl Updater {
                     ) {
                         Ok(()) => (),
                         Err(ReorgError::Recoverable { height, depth }) => {
-                            self.handle_reorg(&block, height, depth)?;
+                            self.handle_reorg(height, depth)?;
                             return Err(ReorgError::Recoverable { height, depth }.into());
                         }
                         Err(e) => {
@@ -535,7 +535,7 @@ impl Updater {
         }
     }
 
-    fn handle_reorg(&self, _block: &BitcoinBlock, height: u64, depth: u64) -> Result<()> {
+    fn handle_reorg(&self, height: u64, depth: u64) -> Result<()> {
         // we're not at tip anymore.
         self.is_at_tip.store(false, Ordering::Release);
 

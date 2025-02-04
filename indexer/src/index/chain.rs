@@ -34,8 +34,8 @@ impl Chain {
         self.into()
     }
     
-    pub(crate) fn first_rune_height(self) -> u64 {
-        Rune::first_rune_height(self.into()) as u64
+    pub(crate) fn first_rune_height(self) -> u32 {
+        Rune::first_rune_height(self.into())
     }
 
     pub(crate) fn address_from_script(self, script: &Script) -> Result<Address, FromScriptError> {
