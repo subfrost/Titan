@@ -79,7 +79,7 @@ impl<'a> TransactionUpdater<'a> {
             self.mint_rune(height, txid, &minted.rune_id, minted.amount)?;
         }
 
-        if let Some((id, rune)) = transaction_state_change.etched {
+        if let Some((id, _)) = transaction_state_change.etched {
             self.etched_rune(height, txid, &id)?;
         }
 

@@ -17,7 +17,7 @@ pub enum MempoolError {
 
 pub fn fetch_transactions(
     client: &Client,
-    txids: Vec<Txid>,
+    txids: &Vec<Txid>,
     interrupt: Arc<AtomicBool>,
 ) -> HashMap<Txid, Transaction> {
     txids

@@ -13,4 +13,5 @@ mod mempool_debouncer;
 mod rollback;
 mod store_lock;
 mod transaction_parser;
+mod transaction_update;
 mod transaction_updater;

@@ -164,6 +164,10 @@ impl Index {
                 }
             }
 
+            if let Err(e) = self.updater.notify_tx_updates() {
+                error!("Failed to notify tx updates: {}", e);
+            }
+
             thread::sleep(Duration::from_millis(self.settings.main_loop_interval));
         }
 

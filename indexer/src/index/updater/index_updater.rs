@@ -1,5 +1,8 @@
 use {
-    super::*,
+    super::{
+        transaction_update::{TransactionChangeSet, TransactionUpdate},
+        *,
+    },
     crate::{
         index::{
             metrics::Metrics, store::Store, RpcClientError, RpcClientProvider, Settings, StoreError,
@@ -20,7 +23,6 @@ use {
     ordinals::{Rune, RuneId, SpacedRune, Terms},
     prometheus::HistogramVec,
     rollback::{Rollback, RollbackError},
-    types::{Block, Event},
     std::{
         collections::HashSet,
         fmt::{self, Display, Formatter},
@@ -33,10 +35,11 @@ use {
     },
     store_lock::StoreWithLock,
     thiserror::Error,
-    tokio::sync::mpsc::Sender,
+    tokio::sync::mpsc::{error::SendError, Sender},
     tracing::{debug, error, info, warn},
     transaction_parser::TransactionParser,
     transaction_updater::TransactionUpdater,
+    types::{Block, Event},
 };
 
 #[derive(Debug, Error)]
@@ -82,6 +85,8 @@ pub enum UpdaterError {
     Mempool(#[from] MempoolError),
     #[error("mutex error")]
     Mutex,
+    #[error("event sender error {0}")]
+    EventSender(#[from] SendError<Event>),
 }
 
 impl UpdaterError {
@@ -101,6 +106,8 @@ pub struct Updater {
 
     mempool_indexing: Mutex<bool>,
     mempool_debouncer: RwLock<MempoolDebouncer>,
+
+    transaction_update: RwLock<TransactionUpdate>,
 
     sender: Option<Sender<Event>>,
 
@@ -124,6 +131,7 @@ impl Updater {
             mempool_indexing: Mutex::new(false),
             shutdown_flag,
             mempool_debouncer: RwLock::new(MempoolDebouncer::new(debounce_duration)),
+            transaction_update: RwLock::new(TransactionUpdate::default()),
             sender,
             latency: metrics.histogram_vec(
                 prometheus::HistogramOpts::new("indexer_latency", "Indexer latency"),
@@ -196,6 +204,13 @@ impl Updater {
                     &mut cache,
                 )?;
 
+                if let Some(sender) = &self.sender {
+                    sender.blocking_send(Event::NewBlock {
+                        block_height: cache.get_block_count(),
+                        block_hash: block.header.block_hash(),
+                    })?;
+                }
+
                 cache.set_new_block(block);
 
                 if cache.should_flush(commit_interval) {
@@ -257,7 +272,7 @@ impl Updater {
         // Index new transactions
         let new_txs_len = new_txs.len();
         if new_txs_len > 0 {
-            let tx_map = mempool::fetch_transactions(&client, new_txs, self.shutdown_flag.clone());
+            let tx_map = mempool::fetch_transactions(&client, &new_txs, self.shutdown_flag.clone());
             let tx_order =
                 mempool::sort_transaction_order(&client, &tx_map, self.shutdown_flag.clone())?;
             let _mempool_indexing = self
@@ -284,7 +299,7 @@ impl Updater {
 
         let removed_len = removed_txs.len();
         if removed_len > 0 {
-            self.remove_txs(removed_txs, true)?;
+            self.remove_txs(&removed_txs, true)?;
         }
 
         if new_txs_len > 0 || removed_len > 0 {
@@ -293,6 +308,14 @@ impl Updater {
                 new_txs_len, removed_len
             );
         }
+
+        self.transaction_update
+            .write()
+            .map_err(|_| UpdaterError::Mutex)?
+            .update_mempool(TransactionChangeSet {
+                added: new_txs.into_iter().collect(),
+                removed: removed_txs.into_iter().collect(),
+            });
 
         Ok(())
     }
@@ -369,9 +392,14 @@ impl Updater {
                 .with_label_values(&["index_block_txs"])
                 .start_timer();
 
+            let mut transaction_update = self
+                .transaction_update
+                .write()
+                .map_err(|_| UpdaterError::Mutex)?;
             for (i, txid, result) in block_data {
                 transaction_updater.save(block_height, txid, &bitcoin_block.txdata[i], &result)?;
                 block.tx_ids.push(txid.to_string());
+                transaction_update.add_block_tx(txid);
                 if let Some((id, ..)) = result.etched {
                     block.etched_runes.push(id);
                 }
@@ -404,7 +432,13 @@ impl Updater {
         )?;
 
         let mut address_updater = AddressUpdater::new();
-        self.index_tx(txid, tx, &mut cache, Some(&mut address_updater))?;
+        if self.index_tx(txid, tx, &mut cache, Some(&mut address_updater))? {
+            if let Some(sender) = &self.sender {
+                sender.blocking_send(Event::TransactionsAdded {
+                    txids: vec![*txid].into_iter().collect(),
+                })?;
+            }
+        }
 
         if self.settings.index_addresses {
             address_updater.batch_update_script_pubkey(&mut cache)?;
@@ -420,7 +454,7 @@ impl Updater {
         tx: &Transaction,
         cache: &mut UpdaterCache,
         address_updater: Option<&mut AddressUpdater>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         if cache.does_tx_exist(*txid)? {
             warn!(
                 "Skipping tx {} in {} because it already exists",
@@ -431,7 +465,7 @@ impl Updater {
                     "block"
                 }
             );
-            return Ok(());
+            return Ok(false);
         }
 
         let _timer = self.latency.with_label_values(&["index_tx"]).start_timer();
@@ -467,10 +501,10 @@ impl Updater {
             cache.set_mempool_tx(*txid);
         }
 
-        Ok(())
+        Ok(true)
     }
 
-    fn remove_txs(&self, txids: Vec<Txid>, mempool: bool) -> Result<()> {
+    fn remove_txs(&self, txids: &Vec<Txid>, mempool: bool) -> Result<()> {
         let db = self.db.write();
         let mut rollback_updater = Rollback::new(&db, mempool, self.settings.index_addresses)?;
 
@@ -573,8 +607,13 @@ impl Updater {
 
         let mut rollback_updater = Rollback::new(&db, false, self.settings.index_addresses)?;
 
+        let mut transaction_update = self
+            .transaction_update
+            .write()
+            .map_err(|_| UpdaterError::Mutex)?;
         for tx in block.tx_ids.iter().rev() {
             let txid = Txid::from_str(tx)?;
+            transaction_update.remove_block_tx(txid);
             match db.get_tx_state_changes(&txid, Some(false)) {
                 Ok(tx_state_changes) => {
                     rollback_updater.revert_transaction(&txid, &tx_state_changes)?;
@@ -598,6 +637,37 @@ impl Updater {
         // Delete block
         db.delete_block(&block.header.block_hash())?;
         db.delete_block_hash(height as u64)?;
+
+        Ok(())
+    }
+
+    pub fn notify_tx_updates(&self) -> Result<()> {
+        let categorized = {
+            let transaction_update = self
+                .transaction_update
+                .read()
+                .map_err(|_| UpdaterError::Mutex)?;
+            transaction_update.categorize_to_change_set()
+        };
+
+        if let Some(sender) = &self.sender {
+            if !categorized.added.is_empty() {
+                sender.blocking_send(Event::TransactionsAdded {
+                    txids: categorized.added.into_iter().collect(),
+                })?;
+            }
+
+            if !categorized.removed.is_empty() {
+                sender.blocking_send(Event::TransactionsReplaced {
+                    txids: categorized.removed.into_iter().collect(),
+                })?;
+            }
+        }
+
+        self.transaction_update
+            .write()
+            .map_err(|_| UpdaterError::Mutex)?
+            .reset();
 
         Ok(())
     }
