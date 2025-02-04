@@ -36,7 +36,7 @@ use {
     store_lock::StoreWithLock,
     thiserror::Error,
     tokio::sync::mpsc::{error::SendError, Sender},
-    tracing::{debug, error, info, warn},
+    tracing::{debug, error, info, trace, warn},
     transaction_parser::TransactionParser,
     transaction_updater::TransactionUpdater,
     types::{Block, Event},
@@ -456,7 +456,7 @@ impl Updater {
         address_updater: Option<&mut AddressUpdater>,
     ) -> Result<bool> {
         if cache.does_tx_exist(*txid)? {
-            warn!(
+            trace!(
                 "Skipping tx {} in {} because it already exists",
                 txid,
                 if cache.settings.mempool {
@@ -482,7 +482,7 @@ impl Updater {
 
         let result = transaction_parser.parse(now as u32, 0, tx, *txid)?;
         if result.has_rune_updates() || self.settings.index_addresses {
-            info!("Indexing tx {}", txid);
+            trace!("Indexing tx {}", txid);
 
             // Create a TransactionUpdater that references the optional address_updater
             let mut transaction_updater = TransactionUpdater::new(
@@ -510,7 +510,7 @@ impl Updater {
 
         // Remove transactions that are no longer in mempool
         for txid in txids {
-            info!("Removing tx {}", txid);
+            trace!("Removing tx {}", txid);
             db.remove_mempool_tx(&txid)?;
             match db.get_tx_state_changes(&txid, Some(mempool)) {
                 Ok(tx_state_changes) => {

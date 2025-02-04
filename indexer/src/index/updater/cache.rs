@@ -9,14 +9,14 @@ use {
     },
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
     ordinals::{Rune, RuneId},
-    types::{Block, InscriptionId, TxOutEntry},
     std::{
         cmp,
         collections::{HashMap, HashSet},
         str::FromStr,
         sync::Arc,
     },
-    tracing::info,
+    tracing::{info, trace},
+    types::{Block, InscriptionId, TxOutEntry},
 };
 
 type Result<T> = std::result::Result<T, StoreError>;
@@ -341,12 +341,12 @@ impl UpdaterCache {
 
         if !self.update.is_empty() {
             db.batch_update(self.update.clone(), self.settings.mempool)?;
-            info!("Flushed update: {}", self.update);
+            trace!("Flushed update: {}", self.update);
         }
 
         if !self.delete.is_empty() {
             db.batch_delete(self.delete.clone())?;
-            info!("Flushed delete: {}", self.delete);
+            trace!("Flushed delete: {}", self.delete);
         }
 
         // Clear the cache
