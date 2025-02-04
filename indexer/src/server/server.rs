@@ -10,6 +10,7 @@ use {
         subscription::WebhookSubscriptionManager,
     },
     axum::{
+        body::Bytes,
         extract::{DefaultBodyLimit, Extension, FromRef, Json, Path, Query},
         response::IntoResponse,
         routing::{get, post},
@@ -17,7 +18,7 @@ use {
     },
     axum_server::Handle,
     bitcoin::{address::NetworkUnchecked, Address, OutPoint, Txid},
-    http::StatusCode,
+    http::{header, StatusCode},
     std::{io, net::ToSocketAddrs, sync::Arc},
     tokio::task,
     tower_http::{
@@ -175,12 +176,14 @@ impl Server {
         Path(txid): Path<Txid>,
     ) -> ServerResult {
         task::block_in_place(|| {
-            Ok(Json(api::bitcoin_transaction_raw(
-                index,
-                config.get_new_rpc_client()?,
-                &txid,
-            )?)
-            .into_response())
+            let raw_tx = api::bitcoin_transaction_raw(index, config.get_new_rpc_client()?, &txid)?;
+
+            Ok((
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "application/octet-stream")],
+                Bytes::from(raw_tx),
+            )
+                .into_response())
         })
     }
 
@@ -190,12 +193,15 @@ impl Server {
         Path(txid): Path<Txid>,
     ) -> ServerResult {
         task::block_in_place(|| {
-            Ok(Json(api::bitcoin_transaction_hex(
-                index,
-                config.get_new_rpc_client()?,
-                &txid,
-            )?)
-            .into_response())
+            let hex_string =
+                api::bitcoin_transaction_hex(index, config.get_new_rpc_client()?, &txid)?;
+
+            Ok((
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/plain")],
+                hex_string,
+            )
+                .into_response())
         })
     }
 
