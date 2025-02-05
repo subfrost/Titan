@@ -74,6 +74,10 @@ impl UpdaterCache {
         self.update.rune_count
     }
 
+    pub fn get_block_height_tip(&self) -> u64 {
+        self.update.block_count.saturating_sub(1)
+    }
+
     pub fn get_block_count(&self) -> u64 {
         self.update.block_count
     }
@@ -108,6 +112,12 @@ impl UpdaterCache {
     }
 
     pub fn set_new_block(&mut self, block: Block) -> () {
+        assert_eq!(
+            self.get_block_count(),
+            block.height,
+            "Block height mismatch"
+        );
+
         let hash: BlockHash = block.header.block_hash();
         self.update.blocks.insert(hash, block);
         self.update
@@ -386,7 +396,7 @@ impl UpdaterCache {
                 location: if self.settings.mempool {
                     Location::mempool()
                 } else {
-                    Location::block(self.get_block_count())
+                    Location::block(self.get_block_height_tip())
                 },
             });
         }

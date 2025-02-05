@@ -159,16 +159,17 @@ impl Updater {
         let mut bitcoin_block_count = bitcoin_block_client.get_block_count()?;
 
         // Fetch new blocks if needed.
-        while bitcoin_block_count > cache.get_block_count() {
+        while bitcoin_block_count > cache.get_block_height_tip() {
             let was_at_tip = self.is_at_tip.load(Ordering::Relaxed);
             self.is_at_tip.store(false, Ordering::Release);
 
-            let progress_bar = self.open_progress_bar(cache.get_block_count(), bitcoin_block_count);
+            let progress_bar =
+                self.open_progress_bar(cache.get_block_height_tip(), bitcoin_block_count);
 
             let rx = fetch_blocks_from(
                 Arc::new(self.settings.clone()),
                 cache.get_block_count(),
-                bitcoin_block_count,
+                bitcoin_block_count + 1,
             )?;
 
             let rpc_client = self.settings.get_new_rpc_client()?;
@@ -395,7 +396,7 @@ impl Updater {
             Some(&mut address_updater),
         )?;
 
-        let mut block = Block::empty_block(height as u32, bitcoin_block.header);
+        let mut block = Block::empty_block(height, bitcoin_block.header);
 
         {
             let _timer = self

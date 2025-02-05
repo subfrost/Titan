@@ -41,7 +41,7 @@ pub fn tip(index: Arc<Index>) -> Result<BlockTip> {
     let block_count = index.get_block_count()?;
     let block_hash = index.get_block_hash(block_count - 1)?;
     Ok(BlockTip {
-        height: block_count,
+        height: block_count - 1,
         hash: block_hash.to_string(),
     })
 }
@@ -51,7 +51,7 @@ pub fn status(index: Arc<Index>) -> Result<Status> {
     let block_hash = index.get_block_hash(block_count - 1)?;
     Ok(Status {
         block_tip: BlockTip {
-            height: block_count,
+            height: block_count - 1,
             hash: block_hash.to_string(),
         },
         runes_count: index.get_runes_count()?,

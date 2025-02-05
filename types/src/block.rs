@@ -12,7 +12,7 @@ use {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Block {
-    pub height: u32,
+    pub height: u64,
     pub header: Header,
     pub tx_ids: Vec<String>,
     pub etched_runes: Vec<RuneId>,
@@ -66,7 +66,7 @@ impl BorshSerialize for Block {
 impl BorshDeserialize for Block {
     fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
         // 1) Deserialize `height`
-        let height = u32::deserialize_reader(reader)?;
+        let height = u64::deserialize_reader(reader)?;
 
         // 2) Deserialize `header` manually
         let version = Version::from_consensus(i32::deserialize_reader(reader)?);
@@ -123,7 +123,7 @@ impl BorshDeserialize for Block {
 }
 
 impl Block {
-    pub fn empty_block(height: u32, header: Header) -> Self {
+    pub fn empty_block(height: u64, header: Header) -> Self {
         Self {
             height,
             header,

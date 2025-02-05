@@ -1,8 +1,10 @@
 use {
     bitcoin::BlockHash,
     ordinals::{RuneId, SpacedRune},
-    serde::{Deserialize, Serialize},
-    std::{fmt::{self, Display}, str::FromStr},
+    std::{
+        fmt::{self, Display},
+        str::FromStr,
+    },
 };
 
 #[derive(Debug, thiserror::Error)]
