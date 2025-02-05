@@ -1,6 +1,7 @@
 mod error;
 mod http;
 mod tcp_client;
+mod tcp_client_blocking;
 
 pub use error::*;
 
@@ -12,6 +13,11 @@ pub use titan_types::*;
 
 #[cfg(feature = "tcp_client")]
 pub use tcp_client::{subscribe as subscribe_to_titan, TcpClientError as TitanTcpClientError};
+
+#[cfg(feature = "tcp_client_blocking")]
+pub use tcp_client_blocking::{
+    subscribe as subscribe_to_titan_blocking, TcpClientError as TitanTcpClientBlockingError,
+};
 
 #[cfg(test)]
 mod tests {
