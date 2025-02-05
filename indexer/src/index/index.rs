@@ -14,7 +14,7 @@ use {
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Transaction as BitcoinTransaction, Txid},
     ordinals::{Rune, RuneId},
     std::{
-        collections::{HashMap, HashSet},
+        collections::HashMap,
         sync::{
             atomic::{AtomicBool, Ordering},
             Arc,
@@ -24,9 +24,9 @@ use {
     },
     titan_types::{
         AddressData, AddressTxOut, Block, Event, InscriptionId, Pagination, PaginationResponse,
-        RuneAmount, Transaction, TransactionStatus, TxOutEntry,
+        RuneAmount, Transaction, TxOutEntry,
     },
-    tokio::sync::mpsc::Sender,
+    tokio::{runtime::Runtime, sync::mpsc::Sender},
     tracing::{error, info, warn},
 };
 
@@ -190,12 +190,15 @@ impl Index {
             thread::sleep(Duration::from_millis(self.settings.main_loop_interval));
         }
 
-        self.zmq_manager.join_zmq_listener();
+        let rt = Runtime::new().expect("Failed to create runtime");
+        rt.block_on(self.zmq_manager.join_zmq_listener());
         info!("Closing indexer");
     }
 
-    pub fn start_zmq_listener(&self) {
-        self.zmq_manager.start_zmq_listener(self.updater.clone());
+    pub async fn start_zmq_listener(&self) {
+        self.zmq_manager
+            .start_zmq_listener(self.updater.clone())
+            .await;
     }
 
     pub fn get_block_count(&self) -> Result<u64> {

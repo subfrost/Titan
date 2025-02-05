@@ -33,4 +33,4 @@ tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
-zmq = { workspace = true }
+async_zmq = { workspace = true }

@@ -137,6 +137,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "async_zmq"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "499c7104563d51146553fb0963f00210d8825833789e0ed270dd96aeeff6ac93"
+dependencies = [
+ "futures",
+ "mio 0.6.23",
+ "once_cell",
+ "slab",
+ "thiserror 1.0.69",
+ "zmq",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
