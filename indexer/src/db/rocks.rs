@@ -75,6 +75,7 @@ const SUBSCRIPTIONS_CF: &str = "subscriptions";
 
 const INDEX_SPENT_OUTPUTS_KEY: &str = "index_spent_outputs";
 const INDEX_ADDRESSES_KEY: &str = "index_addresses";
+const INDEX_BITCOIN_TRANSACTIONS_KEY: &str = "index_bitcoin_transactions";
 
 const BLOCK_COUNT_KEY: &str = "block_count";
 const PURGED_BLOCKS_COUNT_KEY: &str = "purged_blocks_count";
@@ -248,6 +249,25 @@ impl RocksDB {
         self.db.put_cf(
             &cf_handle,
             INDEX_ADDRESSES_KEY,
+            (value as u64).to_le_bytes().to_vec(),
+        )?;
+        Ok(())
+    }
+
+    pub fn is_index_bitcoin_transactions(&self) -> DBResult<Option<bool>> {
+        let cf_handle = self.cf_handle(SETTINGS_CF)?;
+        let val: Option<u64> = self
+            .get_option_vec_data(&cf_handle, INDEX_BITCOIN_TRANSACTIONS_KEY)
+            .mapped()?;
+
+        Ok(val.map(|v| v == 1))
+    }
+
+    pub fn set_index_bitcoin_transactions(&self, value: bool) -> DBResult<()> {
+        let cf_handle = self.cf_handle(SETTINGS_CF)?;
+        self.db.put_cf(
+            &cf_handle,
+            INDEX_BITCOIN_TRANSACTIONS_KEY,
             (value as u64).to_le_bytes().to_vec(),
         )?;
         Ok(())

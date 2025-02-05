@@ -112,6 +112,25 @@ impl Index {
             _ => {}
         }
 
+        let db_index_bitcoin_transactions = self.db.is_index_bitcoin_transactions()?;
+        match (
+            self.settings.index_bitcoin_transactions,
+            db_index_bitcoin_transactions,
+        ) {
+            (true, Some(false)) => {
+                return Err(IndexError::InvalidIndex(
+                    "index_bitcoin_transactions is not set. Disable index_bitcoin_transactions in settings or clean up the database".to_string(),
+                ));
+            }
+            (true, None) => {
+                self.db.set_index_bitcoin_transactions(true)?;
+            }
+            (false, Some(true)) | (false, None) => {
+                self.db.set_index_bitcoin_transactions(false)?;
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 
