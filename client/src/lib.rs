@@ -11,7 +11,7 @@ pub use http::{
 pub use titan_types::*;
 
 #[cfg(feature = "tcp_client")]
-pub use tcp_client::subscribe as subscribe_to_titan;
+pub use tcp_client::{subscribe as subscribe_to_titan, TcpClientError as TitanTcpClientError};
 
 #[cfg(test)]
 mod tests {

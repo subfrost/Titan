@@ -1,5 +1,5 @@
 use serde_json;
-use std::error::Error;
+use thiserror::Error;
 #[cfg(feature = "tcp_client")]
 use titan_types::{Event, TcpSubscriptionRequest};
 use tokio::{
@@ -9,6 +9,14 @@ use tokio::{
 };
 use tracing::{error, info, warn};
 
+#[derive(Debug, Error)]
+pub enum TcpClientError {
+    #[error("io error: {0}")]
+    IOError(#[from] std::io::Error),
+    #[error("serde error: {0}")]
+    SerdeError(#[from] serde_json::Error),
+}
+
 /// Connect to the TCP subscription server at `addr` and subscribe
 /// using the given request. Returns a receiver for incoming events.
 /// The provided shutdown_rx receiver is used to signal a graceful shutdown.
@@ -17,7 +25,7 @@ pub async fn subscribe(
     addr: &str,
     subscription_request: TcpSubscriptionRequest,
     mut shutdown_rx: watch::Receiver<()>,
-) -> Result<mpsc::Receiver<Event>, Box<dyn Error>> {
+) -> Result<mpsc::Receiver<Event>, TcpClientError> {
     // Connect to the TCP server.
     let stream = TcpStream::connect(addr).await?;
     let (reader, mut writer) = stream.into_split();
