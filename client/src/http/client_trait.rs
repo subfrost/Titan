@@ -8,8 +8,6 @@ use titan_types::{
 };
 
 /// Trait for all **async** methods.
-///
-/// Each method is `async fn` returning a `Future` that must be `.await`ed within an async runtime (e.g., `tokio`).
 #[async_trait]
 pub trait TitanApiAsync {
     /// Returns the node's status (e.g., network info, block height).
@@ -81,9 +79,6 @@ pub trait TitanApiAsync {
 }
 
 /// Trait for all **blocking** (synchronous) methods.
-///
-/// Each method blocks the current thread until the request completes.  
-/// Internally, this will use `reqwest::blocking` or a similar blocking approach.
 pub trait TitanApiSync {
     /// Returns the node's status in a **blocking** manner.
     fn get_status(&self) -> Result<Status, Error>;

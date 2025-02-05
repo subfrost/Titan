@@ -1,4 +1,4 @@
-use bitcoin::hex::HexToArrayError;
+use bitcoin::{consensus, hex::HexToArrayError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -17,4 +17,7 @@ pub enum Error {
 
     #[error("hex error: {0}")]
     HexToArrayError(#[from] HexToArrayError),
+
+    #[error("bitcoin consensus error: {0}")]
+    BitcoinConsensusError(#[from] consensus::encode::Error),
 }
