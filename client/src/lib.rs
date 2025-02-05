@@ -1,9 +1,13 @@
-mod http_client;
-mod tcp_client;
 mod error;
+mod http;
+mod tcp_client;
 
 pub use error::*;
-pub use http_client::{Client as TitanClient, TitanApi};
+
+pub use http::{
+    AsyncClient as TitanClient, SyncClient as TitanBlockingClient, TitanApiAsync as TitanApi,
+    TitanApiSync as TitanApiBlocking,
+};
 pub use titan_types::*;
 
 #[cfg(feature = "tcp_client")]
@@ -20,7 +24,7 @@ mod tests {
     };
 
     // Import the HTTP and TCP client functions.
-    use crate::http_client::{Client as HttpClient, TitanApi};
+    use crate::http::{AsyncClient as HttpClient, TitanApiAsync as TitanApi};
     #[cfg(feature = "tcp_client")]
     use crate::tcp_client::subscribe;
 

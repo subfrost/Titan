@@ -27,7 +27,7 @@ ordinals = "0.0.14"
 prometheus = "0.13.4"
 rayon = "1.10.0"
 regex = "1.11.1"
-reqwest = { version = "0.12.12", features = ["json"] }
+reqwest = { version = "0.12.12", features = ["json", "blocking"] }
 rocksdb = "0.22.0"
 serde = "1.0.216"
 serde_json = "1.0.133"
