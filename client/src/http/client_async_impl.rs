@@ -7,6 +7,7 @@ use crate::Error;
 
 use super::TitanApiAsync;
 
+#[derive(Clone)]
 pub struct AsyncClient {
     /// The async HTTP client from `reqwest`.
     http_client: AsyncReqwestClient,

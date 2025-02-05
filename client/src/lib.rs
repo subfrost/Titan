@@ -43,9 +43,9 @@ mod tests {
         let tcp_addr = "127.0.0.1:8080";
         let subscription_request = TcpSubscriptionRequest {
             subscribe: vec![
-                "TransactionsAdded".to_string(),
-                "TransactionsReplaced".to_string(),
-                "NewBlock".to_string(),
+                EventType::TransactionsAdded,
+                EventType::TransactionsReplaced,
+                EventType::NewBlock,
             ],
         };
 

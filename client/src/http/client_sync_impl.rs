@@ -7,6 +7,7 @@ use crate::Error;
 
 use super::TitanApiSync;
 
+#[derive(Clone)]
 pub struct SyncClient {
     /// The **blocking** HTTP client from `reqwest::blocking`.
     http_client: BlockingReqwestClient,

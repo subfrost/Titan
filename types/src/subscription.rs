@@ -18,5 +18,5 @@ pub struct Subscription {
 ///   {"subscribe": ["RuneEtched", "RuneMinted"]}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TcpSubscriptionRequest {
-    pub subscribe: Vec<String>,
+    pub subscribe: Vec<EventType>,
 }

@@ -16,7 +16,7 @@ use uuid::Uuid;
 pub struct TcpSubscription {
     pub id: Uuid,
     /// The set of event types (as strings) the client wants.
-    pub event_types: HashSet<String>,
+    pub event_types: HashSet<EventType>,
     /// Channel sender to deliver events to this client.
     pub sender: mpsc::Sender<Event>,
 }
@@ -48,7 +48,7 @@ impl TcpSubscriptionManager {
     pub async fn broadcast(&self, event: &Event) {
         // Assume you can derive a string event type from your event.
         // For example, if you have a function or trait implementation:
-        let event_type: String = EventType::from(event.clone()).into(); // adjust as needed
+        let event_type: EventType = EventType::from(event.clone()); // adjust as needed
 
         let subs = self.subscriptions.read().await;
         for (id, sub) in subs.iter() {
@@ -117,7 +117,7 @@ async fn handle_tcp_connection(
     let request: TcpSubscriptionRequest = serde_json::from_str(buf.trim())?;
     info!("Received TCP subscription request: {:?}", request);
 
-    let event_types: HashSet<String> = request.subscribe.into_iter().collect();
+    let event_types: HashSet<EventType> = request.subscribe.into_iter().collect();
 
     // Create an mpsc channel for delivering events to this connection.
     let (tx, mut rx) = mpsc::channel::<Event>(100);
