@@ -6,11 +6,20 @@ use {
 };
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct TransactionStatus {
+    pub height: u64,
+    pub hash: String,
+    pub confirmed: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Transaction {
     pub version: i32,
     pub lock_time: u32,
     pub input: Vec<TxIn>,
     pub output: Vec<TxOut>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<TransactionStatus>,
 }
 
 impl From<bitcoin::Transaction> for Transaction {
@@ -28,6 +37,7 @@ impl From<bitcoin::Transaction> for Transaction {
                     runes: vec![],
                 })
                 .collect(),
+            status: None,
         }
     }
 }

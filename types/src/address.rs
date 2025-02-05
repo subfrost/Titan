@@ -1,5 +1,5 @@
 use {
-    crate::{RuneAmount, TxOutEntry},
+    crate::{transaction::TransactionStatus, RuneAmount, TxOutEntry},
     bitcoin::OutPoint,
     serde::{Deserialize, Serialize},
 };
@@ -16,6 +16,8 @@ pub struct AddressTxOut {
     pub outpoint: OutPoint,
     pub value: u64,
     pub runes: Vec<RuneAmount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<TransactionStatus>,
 }
 
 impl From<(OutPoint, TxOutEntry)> for AddressTxOut {
@@ -24,6 +26,7 @@ impl From<(OutPoint, TxOutEntry)> for AddressTxOut {
             outpoint,
             value: tx_out.value,
             runes: tx_out.runes,
+            status: None,
         }
     }
 }

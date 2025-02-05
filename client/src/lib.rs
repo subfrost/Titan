@@ -1,7 +1,9 @@
 mod http_client;
 mod tcp_client;
+mod error;
 
-pub use http_client::Client as TitanClient;
+pub use error::*;
+pub use http_client::{Client as TitanClient, TitanApi};
 pub use titan_types::*;
 
 #[cfg(feature = "tcp_client")]
@@ -18,7 +20,7 @@ mod tests {
     };
 
     // Import the HTTP and TCP client functions.
-    use crate::http_client::Client as HttpClient;
+    use crate::http_client::{Client as HttpClient, TitanApi};
     #[cfg(feature = "tcp_client")]
     use crate::tcp_client::subscribe;
 
@@ -90,7 +92,7 @@ mod tests {
     #[tokio::test]
     async fn test_http_status_tip_e2e() -> Result<(), Box<dyn Error>> {
         let base_url = "http://localhost:3030";
-        let client = HttpClient::new(base_url);
+        let client = TitanClient::new(base_url);
 
         println!("Fetching HTTP status from {}...", base_url);
         match client.get_status().await {

@@ -1,7 +1,7 @@
 use {
     super::{
         content::{content_response, AcceptEncoding, ContentError},
-        query,
+        query::{to_hash, to_rune_id},
     },
     crate::{
         index::{Index, IndexError, StoreError},
@@ -12,8 +12,8 @@ use {
     http::HeaderMap,
     std::sync::Arc,
     titan_types::{
-        AddressData, Block, BlockTip, InscriptionId, Pagination, PaginationResponse, RuneResponse,
-        Status, Subscription, Transaction, TxOutEntry,
+        query, AddressData, Block, BlockTip, InscriptionId, Pagination, PaginationResponse,
+        RuneResponse, Status, Subscription, Transaction, TxOutEntry,
     },
     tracing::error,
     uuid::Uuid,
@@ -60,7 +60,7 @@ pub fn status(index: Arc<Index>) -> Result<Status> {
 }
 
 pub fn block(index: Arc<Index>, block: &query::Block) -> Result<Block> {
-    let hash = block.to_hash(&index)?;
+    let hash = to_hash(block, &index)?;
     Ok(index.get_block_by_hash(&hash)?)
 }
 
@@ -81,7 +81,7 @@ pub fn inscription_content(
 }
 
 pub fn rune(index: Arc<Index>, rune_query: &query::Rune) -> Result<RuneResponse> {
-    let rune_id = rune_query.to_rune_id(&index)?;
+    let rune_id = to_rune_id(rune_query, &index)?;
     let block_count = index.get_block_count()?;
     let rune_response = index
         .get_rune(&rune_id)?
@@ -112,7 +112,7 @@ pub fn last_rune_transactions(
     rune_query: &query::Rune,
     pagination: Option<Pagination>,
 ) -> Result<PaginationResponse<Txid>> {
-    let rune_id = rune_query.to_rune_id(&index)?;
+    let rune_id = to_rune_id(rune_query, &index)?;
     let transactions = index.get_last_rune_transactions(&rune_id, pagination, None)?;
     Ok(transactions)
 }

@@ -20,7 +20,7 @@ use {
     bitcoin::{address::NetworkUnchecked, Address, OutPoint, Txid},
     http::{header, StatusCode},
     std::{io, net::ToSocketAddrs, sync::Arc},
-    titan_types::{InscriptionId, Pagination, Subscription},
+    titan_types::{query, InscriptionId, Pagination, Subscription},
     tokio::task,
     tower_http::{
         compression::CompressionLayer,
@@ -130,7 +130,7 @@ impl Server {
 
     async fn block(
         Extension(index): Extension<Arc<Index>>,
-        Path(DeserializeFromStr(query)): Path<DeserializeFromStr<api::query::Block>>,
+        Path(DeserializeFromStr(query)): Path<DeserializeFromStr<query::Block>>,
     ) -> ServerResult {
         task::block_in_place(|| Ok(Json(api::block(index, &query)?).into_response()))
     }
@@ -156,7 +156,7 @@ impl Server {
         Extension(index): Extension<Arc<Index>>,
         Extension(config): Extension<Arc<ServerConfig>>,
         Path(txid): Path<Txid>,
-        Query(query): Query<api::query::Transaction>,
+        Query(query): Query<query::Transaction>,
     ) -> ServerResult {
         task::block_in_place(|| {
             if query.with_runes {
@@ -223,14 +223,14 @@ impl Server {
 
     async fn rune(
         Extension(index): Extension<Arc<Index>>,
-        Path(DeserializeFromStr(rune)): Path<DeserializeFromStr<api::query::Rune>>,
+        Path(DeserializeFromStr(rune)): Path<DeserializeFromStr<query::Rune>>,
     ) -> ServerResult {
         task::block_in_place(|| Ok(Json(api::rune(index, &rune)?).into_response()))
     }
 
     async fn rune_transactions(
         Extension(index): Extension<Arc<Index>>,
-        Path(DeserializeFromStr(rune)): Path<DeserializeFromStr<api::query::Rune>>,
+        Path(DeserializeFromStr(rune)): Path<DeserializeFromStr<query::Rune>>,
         Query(pagination): Query<Pagination>,
     ) -> ServerResult {
         task::block_in_place(|| {

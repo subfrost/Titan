@@ -16,6 +16,7 @@ mod block;
 mod event;
 mod inscription_id;
 mod pagination;
+pub mod query;
 mod rune;
 mod stats;
 mod subscription;
