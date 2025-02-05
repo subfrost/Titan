@@ -9,12 +9,12 @@ use {
     },
     crate::{
         index::updater::{ReorgError, UpdaterError},
-        models::{Inscription, RuneEntry},
+        models::{block_id_to_transaction_status, Inscription, RuneEntry},
     },
-    bitcoin::{BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
+    bitcoin::{BlockHash, OutPoint, ScriptBuf, Transaction as BitcoinTransaction, Txid},
     ordinals::{Rune, RuneId},
     std::{
-        collections::HashMap,
+        collections::{HashMap, HashSet},
         sync::{
             atomic::{AtomicBool, Ordering},
             Arc,
@@ -24,7 +24,7 @@ use {
     },
     titan_types::{
         AddressData, AddressTxOut, Block, Event, InscriptionId, Pagination, PaginationResponse,
-        RuneAmount, TxOutEntry,
+        RuneAmount, Transaction, TransactionStatus, TxOutEntry,
     },
     tokio::sync::mpsc::Sender,
     tracing::{error, info, warn},
@@ -255,6 +255,8 @@ impl Index {
     pub fn get_script_pubkey_outpoints(&self, script: &ScriptBuf) -> Result<AddressData> {
         let entry = self.db.get_script_pubkey_entry(script, None)?;
         let outpoints = self.db.get_tx_outs(&entry.utxos, None)?;
+        let outpoint_txns: Vec<Txid> = outpoints.keys().map(|outpoint| outpoint.txid).collect();
+        let txns_confirming_block = self.db.get_transaction_confirming_blocks(&outpoint_txns)?;
 
         let mut runes = HashMap::new();
         let mut value = 0;
@@ -268,7 +270,18 @@ impl Index {
             }
 
             value += tx_out.value;
-            outputs.push(AddressTxOut::from((outpoint, tx_out)));
+
+            let output = AddressTxOut::from((
+                outpoint,
+                tx_out,
+                block_id_to_transaction_status(
+                    txns_confirming_block
+                        .get(&outpoint.txid)
+                        .and_then(|x| x.as_ref()),
+                ),
+            ));
+
+            outputs.push(output);
         }
 
         Ok(AddressData {
@@ -293,7 +306,7 @@ impl Index {
         Ok(self.db.get_transaction(txid, None)?)
     }
 
-    pub fn index_new_transaction(&self, txid: &Txid, tx: &Transaction) {
+    pub fn index_new_transaction(&self, txid: &Txid, tx: &BitcoinTransaction) {
         match self.updater.index_new_tx(txid, tx) {
             Ok(_) => (),
             Err(e) => {

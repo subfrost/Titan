@@ -88,13 +88,3 @@ impl Into<String> for Rune {
         }
     }
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Transaction {
-    #[serde(default = "default_with_runes")]
-    pub with_runes: bool,
-}
-
-fn default_with_runes() -> bool {
-    false
-}

@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, BorshSerialize, BorshDeserialize)]
 pub struct PendingEtch {
     pub divisibility: u8,
     pub premine: u128,

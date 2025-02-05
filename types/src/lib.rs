@@ -1,14 +1,13 @@
 pub use {
     address::{AddressData, AddressTxOut},
     block::Block,
-    event::Event,
-    event::EventType,
+    event::{Event, EventType, Location},
     inscription_id::InscriptionId,
     pagination::{Pagination, PaginationResponse},
     rune::{MintResponse, RuneAmount, RuneResponse},
     stats::{BlockTip, Status},
     subscription::{Subscription, TcpSubscriptionRequest},
-    transaction::{Transaction, TxOut, TxOutEntry},
+    transaction::{Transaction, TransactionStatus, TxOut, TxOutEntry},
 };
 
 mod address;

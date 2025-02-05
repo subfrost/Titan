@@ -1,5 +1,5 @@
 use {
-    super::{Inscription, RuneEntry, ScriptPubkeyEntry, TransactionStateChange},
+    super::{BlockId, Inscription, RuneEntry, ScriptPubkeyEntry, TransactionStateChange},
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
     ordinals::RuneId,
     std::{
@@ -24,6 +24,7 @@ pub struct BatchUpdate {
     pub rune_numbers: HashMap<u64, RuneId>,
     pub inscriptions: HashMap<InscriptionId, Inscription>,
     pub transactions: HashMap<Txid, Transaction>,
+    pub transaction_confirming_block: HashMap<Txid, BlockId>,
     pub mempool_txs: HashSet<Txid>,
     pub rune_count: u64,
     pub block_count: u64,
@@ -46,6 +47,7 @@ impl BatchUpdate {
             rune_numbers: HashMap::new(),
             inscriptions: HashMap::new(),
             transactions: HashMap::new(),
+            transaction_confirming_block: HashMap::new(),
             mempool_txs: HashSet::new(),
             rune_count,
             block_count,
@@ -68,6 +70,7 @@ impl BatchUpdate {
             && self.inscriptions.is_empty()
             && self.mempool_txs.is_empty()
             && self.transactions.is_empty()
+            && self.transaction_confirming_block.is_empty()
     }
 }
 
@@ -82,7 +85,8 @@ impl Display for BatchUpdate {
              spent_outpoints_in_mempool: {}, \
              runes: txs {}/ runes {}/ ids {}, \
              inscriptions: {}, \
-             transactions: {}]",
+             transactions: {}, \
+             transaction_confirming_block: {}]",
             self.block_count,
             self.rune_count,
             self.purged_blocks_count,
@@ -97,6 +101,7 @@ impl Display for BatchUpdate {
             self.rune_ids.len(),
             self.inscriptions.len(),
             self.transactions.len(),
+            self.transaction_confirming_block.len(),
         )
     }
 }

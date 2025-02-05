@@ -1,6 +1,8 @@
 use {
-    crate::index::{store::Store, StoreError},
-    crate::models::TransactionStateChange,
+    crate::{
+        index::{store::Store, Settings, StoreError},
+        models::TransactionStateChange,
+    },
     bitcoin::{OutPoint, Txid},
     ordinals::RuneId,
     std::sync::Arc,
@@ -18,10 +20,24 @@ pub enum RollbackError {
 
 type Result<T> = std::result::Result<T, RollbackError>;
 
+pub struct RollbackSettings {
+    pub index_addresses: bool,
+    pub index_bitcoin_transactions: bool,
+}
+
+impl From<Settings> for RollbackSettings {
+    fn from(settings: Settings) -> Self {
+        Self {
+            index_addresses: settings.index_addresses,
+            index_bitcoin_transactions: settings.index_bitcoin_transactions,
+        }
+    }
+}
+
 pub(super) struct Rollback<'a> {
     store: &'a Arc<dyn Store + Send + Sync>,
+    settings: RollbackSettings,
     mempool: bool,
-    index_addresses: bool,
     runes: u64,
 }
 
@@ -29,13 +45,13 @@ impl<'a> Rollback<'a> {
     pub(super) fn new(
         store: &'a Arc<dyn Store + Send + Sync>,
         mempool: bool,
-        index_addresses: bool,
+        settings: RollbackSettings,
     ) -> Result<Self> {
         let runes = store.get_runes_count()?;
         Ok(Self {
             store,
+            settings,
             mempool,
-            index_addresses,
             runes,
         })
     }
@@ -151,13 +167,20 @@ impl<'a> Rollback<'a> {
             self.update_burn_balance(rune_id, -(amount.n() as i128))?;
         }
 
-        if self.index_addresses {
+        if self.settings.index_addresses {
             self.revert_transaction_script_pubkeys_modifications(txid, transaction)?;
         }
 
         // Finally remove the transaction state change.
         self.store.delete_tx_state_changes(txid, self.mempool)?;
-        self.store.delete_transaction(txid, self.mempool)?;
+
+        if self.settings.index_bitcoin_transactions {
+            self.store.delete_transaction(txid, self.mempool)?;
+        }
+
+        if !self.mempool {
+            self.store.delete_transaction_confirming_block(txid)?;
+        }
 
         Ok(())
     }

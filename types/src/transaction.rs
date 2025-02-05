@@ -1,15 +1,35 @@
 use {
     crate::rune::RuneAmount,
-    bitcoin::{ScriptBuf, TxIn},
+    bitcoin::{BlockHash, ScriptBuf, TxIn},
     borsh::{BorshDeserialize, BorshSerialize},
     serde::{Deserialize, Serialize},
 };
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TransactionStatus {
-    pub height: u64,
-    pub hash: String,
     pub confirmed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_height: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_hash: Option<BlockHash>,
+}
+
+impl TransactionStatus {
+    pub fn unconfirmed() -> Self {
+        Self {
+            confirmed: false,
+            block_height: None,
+            block_hash: None,
+        }
+    }
+
+    pub fn confirmed(block_height: u64, block_hash: BlockHash) -> Self {
+        Self {
+            confirmed: true,
+            block_height: Some(block_height),
+            block_hash: Some(block_hash),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -7,7 +7,7 @@ use {
         index::{
             metrics::Metrics, store::Store, RpcClientError, RpcClientProvider, Settings, StoreError,
         },
-        models::RuneEntry,
+        models::{BlockId, RuneEntry},
     },
     address::AddressUpdater,
     bitcoin::{
@@ -353,7 +353,7 @@ impl Updater {
         )?;
 
         let block_header: bitcoin::block::Header = bitcoin_block.header.clone();
-        let block_height = height as u32;
+        let block_height = height;
 
         let block_tx_timer = self
             .latency
@@ -391,7 +391,6 @@ impl Updater {
         let mut address_updater = AddressUpdater::new();
         let mut transaction_updater = TransactionUpdater::new(
             cache,
-            &self.sender,
             self.settings.clone().into(),
             Some(&mut address_updater),
         )?;
@@ -409,7 +408,15 @@ impl Updater {
                 .write()
                 .map_err(|_| UpdaterError::Mutex)?;
             for (i, txid, result) in block_data {
-                transaction_updater.save(block_height, txid, &bitcoin_block.txdata[i], &result)?;
+                transaction_updater.save(
+                    Some(BlockId {
+                        hash: bitcoin_block.header.block_hash(),
+                        height: block_height,
+                    }),
+                    txid,
+                    &bitcoin_block.txdata[i],
+                    &result,
+                )?;
                 block.tx_ids.push(txid.to_string());
                 transaction_update.add_block_tx(txid);
                 if let Some((id, ..)) = result.etched {
@@ -497,15 +504,11 @@ impl Updater {
             trace!("Indexing tx {}", txid);
 
             // Create a TransactionUpdater that references the optional address_updater
-            let mut transaction_updater = TransactionUpdater::new(
-                cache,
-                &self.sender,
-                self.settings.clone().into(),
-                address_updater,
-            )?;
+            let mut transaction_updater =
+                TransactionUpdater::new(cache, self.settings.clone().into(), address_updater)?;
 
             // The same "save" logic as before
-            transaction_updater.save(height as u32, *txid, tx, &result)?;
+            transaction_updater.save(None, *txid, tx, &result)?;
         }
 
         if cache.settings.mempool {
@@ -517,7 +520,7 @@ impl Updater {
 
     fn remove_txs(&self, txids: &Vec<Txid>, mempool: bool) -> Result<()> {
         let db = self.db.write();
-        let mut rollback_updater = Rollback::new(&db, mempool, self.settings.index_addresses)?;
+        let mut rollback_updater = Rollback::new(&db, mempool, self.settings.clone().into())?;
 
         // Remove transactions that are no longer in mempool
         for txid in txids {
@@ -616,7 +619,7 @@ impl Updater {
     fn revert_block(&self, height: u32, block: &Block) -> Result<()> {
         let db = self.db.write();
 
-        let mut rollback_updater = Rollback::new(&db, false, self.settings.index_addresses)?;
+        let mut rollback_updater = Rollback::new(&db, false, self.settings.clone().into())?;
 
         let mut transaction_update = self
             .transaction_update

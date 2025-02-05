@@ -1,14 +1,14 @@
 use {
     super::{address::AddressUpdater, cache::UpdaterCache},
     crate::{
-        index::{Chain, Settings, StoreError},
-        models::TransactionStateChange,
+        index::{Settings, StoreError},
+        models::{BlockId, TransactionStateChange},
     },
     bitcoin::{OutPoint, Transaction, Txid},
     ordinals::RuneId,
     thiserror::Error,
     titan_types::{Event, TxOutEntry},
-    tokio::sync::mpsc::{self, error::SendError},
+    tokio::sync::mpsc::error::SendError,
 };
 
 #[derive(Debug, Error)]
@@ -25,7 +25,6 @@ type Result<T> = std::result::Result<T, TransactionUpdaterError>;
 pub(super) struct TransactionUpdaterSettings {
     pub(super) index_addresses: bool,
     pub(super) index_bitcoin_transactions: bool,
-    pub(super) chain: Chain,
 }
 
 impl From<Settings> for TransactionUpdaterSettings {
@@ -33,14 +32,12 @@ impl From<Settings> for TransactionUpdaterSettings {
         Self {
             index_addresses: settings.index_addresses,
             index_bitcoin_transactions: settings.index_bitcoin_transactions,
-            chain: settings.chain,
         }
     }
 }
 
 pub(super) struct TransactionUpdater<'a> {
     pub(super) address_updater: Option<&'a mut AddressUpdater>,
-    pub(super) event_sender: &'a Option<mpsc::Sender<Event>>,
     pub(super) cache: &'a mut UpdaterCache,
 
     pub(super) settings: TransactionUpdaterSettings,
@@ -49,13 +46,11 @@ pub(super) struct TransactionUpdater<'a> {
 impl<'a> TransactionUpdater<'a> {
     pub(super) fn new(
         cache: &'a mut UpdaterCache,
-        event_sender: &'a Option<mpsc::Sender<Event>>,
         settings: TransactionUpdaterSettings,
         address_updater: Option<&'a mut AddressUpdater>,
     ) -> Result<Self> {
         Ok(Self {
             address_updater,
-            event_sender,
             cache,
             settings,
         })
@@ -63,23 +58,33 @@ impl<'a> TransactionUpdater<'a> {
 
     pub(super) fn save(
         &mut self,
-        height: u32,
+        block_id: Option<BlockId>,
         txid: Txid,
         transaction: &Transaction,
         transaction_state_change: &TransactionStateChange,
     ) -> Result<()> {
         // Update burned rune
         for (rune_id, amount) in transaction_state_change.burned.iter() {
-            self.burn_rune(height, txid, rune_id, amount.n());
+            self.burn_rune(
+                block_id.as_ref().map(|id| id.height),
+                txid,
+                rune_id,
+                amount.n(),
+            );
         }
 
         // Add minted rune if any.
         if let Some(minted) = transaction_state_change.minted.as_ref() {
-            self.mint_rune(height, txid, &minted.rune_id, minted.amount);
+            self.mint_rune(
+                block_id.as_ref().map(|id| id.height),
+                txid,
+                &minted.rune_id,
+                minted.amount,
+            );
         }
 
         if let Some((id, _)) = transaction_state_change.etched {
-            self.etched_rune(height, txid, &id);
+            self.etched_rune(block_id.as_ref().map(|id| id.height), txid, &id);
         }
 
         for tx_in in transaction_state_change.inputs.iter() {
@@ -101,7 +106,12 @@ impl<'a> TransactionUpdater<'a> {
 
             self.cache.set_tx_out(outpoint, output.clone());
 
-            self.transfer_rune(height, txid, outpoint, output);
+            self.transfer_rune(
+                block_id.as_ref().map(|id| id.height),
+                txid,
+                outpoint,
+                output,
+            );
         }
 
         // Save transaction state change
@@ -118,6 +128,11 @@ impl<'a> TransactionUpdater<'a> {
 
         if self.settings.index_bitcoin_transactions {
             self.cache.set_transaction(txid, transaction.clone());
+        }
+
+        if !self.cache.settings.mempool {
+            self.cache
+                .set_transaction_confirming_block(txid, block_id.unwrap());
         }
 
         if self.settings.index_addresses {
@@ -178,44 +193,46 @@ impl<'a> TransactionUpdater<'a> {
         }
     }
 
-    fn burn_rune(&mut self, height: u32, txid: Txid, rune_id: &RuneId, amount: u128) {
+    fn burn_rune(&mut self, height: Option<u64>, txid: Txid, rune_id: &RuneId, amount: u128) {
         self.cache.add_event(Event::RuneBurned {
-            block_height: height,
+            location: height.into(),
             txid,
             amount: amount as u128,
             rune_id: *rune_id,
-            in_mempool: self.cache.settings.mempool,
         });
     }
 
-    fn mint_rune(&mut self, height: u32, txid: Txid, rune_id: &RuneId, amount: u128) {
+    fn mint_rune(&mut self, height: Option<u64>, txid: Txid, rune_id: &RuneId, amount: u128) {
         self.cache.add_event(Event::RuneMinted {
-            block_height: height,
+            location: height.into(),
             txid,
             amount: amount as u128,
             rune_id: *rune_id,
-            in_mempool: self.cache.settings.mempool,
         });
     }
 
-    fn etched_rune(&mut self, height: u32, txid: Txid, id: &RuneId) {
+    fn etched_rune(&mut self, height: Option<u64>, txid: Txid, id: &RuneId) {
         self.cache.add_event(Event::RuneEtched {
-            block_height: height,
+            location: height.into(),
             txid,
             rune_id: *id,
-            in_mempool: false,
         });
     }
 
-    fn transfer_rune(&mut self, height: u32, txid: Txid, outpoint: OutPoint, output: &TxOutEntry) {
+    fn transfer_rune(
+        &mut self,
+        height: Option<u64>,
+        txid: Txid,
+        outpoint: OutPoint,
+        output: &TxOutEntry,
+    ) {
         for rune_amount in output.runes.iter() {
             self.cache.add_event(Event::RuneTransferred {
-                block_height: height,
+                location: height.into(),
                 txid,
                 outpoint,
                 rune_id: rune_amount.rune_id,
                 amount: rune_amount.amount,
-                in_mempool: self.cache.settings.mempool,
             });
         }
     }

@@ -64,6 +64,17 @@ pub fn block(index: Arc<Index>, block: &query::Block) -> Result<Block> {
     Ok(index.get_block_by_hash(&hash)?)
 }
 
+pub fn block_hash_by_height(index: Arc<Index>, height: u64) -> Result<String> {
+    let hash = index.get_block_hash(height)?;
+    Ok(hash.to_string())
+}
+
+pub fn block_txids(index: Arc<Index>, block: &query::Block) -> Result<Vec<String>> {
+    let hash = to_hash(block, &index)?;
+    let block = index.get_block_by_hash(&hash)?;
+    Ok(block.tx_ids)
+}
+
 pub fn output(index: Arc<Index>, outpoint: &OutPoint) -> Result<TxOutEntry> {
     Ok(index.get_tx_out(outpoint)?)
 }
@@ -139,23 +150,11 @@ pub fn bitcoin_transaction_hex(index: Arc<Index>, client: Client, txid: &Txid) -
     Ok(hex::encode(transaction))
 }
 
-pub fn bitcoin_transaction(
-    index: Arc<Index>,
-    client: Client,
-    txid: &Txid,
-) -> Result<bitcoin::Transaction> {
-    if index.is_indexing_bitcoin_transactions() {
-        Ok(index.get_transaction(txid)?)
-    } else {
-        Ok(client.get_raw_transaction(txid, None)?)
-    }
-}
-
 pub fn transaction(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Transaction> {
     let mut transaction = Transaction::from(if index.is_indexing_bitcoin_transactions() {
         index.get_transaction(txid)?
     } else {
-        client.get_raw_transaction(txid, None)?
+        Transaction::from(client.get_raw_transaction(txid, None)?)
     });
 
     for (vout, tx_out) in transaction.output.iter_mut().enumerate() {

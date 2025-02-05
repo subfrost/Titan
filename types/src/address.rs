@@ -20,13 +20,13 @@ pub struct AddressTxOut {
     pub status: Option<TransactionStatus>,
 }
 
-impl From<(OutPoint, TxOutEntry)> for AddressTxOut {
-    fn from((outpoint, tx_out): (OutPoint, TxOutEntry)) -> Self {
+impl From<(OutPoint, TxOutEntry, Option<TransactionStatus>)> for AddressTxOut {
+    fn from((outpoint, tx_out, status): (OutPoint, TxOutEntry, Option<TransactionStatus>)) -> Self {
         Self {
             outpoint,
             value: tx_out.value,
             runes: tx_out.runes,
-            status: None,
+            status,
         }
     }
 }

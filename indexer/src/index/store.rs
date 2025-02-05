@@ -2,15 +2,18 @@ use {
     crate::{
         db::{RocksDB, RocksDBError},
         models::{
-            BatchDelete, BatchUpdate, Inscription, RuneEntry, ScriptPubkeyEntry,
+            BatchDelete, BatchUpdate, BlockId, Inscription, RuneEntry, ScriptPubkeyEntry,
             TransactionStateChange,
         },
     },
-    bitcoin::{hex::HexToArrayError, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
+    bitcoin::{hex::HexToArrayError, BlockHash, OutPoint, ScriptBuf, Txid},
     ordinals::{Rune, RuneId},
     std::collections::{HashMap, HashSet},
     thiserror::Error,
-    titan_types::{Block, InscriptionId, Pagination, PaginationResponse, TxOutEntry},
+    titan_types::{
+        Block, InscriptionId, Pagination, PaginationResponse, Transaction, TransactionStatus,
+        TxOutEntry,
+    },
 };
 
 #[derive(Debug, Error)]
@@ -102,6 +105,12 @@ pub trait Store {
         mempool: Option<bool>,
     ) -> Result<Transaction, StoreError>;
     fn delete_transaction(&self, txid: &Txid, mempool: bool) -> Result<(), StoreError>;
+    fn get_transaction_confirming_block(&self, txid: &Txid) -> Result<BlockId, StoreError>;
+    fn get_transaction_confirming_blocks(
+        &self,
+        txids: &Vec<Txid>,
+    ) -> Result<HashMap<Txid, Option<BlockId>>, StoreError>;
+    fn delete_transaction_confirming_block(&self, txid: &Txid) -> Result<(), StoreError>;
 
     // rune transactions
     fn get_last_rune_transactions(
@@ -345,17 +354,59 @@ impl Store for RocksDB {
         txid: &Txid,
         mempool: Option<bool>,
     ) -> Result<Transaction, StoreError> {
-        if let Some(mempool) = mempool {
-            Ok(self.get_transaction(txid, mempool)?)
+        let (mut tx, mempool) = if let Some(mempool) = mempool {
+            (
+                Transaction::from(self.get_transaction(txid, mempool)?),
+                mempool,
+            )
         } else {
             match self.get_transaction(txid, false) {
-                Ok(transaction) => return Ok(transaction),
+                Ok(transaction) => (Transaction::from(transaction), false),
                 Err(err) => match err {
-                    RocksDBError::NotFound(_) => Ok(self.get_transaction(txid, true)?),
-                    other => Err(StoreError::DB(other)),
+                    RocksDBError::NotFound(_) => {
+                        (Transaction::from(self.get_transaction(txid, true)?), true)
+                    }
+                    other => return Err(StoreError::DB(other)),
                 },
             }
+        };
+
+        if !mempool {
+            tx.status = Some(
+                self.get_transaction_confirming_block(txid)?
+                    .into_transaction_status(),
+            );
+        } else {
+            tx.status = Some(TransactionStatus {
+                confirmed: false,
+                block_height: None,
+                block_hash: None,
+            });
         }
+
+        let tx_outs = self.get_tx_outs(
+            &tx.output
+                .iter()
+                .enumerate()
+                .map(|(vout, _)| OutPoint {
+                    txid: txid.clone(),
+                    vout: vout as u32,
+                })
+                .collect(),
+            mempool,
+        )?;
+
+        for (vout, output) in tx.output.iter_mut().enumerate() {
+            output.runes = tx_outs
+                .get(&OutPoint {
+                    txid: txid.clone(),
+                    vout: vout as u32,
+                })
+                .map(|tx_out| tx_out.runes.clone())
+                .unwrap_or_default();
+        }
+
+        Ok(tx)
     }
 
     fn get_transaction_raw(
@@ -378,6 +429,21 @@ impl Store for RocksDB {
 
     fn delete_transaction(&self, txid: &Txid, mempool: bool) -> Result<(), StoreError> {
         Ok(self.delete_transaction(txid, mempool)?)
+    }
+
+    fn get_transaction_confirming_block(&self, txid: &Txid) -> Result<BlockId, StoreError> {
+        Ok(self.get_transaction_confirming_block(txid)?)
+    }
+
+    fn get_transaction_confirming_blocks(
+        &self,
+        txids: &Vec<Txid>,
+    ) -> Result<HashMap<Txid, Option<BlockId>>, StoreError> {
+        Ok(self.get_transaction_confirming_blocks(txids)?)
+    }
+
+    fn delete_transaction_confirming_block(&self, txid: &Txid) -> Result<(), StoreError> {
+        Ok(self.delete_transaction_confirming_block(txid)?)
     }
 
     fn get_runes_count(&self) -> Result<u64, StoreError> {

@@ -25,24 +25,16 @@ pub trait TitanApi {
     fn get_block_blocking(&self, query: &query::Block) -> Result<Block, Error>;
     async fn get_block_hash_by_height(&self, height: u64) -> Result<String, Error>;
     fn get_block_hash_by_height_blocking(&self, height: u64) -> Result<String, Error>;
-    async fn get_block_raw(&self, hash: String) -> Result<Vec<u8>, Error>;
-    fn get_block_raw_blocking(&self, hash: String) -> Result<Vec<u8>, Error>;
-    async fn get_block_txs(&self, hash: String) -> Result<Vec<Transaction>, Error>;
-    fn get_block_txs_blocking(&self, hash: String) -> Result<Vec<Transaction>, Error>;
-    async fn get_block_txids(&self, hash: String) -> Result<Vec<String>, Error>;
-    fn get_block_txids_blocking(&self, hash: String) -> Result<Vec<String>, Error>;
+    async fn get_block_txids(&self, query: &query::Block) -> Result<Vec<String>, Error>;
+    fn get_block_txids_blocking(&self, query: &query::Block) -> Result<Vec<String>, Error>;
 
     // 4) get_address
     async fn get_address(&self, address: &str) -> Result<AddressData, Error>;
     fn get_address_blocking(&self, address: &str) -> Result<AddressData, Error>;
 
     // 5) get_transaction
-    async fn get_transaction(&self, txid: &str) -> Result<bitcoin::Transaction, Error>;
-    fn get_transaction_blocking(&self, txid: &str) -> Result<bitcoin::Transaction, Error>;
-
-    // 6) get_transaction_with_runes
-    async fn get_transaction_with_runes(&self, txid: &str) -> Result<Transaction, Error>;
-    fn get_transaction_with_runes_blocking(&self, txid: &str) -> Result<Transaction, Error>;
+    async fn get_transaction(&self, txid: &str) -> Result<Transaction, Error>;
+    fn get_transaction_blocking(&self, txid: &str) -> Result<Transaction, Error>;
 
     // 7) get_transaction_raw
     async fn get_transaction_raw(&self, txid: &str) -> Result<Vec<u8>, Error>;
@@ -52,9 +44,9 @@ pub trait TitanApi {
     async fn get_transaction_hex(&self, txid: &str) -> Result<String, Error>;
     fn get_transaction_hex_blocking(&self, txid: &str) -> Result<String, Error>;
 
-    // 9) broadcast_transaction (renamed from `send_tx` in the old TitanApi)
-    async fn broadcast_transaction(&self, tx_hex: String) -> Result<Txid, Error>;
-    fn broadcast_transaction_blocking(&self, tx_hex: String) -> Result<Txid, Error>;
+    // 9) send_transaction
+    async fn send_transaction(&self, tx_hex: String) -> Result<Txid, Error>;
+    fn send_transaction_blocking(&self, tx_hex: String) -> Result<Txid, Error>;
 
     // 10) get_output
     async fn get_output(&self, outpoint: &str) -> Result<TxOutEntry, Error>;
@@ -185,37 +177,16 @@ impl TitanApi for Client {
         rt.block_on(self.get_block_hash_by_height(height))
     }
 
-    async fn get_block_txids(&self, hash: String) -> Result<Vec<String>, Error> {
-        let url = format!("{}/block/{}/txids", self.base_url, hash);
+    async fn get_block_txids(&self, query: &query::Block) -> Result<Vec<String>, Error> {
+        let url = format!("{}/block/{}/txids", self.base_url, query.to_string());
         let resp = self.http_client.get(&url).send().await?;
         let txids = resp.json::<Vec<String>>().await?;
         Ok(txids)
     }
 
-    fn get_block_txids_blocking(&self, hash: String) -> Result<Vec<String>, Error> {
+    fn get_block_txids_blocking(&self, query: &query::Block) -> Result<Vec<String>, Error> {
         let rt = Runtime::new().map_err(|e| Error::Runtime(e.to_string()))?;
-        rt.block_on(self.get_block_txids(hash))
-    }
-
-    async fn get_block_txs(&self, hash: String) -> Result<Vec<Transaction>, Error> {
-        let url = format!("{}/block/{}/txs", self.base_url, hash);
-        let resp = self.http_client.get(&url).send().await?;
-        let txs = resp.json::<Vec<Transaction>>().await?;
-        Ok(txs)
-    }
-
-    fn get_block_txs_blocking(&self, hash: String) -> Result<Vec<Transaction>, Error> {
-        let rt = Runtime::new().map_err(|e| Error::Runtime(e.to_string()))?;
-        rt.block_on(self.get_block_txs(hash))
-    }
-
-    async fn get_block_raw(&self, _hash: String) -> Result<Vec<u8>, Error> {
-        unimplemented!("Server does not expose /block_raw");
-    }
-
-    fn get_block_raw_blocking(&self, hash: String) -> Result<Vec<u8>, Error> {
-        let rt = Runtime::new().map_err(|e| Error::Runtime(e.to_string()))?;
-        rt.block_on(self.get_block_raw(hash))
+        rt.block_on(self.get_block_txids(query))
     }
 
     // ------------------------------------------------------------------------
@@ -235,29 +206,15 @@ impl TitanApi for Client {
     // ------------------------------------------------------------------------
     // 5) get_transaction
     // ------------------------------------------------------------------------
-    async fn get_transaction(&self, txid: &str) -> Result<bitcoin::Transaction, Error> {
+    async fn get_transaction(&self, txid: &str) -> Result<Transaction, Error> {
         let url = format!("{}/tx/{}", self.base_url, txid);
-        let resp = self.http_client.get(&url).send().await?;
-        let tx = resp.json::<bitcoin::Transaction>().await?;
-        Ok(tx)
-    }
-    fn get_transaction_blocking(&self, txid: &str) -> Result<bitcoin::Transaction, Error> {
-        let rt = Runtime::new().map_err(|e| Error::Runtime(e.to_string()))?;
-        rt.block_on(self.get_transaction(txid))
-    }
-
-    // ------------------------------------------------------------------------
-    // 6) get_transaction_with_runes
-    // ------------------------------------------------------------------------
-    async fn get_transaction_with_runes(&self, txid: &str) -> Result<Transaction, Error> {
-        let url = format!("{}/tx/{}?with_runes=true", self.base_url, txid);
         let resp = self.http_client.get(&url).send().await?;
         let tx = resp.json::<Transaction>().await?;
         Ok(tx)
     }
-    fn get_transaction_with_runes_blocking(&self, txid: &str) -> Result<Transaction, Error> {
+    fn get_transaction_blocking(&self, txid: &str) -> Result<Transaction, Error> {
         let rt = Runtime::new().map_err(|e| Error::Runtime(e.to_string()))?;
-        rt.block_on(self.get_transaction_with_runes(txid))
+        rt.block_on(self.get_transaction(txid))
     }
 
     // ------------------------------------------------------------------------
@@ -291,7 +248,7 @@ impl TitanApi for Client {
     // ------------------------------------------------------------------------
     // 9) broadcast_transaction
     // ------------------------------------------------------------------------
-    async fn broadcast_transaction(&self, tx_hex: String) -> Result<Txid, Error> {
+    async fn send_transaction(&self, tx_hex: String) -> Result<Txid, Error> {
         let url = format!("{}/tx/broadcast", self.base_url);
         let resp = self.http_client.post(&url).body(tx_hex).send().await?;
         let status = resp.status();
@@ -305,9 +262,9 @@ impl TitanApi for Client {
         let txid = Txid::from_str(&body_text)?;
         Ok(txid)
     }
-    fn broadcast_transaction_blocking(&self, tx_hex: String) -> Result<Txid, Error> {
+    fn send_transaction_blocking(&self, tx_hex: String) -> Result<Txid, Error> {
         let rt = Runtime::new().map_err(|e| Error::Runtime(e.to_string()))?;
-        rt.block_on(self.broadcast_transaction(tx_hex))
+        rt.block_on(self.send_transaction(tx_hex))
     }
 
     // ------------------------------------------------------------------------

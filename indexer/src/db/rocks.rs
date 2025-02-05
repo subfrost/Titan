@@ -1,7 +1,7 @@
 use {
     super::{entry::Entry, *},
     crate::models::{
-        BatchDelete, BatchUpdate, Inscription, RuneEntry, ScriptPubkeyEntry,
+        BatchDelete, BatchUpdate, BlockId, Inscription, RuneEntry, ScriptPubkeyEntry,
         TransactionStateChange, TxRuneIndexRef,
     },
     bitcoin::{consensus, hashes::Hash, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
@@ -65,6 +65,7 @@ const SPENT_OUTPOINTS_MEMPOOL_CF: &str = "spent_outpoints_mempool";
 
 const TRANSACTIONS_CF: &str = "transactions";
 const TRANSACTIONS_MEMPOOL_CF: &str = "transactions_mempool";
+const TRANSACTION_CONFIRMING_BLOCK_CF: &str = "transaction_confirming_block";
 
 const MEMPOOL_CF: &str = "mempool";
 const STATS_CF: &str = "stats";
@@ -133,6 +134,8 @@ impl RocksDB {
             ColumnFamilyDescriptor::new(TRANSACTIONS_CF, cf_opts.clone());
         let transactions_mempool_cfd: ColumnFamilyDescriptor =
             ColumnFamilyDescriptor::new(TRANSACTIONS_MEMPOOL_CF, cf_opts.clone());
+        let transaction_confirming_block_cfd: ColumnFamilyDescriptor =
+            ColumnFamilyDescriptor::new(TRANSACTION_CONFIRMING_BLOCK_CF, cf_opts.clone());
         let settings_cfd: ColumnFamilyDescriptor =
             ColumnFamilyDescriptor::new(SETTINGS_CF, cf_opts.clone());
         let subscriptions_cfd: ColumnFamilyDescriptor =
@@ -183,6 +186,7 @@ impl RocksDB {
                 spent_outpoints_mempool_cfd,
                 transactions_cfd,
                 transactions_mempool_cfd,
+                transaction_confirming_block_cfd,
                 settings_cfd,
                 subscriptions_cfd,
             ],
@@ -1178,6 +1182,50 @@ impl RocksDB {
         Ok(())
     }
 
+    pub fn get_transaction_confirming_block(&self, txid: &Txid) -> DBResult<BlockId> {
+        let cf_handle = self.cf_handle(TRANSACTION_CONFIRMING_BLOCK_CF)?;
+        Ok(self
+            .get_option_vec_data(&cf_handle, txid_to_bytes(txid))
+            .mapped()?
+            .ok_or(RocksDBError::NotFound(format!(
+                "transaction confirming block not found: {}",
+                txid
+            )))?)
+    }
+
+    pub fn get_transaction_confirming_blocks(
+        &self,
+        txids: &Vec<Txid>,
+    ) -> DBResult<HashMap<Txid, Option<BlockId>>> {
+        let cf_handle = self.cf_handle(TRANSACTION_CONFIRMING_BLOCK_CF)?;
+        let keys: Vec<_> = txids
+            .iter()
+            .map(|txid| (&cf_handle, txid_to_bytes(txid)))
+            .collect();
+        let results = self.db.multi_get_cf(keys);
+
+        let mut confirming_blocks = HashMap::with_capacity(txids.len());
+        for (i, result) in results.iter().enumerate() {
+            match result {
+                Ok(Some(bytes)) => {
+                    confirming_blocks.insert(txids[i].clone(), Some(BlockId::load(bytes.clone())));
+                }
+                Ok(None) => {
+                    confirming_blocks.insert(txids[i].clone(), None);
+                }
+                Err(e) => return Err(e.clone().into()),
+            }
+        }
+
+        Ok(confirming_blocks)
+    }
+
+    pub fn delete_transaction_confirming_block(&self, txid: &Txid) -> DBResult<()> {
+        let cf_handle = self.cf_handle(TRANSACTION_CONFIRMING_BLOCK_CF)?;
+        self.db.delete_cf(&cf_handle, txid_to_bytes(txid))?;
+        Ok(())
+    }
+
     pub fn batch_update(&self, update: BatchUpdate, mempool: bool) -> DBResult<()> {
         let mut batch = WriteBatch::default();
 
@@ -1369,6 +1417,16 @@ impl RocksDB {
                     txid_to_bytes(&txid),
                     consensus::serialize(&transaction),
                 );
+            }
+        }
+
+        // 17. Update transaction_confirming_block
+        if !mempool {
+            let cf_handle: Arc<BoundColumnFamily<'_>> =
+                self.cf_handle(TRANSACTION_CONFIRMING_BLOCK_CF)?;
+
+            for (txid, block_id) in update.transaction_confirming_block {
+                batch.put_cf(&cf_handle, txid_to_bytes(&txid), block_id.store());
             }
         }
 

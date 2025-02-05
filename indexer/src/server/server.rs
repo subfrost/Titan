@@ -58,6 +58,8 @@ impl Server {
             // Blocks
             .route("/tip", get(Self::tip))
             .route("/block/{query}", get(Self::block))
+            .route("/block/{height}/hash", get(Self::block_hash_by_height))
+            .route("/block/{query}/txids", get(Self::block_txids))
             // Addresses
             .route("/address/{address}", get(Self::address))
             // Transactions
@@ -135,6 +137,20 @@ impl Server {
         task::block_in_place(|| Ok(Json(api::block(index, &query)?).into_response()))
     }
 
+    async fn block_hash_by_height(
+        Extension(index): Extension<Arc<Index>>,
+        Path(DeserializeFromStr(height)): Path<DeserializeFromStr<u64>>,
+    ) -> ServerResult {
+        task::block_in_place(|| Ok(Json(api::block_hash_by_height(index, height)?).into_response()))
+    }
+
+    async fn block_txids(
+        Extension(index): Extension<Arc<Index>>,
+        Path(DeserializeFromStr(query)): Path<DeserializeFromStr<query::Block>>,
+    ) -> ServerResult {
+        task::block_in_place(|| Ok(Json(api::block_txids(index, &query)?).into_response()))
+    }
+
     async fn broadcast_transaction(
         Extension(index): Extension<Arc<Index>>,
         Extension(config): Extension<Arc<ServerConfig>>,
@@ -156,19 +172,10 @@ impl Server {
         Extension(index): Extension<Arc<Index>>,
         Extension(config): Extension<Arc<ServerConfig>>,
         Path(txid): Path<Txid>,
-        Query(query): Query<query::Transaction>,
     ) -> ServerResult {
         task::block_in_place(|| {
-            if query.with_runes {
-                let transaction = api::transaction(index, config.get_new_rpc_client()?, &txid)?;
-
-                Ok(Json(transaction).into_response())
-            } else {
-                let transaction =
-                    api::bitcoin_transaction(index, config.get_new_rpc_client()?, &txid)?;
-
-                Ok(Json(transaction).into_response())
-            }
+            let transaction = api::transaction(index, config.get_new_rpc_client()?, &txid)?;
+            Ok(Json(transaction).into_response())
         })
     }
 

@@ -58,39 +58,71 @@ impl Into<String> for EventType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Location {
+    pub mempool: bool,
+    pub block_height: Option<u64>,
+}
+
+impl Location {
+    pub fn mempool() -> Self {
+        Location {
+            mempool: true,
+            block_height: None,
+        }
+    }
+
+    pub fn block(block_height: u64) -> Self {
+        Location {
+            mempool: false,
+            block_height: Some(block_height),
+        }
+    }
+}
+
+impl From<Option<u64>> for Location {
+    fn from(block_height: Option<u64>) -> Self {
+        match block_height {
+            Some(block_height) => Location {
+                mempool: false,
+                block_height: Some(block_height),
+            },
+            None => Location {
+                mempool: true,
+                block_height: None,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Event {
     RuneEtched {
-        block_height: u32,
+        location: Location,
         rune_id: RuneId,
         txid: Txid,
-        in_mempool: bool,
     },
     RuneBurned {
         amount: u128,
-        block_height: u32,
+        location: Location,
         rune_id: RuneId,
         txid: Txid,
-        in_mempool: bool,
     },
     RuneMinted {
         amount: u128,
-        block_height: u32,
+        location: Location,
         rune_id: RuneId,
         txid: Txid,
-        in_mempool: bool,
     },
     RuneTransferred {
         amount: u128,
-        block_height: u32,
+        location: Location,
         outpoint: OutPoint,
         rune_id: RuneId,
         txid: Txid,
-        in_mempool: bool,
     },
     AddressModified {
         address: String,
-        block_height: u32,
-        in_mempool: bool,
+        location: Location,
     },
     TransactionsAdded {
         txids: Vec<Txid>,
@@ -99,7 +131,7 @@ pub enum Event {
         txids: Vec<Txid>,
     },
     NewBlock {
-        block_height: u64,
         block_hash: BlockHash,
+        block_height: u64,
     },
 }

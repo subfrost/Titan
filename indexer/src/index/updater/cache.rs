@@ -3,7 +3,7 @@ use {
     crate::{
         index::{store::StoreError, Settings},
         models::{
-            BatchDelete, BatchUpdate, Inscription, RuneEntry, ScriptPubkeyEntry,
+            BatchDelete, BatchUpdate, BlockId, Inscription, RuneEntry, ScriptPubkeyEntry,
             TransactionStateChange,
         },
     },
@@ -15,7 +15,7 @@ use {
         str::FromStr,
         sync::Arc,
     },
-    titan_types::{Block, Event, InscriptionId, TxOutEntry},
+    titan_types::{Block, Event, InscriptionId, Location, TxOutEntry},
     tokio::sync::mpsc,
     tracing::{info, trace},
 };
@@ -202,6 +202,12 @@ impl UpdaterCache {
         self.update.transactions.insert(txid, transaction);
     }
 
+    pub fn set_transaction_confirming_block(&mut self, txid: Txid, block_id: BlockId) -> () {
+        self.update
+            .transaction_confirming_block
+            .insert(txid, block_id);
+    }
+
     pub fn add_rune_transaction(&mut self, rune_id: RuneId, txid: Txid) -> () {
         self.update
             .rune_transactions
@@ -377,8 +383,11 @@ impl UpdaterCache {
         for script_pubkey in self.update.script_pubkeys.keys() {
             self.events.push(Event::AddressModified {
                 address: script_pubkey.to_string(),
-                block_height: self.get_block_count() as u32,
-                in_mempool: self.settings.mempool,
+                location: if self.settings.mempool {
+                    Location::mempool()
+                } else {
+                    Location::block(self.get_block_count())
+                },
             });
         }
     }
