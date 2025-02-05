@@ -10,7 +10,7 @@ use {
     ordinals::{Rune, RuneId},
     std::collections::{HashMap, HashSet},
     thiserror::Error,
-    types::{Block, InscriptionId, Pagination, PaginationResponse, TxOutEntry},
+    titan_types::{Block, InscriptionId, Pagination, PaginationResponse, TxOutEntry},
 };
 
 #[derive(Debug, Error)]

@@ -10,9 +10,9 @@ use {
     bitcoin::{consensus::encode, OutPoint, Transaction, Txid},
     bitcoincore_rpc::{Client, RpcApi},
     ordinals::{Artifact, Edict, Etching, Height, Rune, RuneId, Runestone, SpacedRune},
-    types::{RuneAmount, TxOutEntry},
     std::collections::HashMap,
     thiserror::Error,
+    titan_types::{RuneAmount, TxOutEntry},
 };
 
 #[derive(Debug, Error)]

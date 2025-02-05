@@ -2424,26 +2424,56 @@ dependencies = [
  "serde_json",
  "serde_with",
  "thiserror 2.0.9",
+ "titan-types 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "types",
  "uuid",
  "zmq",
 ]
 
 [[package]]
 name = "titan-client"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "bitcoin",
  "reqwest",
  "serde",
  "serde_json",
+ "titan-types 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
  "tracing",
- "types",
+ "uuid",
+]
+
+[[package]]
+name = "titan-types"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "borsh",
+ "brotli",
+ "http",
+ "ordinals",
+ "serde",
+ "thiserror 2.0.9",
+ "uuid",
+]
+
+[[package]]
+name = "titan-types"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32bf8515106dc90f024ada03aaf0714547179dc42011cda5c5011aa5d1b490f4"
+dependencies = [
+ "bitcoin",
+ "borsh",
+ "brotli",
+ "http",
+ "ordinals",
+ "serde",
+ "thiserror 2.0.9",
  "uuid",
 ]
 
@@ -2667,20 +2697,6 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
-
-[[package]]
-name = "types"
-version = "0.1.0"
-dependencies = [
- "bitcoin",
- "borsh",
- "brotli",
- "http",
- "ordinals",
- "serde",
- "thiserror 2.0.9",
- "uuid",
-]
 
 [[package]]
 name = "unicode-ident"

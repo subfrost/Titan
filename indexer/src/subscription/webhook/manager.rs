@@ -4,8 +4,8 @@ use {
         store::{Store, StoreError},
     },
     reqwest::Client,
-    types::{Event, Subscription},
     std::sync::Arc,
+    titan_types::{Event, Subscription},
     uuid::Uuid,
 };
 

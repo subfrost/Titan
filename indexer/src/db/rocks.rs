@@ -17,7 +17,7 @@ use {
         str::FromStr,
         sync::{Arc, RwLock},
     },
-    types::{Block, InscriptionId, Pagination, PaginationResponse, Subscription, TxOutEntry},
+    titan_types::{Block, InscriptionId, Pagination, PaginationResponse, Subscription, TxOutEntry},
     util::{
         inscription_id_to_bytes, outpoint_to_bytes, rune_id_to_bytes, txid_from_bytes,
         txid_to_bytes,

@@ -6,7 +6,7 @@ use {
         collections::{HashMap, HashSet},
         fmt::Display,
     },
-    types::{Block, InscriptionId, TxOutEntry},
+    titan_types::{Block, InscriptionId, TxOutEntry},
 };
 
 #[derive(Debug, Clone)]

@@ -6,9 +6,9 @@ use std::{
 use bitcoin::Txid;
 use borsh::{BorshDeserialize, BorshSerialize};
 use ordinals::{Rune, RuneId, SpacedRune, Terms};
-use types::{InscriptionId, MintResponse, RuneResponse};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use titan_types::{InscriptionId, MintResponse, RuneResponse};
 
 #[derive(Debug, PartialEq, Error)]
 pub enum MintError {

@@ -1,21 +1,21 @@
 mod http_client;
 mod tcp_client;
 
-pub use http_client::Client as HttpClient;
-pub use types::*;
+pub use http_client::Client as TitanClient;
+pub use titan_types::*;
 
 #[cfg(feature = "tcp_client")]
-pub use tcp_client::subscribe;
+pub use tcp_client::subscribe as subscribe_to_titan;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::error::Error;
+    use titan_types::{Event, TcpSubscriptionRequest};
     use tokio::{
         sync::watch,
         time::{sleep, Duration, Instant},
     };
-    use types::{Event, TcpSubscriptionRequest};
 
     // Import the HTTP and TCP client functions.
     use crate::http_client::Client as HttpClient;

@@ -1,5 +1,5 @@
-mod manager;
 mod listener;
+mod manager;
 
-pub use manager::ZmqManager;
 pub use listener::zmq_listener;
+pub use manager::ZmqManager;

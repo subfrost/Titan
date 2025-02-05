@@ -35,11 +35,11 @@ use {
     },
     store_lock::StoreWithLock,
     thiserror::Error,
+    titan_types::{Block, Event},
     tokio::sync::mpsc::{error::SendError, Sender},
     tracing::{debug, error, info, trace},
     transaction_parser::TransactionParser,
     transaction_updater::TransactionUpdater,
-    types::{Block, Event},
 };
 
 #[derive(Debug, Error)]

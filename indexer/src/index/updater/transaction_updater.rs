@@ -7,8 +7,8 @@ use {
     bitcoin::{OutPoint, Transaction, Txid},
     ordinals::RuneId,
     thiserror::Error,
+    titan_types::{Event, TxOutEntry},
     tokio::sync::mpsc::{self, error::SendError},
-    types::{Event, TxOutEntry},
 };
 
 #[derive(Debug, Error)]

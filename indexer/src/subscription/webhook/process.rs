@@ -1,12 +1,12 @@
 use {
     super::store::Store,
     reqwest::Client,
-    types::{Event, EventType},
     std::{
         sync::Arc,
         time::{Duration, SystemTime, UNIX_EPOCH},
     },
     thiserror::Error,
+    titan_types::{Event, EventType},
     tokio::time::sleep,
     tracing::error,
 };

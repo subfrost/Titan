@@ -1,7 +1,7 @@
 use {
     crate::db::{RocksDB, RocksDBError},
-    types::Subscription,
     thiserror::Error,
+    titan_types::Subscription,
     uuid::Uuid,
 };
 

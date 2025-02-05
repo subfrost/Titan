@@ -22,12 +22,12 @@ use {
         thread::{self},
         time::Duration,
     },
-    tokio::sync::mpsc::Sender,
-    tracing::{error, info, warn},
-    types::{
+    titan_types::{
         AddressData, AddressTxOut, Block, Event, InscriptionId, Pagination, PaginationResponse,
         RuneAmount, TxOutEntry,
     },
+    tokio::sync::mpsc::Sender,
+    tracing::{error, info, warn},
 };
 
 #[derive(Debug, thiserror::Error)]

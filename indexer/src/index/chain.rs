@@ -33,7 +33,7 @@ impl Chain {
     pub(crate) fn network(self) -> Network {
         self.into()
     }
-    
+
     pub(crate) fn first_rune_height(self) -> u32 {
         Rune::first_rune_height(self.into())
     }

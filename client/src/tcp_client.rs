@@ -1,13 +1,13 @@
 use serde_json;
 use std::error::Error;
+#[cfg(feature = "tcp_client")]
+use titan_types::{Event, TcpSubscriptionRequest};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
     sync::{mpsc, watch},
 };
 use tracing::{error, info, warn};
-#[cfg(feature = "tcp_client")]
-use types::{Event, TcpSubscriptionRequest};
 
 /// Connect to the TCP subscription server at `addr` and subscribe
 /// using the given request. Returns a receiver for incoming events.

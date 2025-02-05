@@ -1,7 +1,15 @@
 [package]
-name = "types"
+name = "titan-types"
 version = "0.1.0"
 edition = "2021"
+
+authors = ["Marcos <mcolladomcm@email.com>"]
+license = "MIT OR Apache-2.0"
+description = "Types for Titan bitcoin and runes indexer"
+repository = "https://github.com/SaturnBTC/titan"
+readme = "README.md"
+categories = []
+keywords = ["bitcoin", "indexer", "runes", "rust"]
 
 [dependencies]
 bitcoin = { workspace = true }

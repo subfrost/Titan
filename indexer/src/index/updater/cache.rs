@@ -15,9 +15,9 @@ use {
         str::FromStr,
         sync::Arc,
     },
+    titan_types::{Block, Event, InscriptionId, TxOutEntry},
     tokio::sync::mpsc,
     tracing::{info, trace},
-    types::{Block, Event, InscriptionId, TxOutEntry},
 };
 
 type Result<T> = std::result::Result<T, StoreError>;

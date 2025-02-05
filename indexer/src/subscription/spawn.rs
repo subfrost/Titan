@@ -7,8 +7,8 @@ use {
             webhook::cleanup_inactive_subscriptions,
         },
     },
-    types::Event,
     std::{sync::Arc, time::Duration},
+    titan_types::Event,
     tokio::{
         sync::{mpsc, watch},
         task,

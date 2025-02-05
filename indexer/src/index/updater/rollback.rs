@@ -5,7 +5,7 @@ use {
     ordinals::RuneId,
     std::sync::Arc,
     thiserror::Error,
-    types::InscriptionId,
+    titan_types::InscriptionId,
 };
 
 #[derive(Debug, Error)]

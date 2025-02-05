@@ -1,13 +1,21 @@
 [package]
 name = "titan-client"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
+
+authors = ["Marcos <mcolladomcm@email.com>"]
+license = "MIT OR Apache-2.0"
+description = "HTTP and TCP client for Titan bitcoin and runes indexer"
+repository = "https://github.com/SaturnBTC/titan"
+readme = "README.md"
+categories = []
+keywords = ["bitcoin", "indexer", "runes", "rust"]
 
 [features]
 tcp_client = []
 
 [dependencies]
-types = { workspace = true }
+titan-types = { workspace = true }
 
 bitcoin = { workspace = true }
 serde = { workspace = true }

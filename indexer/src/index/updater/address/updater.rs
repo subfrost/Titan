@@ -1,7 +1,7 @@
 use {
     crate::index::{updater::cache::UpdaterCache, StoreError},
-    bitcoin::{OutPoint, ScriptBuf},
     crate::models::ScriptPubkeyEntry,
+    bitcoin::{OutPoint, ScriptBuf},
     std::collections::{HashMap, HashSet},
 };
 

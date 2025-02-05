@@ -1,7 +1,7 @@
 use bitcoin::Txid;
 use reqwest::{header::HeaderMap, Client as HttpClient, Response};
 use std::{error::Error, str::FromStr};
-use types::{
+use titan_types::{
     AddressData, Block, BlockTip, Pagination, PaginationResponse, RuneResponse, Status,
     Subscription, Transaction, TxOutEntry,
 };

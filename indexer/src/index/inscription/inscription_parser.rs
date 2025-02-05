@@ -2,7 +2,7 @@ use {
     super::*,
     crate::models::Inscription,
     bitcoin::{Transaction, Txid},
-    types::InscriptionId,
+    titan_types::InscriptionId,
 };
 
 pub fn index_rune_icon(tx: &Transaction, txid: Txid) -> Option<(InscriptionId, Inscription)> {
@@ -20,10 +20,7 @@ pub fn index_rune_icon(tx: &Transaction, txid: Txid) -> Option<(InscriptionId, I
             return None;
         }
 
-        let inscription_id = InscriptionId {
-            txid,
-            index: 0,
-        };
+        let inscription_id = InscriptionId { txid, index: 0 };
 
         return Some((inscription_id, inscription));
     }

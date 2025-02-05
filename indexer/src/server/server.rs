@@ -20,13 +20,13 @@ use {
     bitcoin::{address::NetworkUnchecked, Address, OutPoint, Txid},
     http::{header, StatusCode},
     std::{io, net::ToSocketAddrs, sync::Arc},
+    titan_types::{InscriptionId, Pagination, Subscription},
     tokio::task,
     tower_http::{
         compression::CompressionLayer,
         cors::{Any, CorsLayer},
     },
     tracing::{error, info},
-    types::{InscriptionId, Pagination, Subscription},
     uuid::Uuid,
 };
 

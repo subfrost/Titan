@@ -3,12 +3,12 @@ use {
     bitcoin::{hashes::Hash, OutPoint},
     borsh::{BorshDeserialize, BorshSerialize},
     ordinals::{Rune, RuneId},
-    types::{RuneAmount, TxOutEntry},
     std::{
         collections::{HashMap, HashSet},
         fmt::Display,
         io::{Read, Result, Write},
     },
+    titan_types::{RuneAmount, TxOutEntry},
 };
 
 #[derive(Debug, Clone)]

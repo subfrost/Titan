@@ -1,8 +1,8 @@
-use types::{Event, EventType, TcpSubscriptionRequest};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
+use titan_types::{Event, EventType, TcpSubscriptionRequest};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},

@@ -3,7 +3,7 @@ use {
         Inscription, RuneEntry, ScriptPubkeyEntry, TransactionStateChange, TxRuneIndexRef,
     },
     borsh::{BorshDeserialize, BorshSerialize},
-    types::{Block, Subscription, TxOutEntry},
+    titan_types::{Block, Subscription, TxOutEntry},
 };
 
 pub trait Entry: Sized + BorshDeserialize + BorshSerialize {

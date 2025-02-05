@@ -1,8 +1,8 @@
 use {
     super::tcp_subscription::TcpSubscriptionManager,
     crate::subscription::WebhookSubscriptionManager,
-    types::Event,
     std::sync::Arc,
+    titan_types::Event,
     tokio::{
         select,
         sync::{mpsc, watch},

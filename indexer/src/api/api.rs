@@ -11,11 +11,11 @@ use {
     bitcoincore_rpc::{Client, RpcApi},
     http::HeaderMap,
     std::sync::Arc,
-    tracing::error,
-    types::{
+    titan_types::{
         AddressData, Block, BlockTip, InscriptionId, Pagination, PaginationResponse, RuneResponse,
         Status, Subscription, Transaction, TxOutEntry,
     },
+    tracing::error,
     uuid::Uuid,
 };
 
