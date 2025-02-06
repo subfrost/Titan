@@ -66,6 +66,13 @@ impl TransactionUpdate {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.mempool_added.is_empty()
+            && self.mempool_removed.is_empty()
+            && self.block_added.is_empty()
+            && self.block_removed.is_empty()
+    }
+
     pub fn add_block_tx(&mut self, txid: Txid) {
         self.block_added.insert(txid);
     }

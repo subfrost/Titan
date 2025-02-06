@@ -44,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     set_panic_hook(db_arc.clone());
 
     // 5. If subscriptions are enabled, spawn the dispatcher + cleanup tasks
-    let spawn_subscription_result = spawn_subscription_tasks(db_arc.clone(), options.into());
+    let spawn_subscription_result = spawn_subscription_tasks(db_arc.clone(), options.clone().into());
 
     let (webhook_subscription_manager, event_sender) = match spawn_subscription_result.as_ref() {
         Some(sub) => (
@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     index.validate_index()?;
 
     // 7. Spawn background threads (indexer, ZMQ listener, etc.)
-    let index_handle = spawn_background_threads(index.clone()).await;
+    let index_handle = spawn_background_threads(index.clone(), options.enable_zmq_listener).await;
 
     // 8. Start the HTTP server
     let handle = Handle::new();
@@ -145,7 +145,10 @@ fn set_panic_hook(db_arc: Arc<RocksDB>) {
 }
 
 /// Spawn background threads: indexer loop, ZMQ listener, etc. Return their JoinHandle.
-async fn spawn_background_threads(index: Arc<Index>) -> std::thread::JoinHandle<()> {
+async fn spawn_background_threads(
+    index: Arc<Index>,
+    enable_zmq_listener: bool,
+) -> std::thread::JoinHandle<()> {
     // 1) Spawn the indexer loop in a blocking thread
     let index_clone = index.clone();
     let index_handle = std::thread::spawn(move || {
@@ -153,7 +156,9 @@ async fn spawn_background_threads(index: Arc<Index>) -> std::thread::JoinHandle<
     });
 
     // 2) Spawn the ZMQ listener (also likely blocking)
-    index.start_zmq_listener().await;
+    if enable_zmq_listener {
+        index.start_zmq_listener().await;
+    }
 
     info!("Spawned background threads");
     index_handle

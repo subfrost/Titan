@@ -119,6 +119,11 @@ pub struct Options {
     )]
     pub(super) commit_interval: u64,
 
+    /// Enable zmq listener. Beware that if you enable this, you'll receive subscription events in the wrong order.
+    /// Don't enable this if you are building a product that requires sync with bitcoin core and have to handle rollbacks right.
+    #[arg(long, default_value = "false")]
+    pub(super) enable_zmq_listener: bool,
+
     /// ZeroMQ endpoint for raw transactions from bitcoind
     #[arg(long, default_value = "tcp://127.0.0.1:28332")]
     pub(super) zmq_endpoint: String,

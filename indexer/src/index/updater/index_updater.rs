@@ -662,19 +662,21 @@ impl Updater {
                 .transaction_update
                 .read()
                 .map_err(|_| UpdaterError::Mutex)?;
+
+
             transaction_update.categorize_to_change_set()
         };
 
         if let Some(sender) = &self.sender {
-            if !categorized.added.is_empty() {
-                sender.blocking_send(Event::TransactionsAdded {
-                    txids: categorized.added.into_iter().collect(),
-                })?;
-            }
-
             if !categorized.removed.is_empty() {
                 sender.blocking_send(Event::TransactionsReplaced {
                     txids: categorized.removed.into_iter().collect(),
+                })?;
+            }
+            
+            if !categorized.added.is_empty() {
+                sender.blocking_send(Event::TransactionsAdded {
+                    txids: categorized.added.into_iter().collect(),
                 })?;
             }
         }
