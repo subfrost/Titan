@@ -5,7 +5,7 @@ use {
         SubscribeError,
     },
     bitcoin::{consensus::encode, Transaction},
-    std::sync::Arc,
+    std::{sync::Arc, thread},
     tokio::sync::watch,
     tracing::{debug, error, info},
 };
@@ -117,10 +117,21 @@ fn handle_raw_tx(
     let tx = encode::deserialize::<Transaction>(tx_bytes)?;
     let txid = tx.compute_txid();
 
-    // Example: index the new transaction if we are at tip
+    // If the updater is at tip, spawn a new thread to index the transaction.
     if updater.is_at_tip() {
-        updater.index_new_tx(&txid, &tx)?;
-        debug!("Indexed tx {}", txid);
+        // Clone the Arc so the thread can use it.
+        let updater_clone = Arc::clone(updater);
+        // Clone the transaction if needed.
+        let tx_clone = tx.clone();
+        let txid_clone = txid; // Txid is Copy
+
+        // Spawn a new thread to do the update work.
+        thread::spawn(
+            move || match updater_clone.index_new_tx(&txid_clone, &tx_clone) {
+                Ok(()) => debug!("Indexed tx {}", txid_clone),
+                Err(e) => error!("Failed to index tx {}: {:?}", txid_clone, e),
+            },
+        );
     }
 
     Ok(())
