@@ -35,7 +35,10 @@ impl FromStr for Block {
 
 impl Display for Block {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self)
+        match self {
+            Block::Height(height) => write!(f, "{}", height),
+            Block::Hash(hash) => write!(f, "{}", hash),
+        }
     }
 }
 
@@ -78,7 +81,10 @@ impl FromStr for Rune {
 
 impl Display for Rune {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self)
+        match self {
+            Self::Spaced(rune) => write!(f, "{}", rune),
+            Self::Id(id) => write!(f, "{}", id),
+        }
     }
 }
 
