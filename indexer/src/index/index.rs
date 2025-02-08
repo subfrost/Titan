@@ -23,8 +23,7 @@ use {
         time::Duration,
     },
     titan_types::{
-        AddressData, AddressTxOut, Block, Event, InscriptionId, Pagination, PaginationResponse,
-        RuneAmount, Transaction, TxOutEntry,
+        AddressData, AddressTxOut, Block, Event, InscriptionId, Pagination, PaginationResponse, RuneAmount, Transaction, TransactionStatus, TxOutEntry
     },
     tokio::{runtime::Runtime, sync::mpsc::Sender},
     tracing::{error, info, warn},
@@ -307,6 +306,21 @@ impl Index {
 
     pub fn get_transaction(&self, txid: &Txid) -> Result<Transaction> {
         Ok(self.db.get_transaction(txid, None)?)
+    }
+
+    pub fn get_transaction_status(&self, txid: &Txid) -> Result<TransactionStatus> {
+        let result = self.db.get_transaction_confirming_block(txid);
+        match result {
+            Ok(block_id) => Ok(block_id.into_transaction_status()),
+            Err(StoreError::NotFound(_)) => {
+                // If the transaction is not found, we will return a not found error.
+                self.db.get_transaction_raw(txid, None)?;
+
+                // If it's found, then it's unconfirmed.
+                Ok(TransactionStatus::unconfirmed())
+            }
+            Err(e) => Err(IndexError::StoreError(e)),
+        }
     }
 
     pub fn index_new_transaction(&self, txid: &Txid, tx: &BitcoinTransaction) {

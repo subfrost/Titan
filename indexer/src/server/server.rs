@@ -67,6 +67,7 @@ impl Server {
             .route("/tx/{txid}", get(Self::transaction))
             .route("/tx/{txid}/raw", get(Self::transaction_raw))
             .route("/tx/{txid}/hex", get(Self::transaction_hex))
+            .route("/tx/{txid}/status", get(Self::transaction_status))
             .route("/output/{outpoint}", get(Self::output))
             // Inscriptions
             .route("/inscription/{inscription_id}", get(Self::inscription))
@@ -212,6 +213,13 @@ impl Server {
             )
                 .into_response())
         })
+    }
+
+    async fn transaction_status(
+        Extension(index): Extension<Arc<Index>>,
+        Path(txid): Path<Txid>,
+    ) -> ServerResult {
+        task::block_in_place(|| Ok(Json(api::transaction_status(index, &txid)?).into_response()))
     }
 
     async fn output(

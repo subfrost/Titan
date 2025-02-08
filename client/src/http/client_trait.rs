@@ -4,7 +4,7 @@ use bitcoin::Txid;
 use reqwest::header::HeaderMap;
 use titan_types::{
     query, AddressData, Block, BlockTip, Pagination, PaginationResponse, RuneResponse, Status,
-    Subscription, Transaction, TxOutEntry,
+    Subscription, Transaction, TransactionStatus, TxOutEntry,
 };
 
 /// Trait for all **async** methods.
@@ -36,6 +36,9 @@ pub trait TitanApiAsync {
 
     /// Returns raw transaction hex.
     async fn get_transaction_hex(&self, txid: &str) -> Result<String, Error>;
+
+    /// Returns the status of a transaction by `txid`.
+    async fn get_transaction_status(&self, txid: &str) -> Result<TransactionStatus, Error>;
 
     /// Broadcasts a transaction (raw hex) to the network and returns the resulting `Txid`.
     async fn send_transaction(&self, tx_hex: String) -> Result<Txid, Error>;
@@ -106,6 +109,9 @@ pub trait TitanApiSync {
 
     /// Returns raw tx hex in a **blocking** manner.
     fn get_transaction_hex(&self, txid: &str) -> Result<String, Error>;
+
+    /// Returns the status of a transaction by `txid` in a **blocking** manner.
+    fn get_transaction_status(&self, txid: &str) -> Result<TransactionStatus, Error>;
 
     /// Broadcasts a raw-hex transaction in a **blocking** manner.
     fn send_transaction(&self, tx_hex: String) -> Result<Txid, Error>;

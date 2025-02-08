@@ -9,6 +9,7 @@ import {
   Status,
   Transaction,
   TxOutEntry,
+  TransactionStatus,
 } from './types';
 
 /**
@@ -75,6 +76,13 @@ export class TitanHttpClient {
 
   async getTransactionHex(txid: string): Promise<string> {
     const response = await this.http.get<string>(`/tx/${txid}/hex`);
+    return response.data;
+  }
+
+  async getTransactionStatus(txid: string): Promise<TransactionStatus> {
+    const response = await this.http.get<TransactionStatus>(
+      `/tx/${txid}/status`,
+    );
     return response.data;
   }
 

@@ -12,8 +12,7 @@ use {
     http::HeaderMap,
     std::sync::Arc,
     titan_types::{
-        query, AddressData, Block, BlockTip, InscriptionId, Pagination, PaginationResponse,
-        RuneResponse, Status, Subscription, Transaction, TxOutEntry,
+        query, AddressData, Block, BlockTip, InscriptionId, Pagination, PaginationResponse, RuneResponse, Status, Subscription, Transaction, TransactionStatus, TxOutEntry
     },
     tracing::error,
     uuid::Uuid,
@@ -154,7 +153,9 @@ pub fn transaction(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Tra
     let mut transaction = Transaction::from(if index.is_indexing_bitcoin_transactions() {
         index.get_transaction(txid)?
     } else {
-        Transaction::from(client.get_raw_transaction(txid, None)?)
+        let mut transaction = Transaction::from(client.get_raw_transaction(txid, None)?);
+        transaction.status = Some(index.get_transaction_status(txid)?);
+        transaction
     });
 
     for (vout, tx_out) in transaction.output.iter_mut().enumerate() {
@@ -175,6 +176,10 @@ pub fn transaction(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Tra
     }
 
     Ok(transaction)
+}
+
+pub fn transaction_status(index: Arc<Index>, txid: &Txid) -> Result<TransactionStatus> {
+    Ok(index.get_transaction_status(txid)?)
 }
 
 pub fn mempool_txids(index: Arc<Index>) -> Result<Vec<Txid>> {

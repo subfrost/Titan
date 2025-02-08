@@ -26,21 +26,18 @@ impl SyncClient {
 }
 
 impl TitanApiSync for SyncClient {
-    // 1) get_status
     fn get_status(&self) -> Result<Status, Error> {
         let url = format!("{}/status", self.base_url);
         let resp = self.http_client.get(&url).send()?;
         Ok(resp.json()?)
     }
 
-    // 2) get_tip
     fn get_tip(&self) -> Result<BlockTip, Error> {
         let url = format!("{}/tip", self.base_url);
         let resp = self.http_client.get(&url).send()?;
         Ok(resp.json()?)
     }
 
-    // 3) get_block
     fn get_block(&self, query: &query::Block) -> Result<Block, Error> {
         let url = format!("{}/block/{}", self.base_url, query);
         let resp = self.http_client.get(&url).send()?;
@@ -59,35 +56,36 @@ impl TitanApiSync for SyncClient {
         Ok(resp.json()?)
     }
 
-    // 4) get_address
     fn get_address(&self, address: &str) -> Result<AddressData, Error> {
         let url = format!("{}/address/{}", self.base_url, address);
         let resp = self.http_client.get(&url).send()?;
         Ok(resp.json()?)
     }
 
-    // 5) get_transaction
     fn get_transaction(&self, txid: &str) -> Result<Transaction, Error> {
         let url = format!("{}/tx/{}", self.base_url, txid);
         let resp = self.http_client.get(&url).send()?;
         Ok(resp.json()?)
     }
 
-    // 7) get_transaction_raw
     fn get_transaction_raw(&self, txid: &str) -> Result<Vec<u8>, Error> {
         let url = format!("{}/tx/{}/raw", self.base_url, txid);
         let resp = self.http_client.get(&url).send()?;
         Ok(resp.bytes()?.to_vec())
     }
 
-    // 8) get_transaction_hex
     fn get_transaction_hex(&self, txid: &str) -> Result<String, Error> {
         let url = format!("{}/tx/{}/hex", self.base_url, txid);
         let resp = self.http_client.get(&url).send()?;
         Ok(resp.text()?)
     }
 
-    // 9) send_transaction
+    fn get_transaction_status(&self, txid: &str) -> Result<TransactionStatus, Error> {
+        let url = format!("{}/tx/{}/status", self.base_url, txid);
+        let resp = self.http_client.get(&url).send()?;
+        Ok(resp.json()?)
+    }
+
     fn send_transaction(&self, tx_hex: String) -> Result<Txid, Error> {
         let url = format!("{}/tx/broadcast", self.base_url);
         let resp = self.http_client.post(&url).body(tx_hex).send()?;
@@ -103,14 +101,12 @@ impl TitanApiSync for SyncClient {
         Ok(txid)
     }
 
-    // 10) get_output
     fn get_output(&self, outpoint: &str) -> Result<TxOutEntry, Error> {
         let url = format!("{}/output/{}", self.base_url, outpoint);
         let resp = self.http_client.get(&url).send()?;
         Ok(resp.json()?)
     }
 
-    // 11) get_inscription
     fn get_inscription(&self, inscription_id: &str) -> Result<(HeaderMap, Vec<u8>), Error> {
         let url = format!("{}/inscription/{}", self.base_url, inscription_id);
         let resp = self.http_client.get(&url).send()?;
@@ -127,7 +123,6 @@ impl TitanApiSync for SyncClient {
         Ok((headers, bytes))
     }
 
-    // 12) get_runes
     fn get_runes(
         &self,
         pagination: Option<Pagination>,
@@ -141,14 +136,12 @@ impl TitanApiSync for SyncClient {
         Ok(resp.json()?)
     }
 
-    // 13) get_rune
     fn get_rune(&self, rune: &str) -> Result<RuneResponse, Error> {
         let url = format!("{}/rune/{}", self.base_url, rune);
         let resp = self.http_client.get(&url).send()?;
         Ok(resp.json()?)
     }
 
-    // 14) get_rune_transactions
     fn get_rune_transactions(
         &self,
         rune: &str,
@@ -163,35 +156,30 @@ impl TitanApiSync for SyncClient {
         Ok(resp.json()?)
     }
 
-    // 15) get_mempool_txids
     fn get_mempool_txids(&self) -> Result<Vec<Txid>, Error> {
         let url = format!("{}/mempool/txids", self.base_url);
         let resp = self.http_client.get(&url).send()?;
         Ok(resp.json()?)
     }
 
-    // 16) get_subscription
     fn get_subscription(&self, id: &str) -> Result<Subscription, Error> {
         let url = format!("{}/subscription/{}", self.base_url, id);
         let resp = self.http_client.get(&url).send()?;
         Ok(resp.json()?)
     }
 
-    // 17) list_subscriptions
     fn list_subscriptions(&self) -> Result<Vec<Subscription>, Error> {
         let url = format!("{}/subscriptions", self.base_url);
         let resp = self.http_client.get(&url).send()?;
         Ok(resp.json()?)
     }
-
-    // 18) add_subscription
+    
     fn add_subscription(&self, subscription: &Subscription) -> Result<Subscription, Error> {
         let url = format!("{}/subscription", self.base_url);
         let resp = self.http_client.post(&url).json(subscription).send()?;
         Ok(resp.json()?)
     }
 
-    // 19) delete_subscription
     fn delete_subscription(&self, id: &str) -> Result<(), Error> {
         let url = format!("{}/subscription/{}", self.base_url, id);
         let resp = self.http_client.delete(&url).send()?;

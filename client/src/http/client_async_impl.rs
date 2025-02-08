@@ -27,21 +27,18 @@ impl AsyncClient {
 
 #[async_trait::async_trait]
 impl TitanApiAsync for AsyncClient {
-    // 1) get_status
     async fn get_status(&self) -> Result<Status, Error> {
         let url = format!("{}/status", self.base_url);
         let resp = self.http_client.get(&url).send().await?;
         Ok(resp.json().await?)
     }
 
-    // 2) get_tip
     async fn get_tip(&self) -> Result<BlockTip, Error> {
         let url = format!("{}/tip", self.base_url);
         let resp = self.http_client.get(&url).send().await?;
         Ok(resp.json().await?)
     }
 
-    // 3) get_block
     async fn get_block(&self, query: &query::Block) -> Result<Block, Error> {
         let url = format!("{}/block/{}", self.base_url, query);
         let resp = self.http_client.get(&url).send().await?;
@@ -60,35 +57,36 @@ impl TitanApiAsync for AsyncClient {
         Ok(resp.json().await?)
     }
 
-    // 4) get_address
     async fn get_address(&self, address: &str) -> Result<AddressData, Error> {
         let url = format!("{}/address/{}", self.base_url, address);
         let resp = self.http_client.get(&url).send().await?;
         Ok(resp.json().await?)
     }
 
-    // 5) get_transaction
     async fn get_transaction(&self, txid: &str) -> Result<Transaction, Error> {
         let url = format!("{}/tx/{}", self.base_url, txid);
         let resp = self.http_client.get(&url).send().await?;
         Ok(resp.json().await?)
     }
 
-    // 7) get_transaction_raw
     async fn get_transaction_raw(&self, txid: &str) -> Result<Vec<u8>, Error> {
         let url = format!("{}/tx/{}/raw", self.base_url, txid);
         let resp = self.http_client.get(&url).send().await?;
         Ok(resp.bytes().await?.to_vec())
     }
 
-    // 8) get_transaction_hex
     async fn get_transaction_hex(&self, txid: &str) -> Result<String, Error> {
         let url = format!("{}/tx/{}/hex", self.base_url, txid);
         let resp = self.http_client.get(&url).send().await?;
         Ok(resp.text().await?)
     }
 
-    // 9) send_transaction
+    async fn get_transaction_status(&self, txid: &str) -> Result<TransactionStatus, Error> {
+        let url = format!("{}/tx/{}/status", self.base_url, txid);
+        let resp = self.http_client.get(&url).send().await?;
+        Ok(resp.json().await?)
+    }
+
     async fn send_transaction(&self, tx_hex: String) -> Result<Txid, Error> {
         let url = format!("{}/tx/broadcast", self.base_url);
         let resp = self.http_client.post(&url).body(tx_hex).send().await?;
@@ -104,14 +102,12 @@ impl TitanApiAsync for AsyncClient {
         Ok(txid)
     }
 
-    // 10) get_output
     async fn get_output(&self, outpoint: &str) -> Result<TxOutEntry, Error> {
         let url = format!("{}/output/{}", self.base_url, outpoint);
         let resp = self.http_client.get(&url).send().await?;
         Ok(resp.json().await?)
     }
 
-    // 11) get_inscription
     async fn get_inscription(&self, inscription_id: &str) -> Result<(HeaderMap, Vec<u8>), Error> {
         let url = format!("{}/inscription/{}", self.base_url, inscription_id);
         let resp = self.http_client.get(&url).send().await?;
@@ -128,7 +124,6 @@ impl TitanApiAsync for AsyncClient {
         Ok((headers, bytes))
     }
 
-    // 12) get_runes
     async fn get_runes(
         &self,
         pagination: Option<Pagination>,
@@ -142,14 +137,12 @@ impl TitanApiAsync for AsyncClient {
         Ok(resp.json().await?)
     }
 
-    // 13) get_rune
     async fn get_rune(&self, rune: &str) -> Result<RuneResponse, Error> {
         let url = format!("{}/rune/{}", self.base_url, rune);
         let resp = self.http_client.get(&url).send().await?;
         Ok(resp.json().await?)
     }
 
-    // 14) get_rune_transactions
     async fn get_rune_transactions(
         &self,
         rune: &str,
@@ -164,28 +157,24 @@ impl TitanApiAsync for AsyncClient {
         Ok(resp.json().await?)
     }
 
-    // 15) get_mempool_txids
     async fn get_mempool_txids(&self) -> Result<Vec<Txid>, Error> {
         let url = format!("{}/mempool/txids", self.base_url);
         let resp = self.http_client.get(&url).send().await?;
         Ok(resp.json().await?)
     }
 
-    // 16) get_subscription
     async fn get_subscription(&self, id: &str) -> Result<Subscription, Error> {
         let url = format!("{}/subscription/{}", self.base_url, id);
         let resp = self.http_client.get(&url).send().await?;
         Ok(resp.json().await?)
     }
 
-    // 17) list_subscriptions
     async fn list_subscriptions(&self) -> Result<Vec<Subscription>, Error> {
         let url = format!("{}/subscriptions", self.base_url);
         let resp = self.http_client.get(&url).send().await?;
         Ok(resp.json().await?)
     }
 
-    // 18) add_subscription
     async fn add_subscription(&self, subscription: &Subscription) -> Result<Subscription, Error> {
         let url = format!("{}/subscription", self.base_url);
         let resp = self
@@ -197,7 +186,6 @@ impl TitanApiAsync for AsyncClient {
         Ok(resp.json().await?)
     }
 
-    // 19) delete_subscription
     async fn delete_subscription(&self, id: &str) -> Result<(), Error> {
         let url = format!("{}/subscription/{}", self.base_url, id);
         let resp = self.http_client.delete(&url).send().await?;
