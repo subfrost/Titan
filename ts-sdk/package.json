@@ -1,21 +1,26 @@
 {
-  "name": "@titan-io/sdk",
+  "name": "@titanbtcio/sdk",
   "version": "0.0.1",
-  "description": "",
-  "author": "",
-  "private": true,
+  "description": "SDK for Titan BTC indexer",
+  "author": "Saturn BTC",
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT or Apache-2.0",
   "engines": {
     "node": ">=20.0.0"
   },
   "files": [
-    "dist"
+    "dist",
+    "package.json",
+    "README.md"
   ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+     "deploy": "npm run build && npm publish"
   },
   "prettier": {
     "printWidth": 80,
