@@ -99,7 +99,7 @@ export interface PaginationResponse<T> {
   offset: number;
 }
 
-export enum EventType {
+export enum TitanEventType {
   RuneEtched = 'RuneEtched',
   RuneMinted = 'RuneMinted',
   RuneBurned = 'RuneBurned',
@@ -110,11 +110,64 @@ export enum EventType {
   NewBlock = 'NewBlock',
 }
 
+export interface Location {
+  mempool: boolean;
+  block_height: number | null;
+}
+
+export type TitanEvent =
+  | {
+      type: TitanEventType.RuneEtched;
+      location: Location;
+      rune_id: string; // representing the RuneId as a string
+      txid: string; // representing the Txid as a string
+    }
+  | {
+      type: TitanEventType.RuneBurned;
+      amount: string; // u128 values are represented as strings to avoid precision loss
+      location: Location;
+      rune_id: string;
+      txid: string;
+    }
+  | {
+      type: TitanEventType.RuneMinted;
+      amount: string;
+      location: Location;
+      rune_id: string;
+      txid: string;
+    }
+  | {
+      type: TitanEventType.RuneTransferred;
+      amount: string;
+      location: Location;
+      outpoint: string; // representing the OutPoint as a string
+      rune_id: string;
+      txid: string;
+    }
+  | {
+      type: TitanEventType.AddressModified;
+      address: string;
+      location: Location;
+    }
+  | {
+      type: TitanEventType.TransactionsAdded;
+      txids: string[];
+    }
+  | {
+      type: TitanEventType.TransactionsReplaced;
+      txids: string[];
+    }
+  | {
+      type: TitanEventType.NewBlock;
+      block_hash: string;
+      block_height: number;
+    };
+
 /**
  * The request object to subscribe to TCP events.
  * For example, a client might send:
  *   { subscribe: ["RuneEtched", "RuneMinted"] }
  */
 export interface TcpSubscriptionRequest {
-  subscribe: EventType[];
+  subscribe: TitanEventType[];
 }
