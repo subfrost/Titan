@@ -118,49 +118,61 @@ export interface Location {
 export type TitanEvent =
   | {
       type: TitanEventType.RuneEtched;
-      location: Location;
-      rune_id: string; // representing the RuneId as a string
-      txid: string; // representing the Txid as a string
+      data: {
+        location: Location;
+        rune_id: string;
+        txid: string;
+      };
     }
   | {
       type: TitanEventType.RuneBurned;
-      amount: string; // u128 values are represented as strings to avoid precision loss
-      location: Location;
-      rune_id: string;
-      txid: string;
+      data: {
+        amount: string;
+        location: Location;
+        rune_id: string;
+        txid: string;
+      };
     }
   | {
       type: TitanEventType.RuneMinted;
-      amount: string;
-      location: Location;
-      rune_id: string;
-      txid: string;
+      data: {
+        amount: string;
+        location: Location;
+        rune_id: string;
+        txid: string;
+      };
     }
   | {
       type: TitanEventType.RuneTransferred;
-      amount: string;
-      location: Location;
-      outpoint: string; // representing the OutPoint as a string
-      rune_id: string;
-      txid: string;
+      data: {
+        amount: string;
+        location: Location;
+        outpoint: string;
+        rune_id: string;
+        txid: string;
+      };
     }
   | {
       type: TitanEventType.AddressModified;
-      address: string;
-      location: Location;
+      data: {
+        address: string;
+        location: Location;
+      };
     }
   | {
       type: TitanEventType.TransactionsAdded;
-      txids: string[];
+      data: { txids: string[] };
     }
   | {
       type: TitanEventType.TransactionsReplaced;
-      txids: string[];
+      data: { txids: string[] };
     }
   | {
       type: TitanEventType.NewBlock;
-      block_hash: string;
-      block_height: number;
+      data: {
+        block_hash: string;
+        block_height: number;
+      };
     };
 
 /**

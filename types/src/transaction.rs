@@ -62,7 +62,7 @@ impl From<bitcoin::Transaction> for Transaction {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxOut {
     pub value: u64,
     pub script_pubkey: ScriptBuf,

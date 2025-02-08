@@ -1,6 +1,6 @@
 {
   "name": "@titanbtcio/sdk",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "description": "SDK for Titan BTC indexer",
   "author": "Saturn BTC",
   "publishConfig": {

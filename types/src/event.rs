@@ -95,6 +95,7 @@ impl From<Option<u64>> for Location {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
 pub enum Event {
     RuneEtched {
         location: Location,
