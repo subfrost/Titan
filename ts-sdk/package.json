@@ -20,7 +20,7 @@
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts",
     "lint": "tsc --noEmit",
-     "deploy": "npm run build && npm publish"
+    "deploy": "npm run build && npm publish"
   },
   "prettier": {
     "printWidth": 80,
@@ -41,6 +41,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.13.1",
+    "bitcoinjs-lib": "^6.1.7",
     "prettier": "^3.4.2",
     "tsup": "^8.3.6",
     "typescript": "^5.7.3"
