@@ -21,7 +21,8 @@ export interface TransactionStatus {
 }
 
 export interface AddressTxOut {
-  outpoint: string;
+  txid: string;
+  vout: number;
   value: number;
   runes: RuneAmount[];
   status?: TransactionStatus;
