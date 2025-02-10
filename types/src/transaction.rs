@@ -1,6 +1,6 @@
 use {
     crate::rune::RuneAmount,
-    bitcoin::{BlockHash, ScriptBuf, TxIn},
+    bitcoin::{BlockHash, ScriptBuf, TxIn, Txid},
     borsh::{BorshDeserialize, BorshSerialize},
     serde::{Deserialize, Serialize},
 };
@@ -34,6 +34,7 @@ impl TransactionStatus {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Transaction {
+    pub txid: Txid,
     pub version: i32,
     pub lock_time: u32,
     pub input: Vec<TxIn>,
@@ -45,6 +46,7 @@ pub struct Transaction {
 impl From<bitcoin::Transaction> for Transaction {
     fn from(transaction: bitcoin::Transaction) -> Self {
         Transaction {
+            txid: transaction.compute_txid(),
             version: transaction.version.0,
             lock_time: transaction.lock_time.to_consensus_u32(),
             input: transaction.input,
