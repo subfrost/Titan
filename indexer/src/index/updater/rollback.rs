@@ -4,7 +4,7 @@ use {
         index::{store::Store, Settings, StoreError},
         models::TransactionStateChange,
     },
-    bitcoin::{OutPoint, Txid},
+    bitcoin::{OutPoint, ScriptBuf, Txid},
     ordinals::RuneId,
     std::{
         collections::{HashMap, HashSet},
@@ -253,19 +253,17 @@ impl<'a> Rollback<'a> {
             })
             .collect::<Vec<_>>();
 
-        println!("outpoints: {:?}", outpoints.len());
-
         let outpoints_to_script_pubkeys = self.cache.get_outpoints_to_script_pubkey(&outpoints)?;
 
         // Get script pubkeys.
-        let script_pubkeys = outpoints_to_script_pubkeys.values().cloned().collect::<Vec<_>>();
-
-        println!("script_pubkeys: {:?}", script_pubkeys.len());
+        let script_pubkeys = outpoints_to_script_pubkeys
+            .values()
+            .cloned()
+            .collect::<HashSet<_>>();
 
         // Update script pubkey entries.
-        let mut script_pubkey_entries = self.cache.get_script_pubkey_entries(&script_pubkeys)?;
-
-        println!("script_pubkey_entries: {:?}", script_pubkey_entries.len());
+        let mut script_pubkey_entries: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)> =
+            HashMap::new();
 
         // Delete outpoints.
         for outpoint in outpoints {
@@ -273,13 +271,12 @@ impl<'a> Rollback<'a> {
                 .get(&outpoint)
                 .unwrap_or_else(|| panic!("script pubkey not found"));
 
-            let script_pubkey_entry = script_pubkey_entries
-                .get_mut(script_pubkey)
-                .unwrap_or_else(|| panic!("script pubkey entry not found"));
+            let entry = script_pubkey_entries
+                .entry(script_pubkey.clone())
+                .or_default();
 
-            script_pubkey_entry
-                .utxos
-                .retain(|pubkey_outpoint| *pubkey_outpoint != outpoint);
+            // Add spent outpoint.
+            entry.1.push(outpoint);
         }
 
         let prev_outpoints = tx_to_state_changes
@@ -288,13 +285,11 @@ impl<'a> Rollback<'a> {
             .flat_map(|tx| tx.inputs.clone())
             .collect::<Vec<_>>();
 
-        println!("prev_outpoints: {:?}", prev_outpoints.len());
-
         if self.cache.mempool {
             // Remove spent outpoints.
             self.cache.add_prev_outpoint_to_delete(&prev_outpoints);
         } else {
-            let outpoints_to_script_pubkeys =
+            let outpoints_to_script_pubkeys: HashMap<OutPoint, ScriptBuf> =
                 self.cache.get_outpoints_to_script_pubkey(&prev_outpoints)?;
 
             for prev_outpoint in prev_outpoints {
@@ -302,20 +297,16 @@ impl<'a> Rollback<'a> {
                     .get(&prev_outpoint)
                     .unwrap_or_else(|| panic!("script pubkey not found"));
 
-                let script_pubkey_entry = script_pubkey_entries
-                    .get_mut(script_pubkey)
-                    .unwrap_or_else(|| panic!("script pubkey entry not found"));
+                let entry = script_pubkey_entries
+                    .entry(script_pubkey.clone())
+                    .or_default();
 
-                script_pubkey_entry.utxos.push(prev_outpoint);
+                // Restore outpoint.
+                entry.0.push(prev_outpoint);
             }
         }
 
-        println!("script_pubkey_entries: {:?}", script_pubkey_entries.len());
-
-        for (script_pubkey, script_pubkey_entry) in script_pubkey_entries {
-            self.cache
-                .set_script_pubkey_entry(script_pubkey, script_pubkey_entry);
-        }
+        self.cache.set_script_pubkey_entries(script_pubkey_entries);
 
         Ok(())
     }

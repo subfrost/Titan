@@ -14,7 +14,7 @@ use {
         constants::SUBSIDY_HALVING_INTERVAL, hashes::Hash, hex::HexToArrayError,
         Block as BitcoinBlock, Transaction, Txid,
     },
-    bitcoincore_rpc::{json::GetMempoolEntryResult, Client, RpcApi},
+    bitcoincore_rpc::{Client, RpcApi},
     block_fetcher::fetch_blocks_from,
     cache::{UpdaterCache, UpdaterCacheSettings},
     indicatif::{ProgressBar, ProgressStyle},
@@ -24,7 +24,6 @@ use {
     prometheus::HistogramVec,
     rollback::{Rollback, RollbackError},
     std::{
-        collections::{HashMap, HashSet},
         fmt::{self, Display, Formatter},
         str::FromStr,
         sync::{
@@ -149,6 +148,7 @@ impl Updater {
 
         // Every 5000 blocks, commit the changes to the database
         let commit_interval = self.settings.commit_interval as usize;
+        let mut address_updater = AddressUpdater::new();
         let mut cache = UpdaterCache::new(
             self.db.clone(),
             UpdaterCacheSettings::new(&self.settings, false),
@@ -182,9 +182,7 @@ impl Updater {
                     break;
                 }
 
-                if
-                /*was_at_tip || first_block*/
-                true {
+                if was_at_tip || first_block {
                     match self.detect_reorg(
                         &block,
                         cache.get_block_count(),
@@ -207,6 +205,7 @@ impl Updater {
                     cache.get_block_count() as u64,
                     &rpc_client,
                     &mut cache,
+                    &mut address_updater,
                 )?;
 
                 cache.add_event(Event::NewBlock {
@@ -217,6 +216,15 @@ impl Updater {
                 cache.set_new_block(block);
 
                 if cache.should_flush(commit_interval) {
+                    // 5) If index_addresses is enabled, do one big pass
+                    if self.settings.index_addresses {
+                        let _timer = self
+                            .latency
+                            .with_label_values(&["batch_update_script_pubkeys_for_block"])
+                            .start_timer();
+                        address_updater.batch_update_script_pubkey(&mut cache)?;
+                    }
+
                     cache.add_address_events();
                     cache.flush()?;
                     cache.send_events(&self.sender)?;
@@ -237,6 +245,14 @@ impl Updater {
         }
 
         // Flush the cache to the database
+        if self.settings.index_addresses {
+            let _timer = self
+                .latency
+                .with_label_values(&["batch_update_script_pubkeys_for_block"])
+                .start_timer();
+            address_updater.batch_update_script_pubkey(&mut cache)?;
+        }
+
         cache.add_address_events();
         cache.flush()?;
         cache.send_events(&self.sender)?;
@@ -297,7 +313,7 @@ impl Updater {
                 self.db.clone(),
                 UpdaterCacheSettings::new(&self.settings, true),
             )?;
-            let mut address_updater = AddressUpdater::new(self.settings.chain);
+            let mut address_updater = AddressUpdater::new();
             for txid in tx_order {
                 let tx = tx_map.get(&txid).unwrap();
                 if self.index_tx(&txid, &tx, &mut cache, Some(&mut address_updater))? {
@@ -349,6 +365,7 @@ impl Updater {
         height: u64,
         rpc_client: &Client,
         cache: &mut UpdaterCache,
+        address_updater: &mut AddressUpdater,
     ) -> Result<Block> {
         let _timer = self
             .latency
@@ -370,7 +387,9 @@ impl Updater {
             .latency
             .with_label_values(&["parse_block"])
             .start_timer();
+
         transaction_parser.pre_cache_tx_outs(&bitcoin_block.txdata)?;
+
         let block_data = bitcoin_block
             .txdata
             .iter()
@@ -399,12 +418,8 @@ impl Updater {
             .collect::<Vec<_>>();
         drop(block_tx_timer);
 
-        let mut address_updater = AddressUpdater::new(self.settings.chain);
-        let mut transaction_updater = TransactionUpdater::new(
-            cache,
-            self.settings.clone().into(),
-            Some(&mut address_updater),
-        )?;
+        let mut transaction_updater =
+            TransactionUpdater::new(cache, self.settings.clone().into(), Some(address_updater))?;
 
         let mut block = Block::empty_block(height, bitcoin_block.header);
 
@@ -436,15 +451,6 @@ impl Updater {
             }
         }
 
-        // 5) If index_addresses is enabled, do one big pass
-        if self.settings.index_addresses {
-            let _timer = self
-                .latency
-                .with_label_values(&["batch_update_script_pubkeys_for_block"])
-                .start_timer();
-            address_updater.batch_update_script_pubkey(cache)?;
-        }
-
         Ok(block)
     }
 
@@ -459,7 +465,7 @@ impl Updater {
             UpdaterCacheSettings::new(&self.settings, true),
         )?;
 
-        let mut address_updater = AddressUpdater::new(self.settings.chain);
+        let mut address_updater = AddressUpdater::new();
         if self.index_tx(txid, tx, &mut cache, Some(&mut address_updater))? {
             self.mempool_debouncer.write().unwrap().mark_as_added(*txid);
 
@@ -557,30 +563,28 @@ impl Updater {
             return Ok(());
         }
 
-        Err(ReorgError::Recoverable { height, depth: 2 })
+        let db = self.db.read();
+        let bitcoind_prev_blockhash = block.header.prev_blockhash;
 
-        // let db = self.db.read();
-        // let bitcoind_prev_blockhash = block.header.prev_blockhash;
+        let prev_height = height.checked_sub(1).ok_or(ReorgError::Unrecoverable)?;
+        match db.get_block_hash(prev_height as u64) {
+            Ok(index_prev_blockhash) if index_prev_blockhash == bitcoind_prev_blockhash => Ok(()),
+            Ok(index_prev_blockhash) if index_prev_blockhash != bitcoind_prev_blockhash => {
+                for depth in 1..max_recoverable_reorg_depth {
+                    let height_to_check = height.saturating_sub(depth);
+                    let index_block_hash = db.get_block_hash(height_to_check)?;
+                    let bitcoind_block_hash = client.get_block_hash(height_to_check)?;
 
-        // let prev_height = height.checked_sub(1).ok_or(ReorgError::Unrecoverable)?;
-        // match db.get_block_hash(prev_height as u64) {
-        //     Ok(index_prev_blockhash) if index_prev_blockhash == bitcoind_prev_blockhash => Ok(()),
-        //     Ok(index_prev_blockhash) if index_prev_blockhash != bitcoind_prev_blockhash => {
-        //         for depth in 1..max_recoverable_reorg_depth {
-        //             let height_to_check = height.saturating_sub(depth);
-        //             let index_block_hash = db.get_block_hash(height_to_check)?;
-        //             let bitcoind_block_hash = client.get_block_hash(height_to_check)?;
+                    if index_block_hash == bitcoind_block_hash {
+                        info!("Reorg until height {}. Depth: {}", height_to_check, depth);
+                        return Err(ReorgError::Recoverable { height, depth });
+                    }
+                }
 
-        //             if index_block_hash == bitcoind_block_hash {
-        //                 info!("Reorg until height {}. Depth: {}", height_to_check, depth);
-        //                 return Err(ReorgError::Recoverable { height, depth });
-        //             }
-        //         }
-
-        //         Err(ReorgError::Unrecoverable)
-        //     }
-        //     _ => Ok(()),
-        // }
+                Err(ReorgError::Unrecoverable)
+            }
+            _ => Ok(()),
+        }
     }
 
     fn handle_reorg(&self, height: u64, depth: u64) -> Result<()> {

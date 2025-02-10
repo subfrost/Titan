@@ -16,6 +16,8 @@ pub enum RocksDBError {
     InvalidRuneId,
     #[error("invalid txid")]
     InvalidTxid,
+    #[error("invalid outpoint")]
+    InvalidOutpoint,
     #[error("poisoned lock")]
     LockPoisoned,
     #[error("not found: {0}")]

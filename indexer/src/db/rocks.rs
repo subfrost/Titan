@@ -1,15 +1,22 @@
 use {
-    super::{entry::Entry, *},
+    super::{
+        entry::Entry,
+        util::{
+            parse_outpoint_from_script_pubkey_key, script_pubkey_outpoint_to_bytes,
+            script_pubkey_search_key,
+        },
+        *,
+    },
     crate::models::{
         BatchDelete, BatchRollback, BatchUpdate, BlockId, Inscription, RuneEntry,
-        ScriptPubkeyEntry, TransactionStateChange, TxRuneIndexRef,
+        TransactionStateChange, TxRuneIndexRef,
     },
     bitcoin::{consensus, hashes::Hash, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
     helpers::{rune_index_key, rune_transaction_key},
     mapper::DBResultMapper,
     ordinals::RuneId,
     rocksdb::{
-        BlockBasedOptions, BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode,
+        BlockBasedOptions, BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, Direction,
         IteratorMode, MultiThreaded, Options, WriteBatch,
     },
     std::{
@@ -967,104 +974,37 @@ impl RocksDB {
         Ok(db_txids)
     }
 
-    pub fn all_script_pubkeys(&self) -> DBResult<HashMap<ScriptBuf, ScriptPubkeyEntry>> {
-        let cf_handle = self.cf_handle(SCRIPT_PUBKEYS_CF)?;
-        let iter = self.db.iterator_cf(&cf_handle, IteratorMode::Start);
-        let mut script_pubkeys = HashMap::new();
+    pub fn get_script_pubkey_outpoints(
+        &self,
+        script_pubkey: &ScriptBuf,
+        mempool: bool,
+    ) -> DBResult<Vec<OutPoint>> {
+        let cf_handle = if mempool {
+            self.cf_handle(SCRIPT_PUBKEYS_MEMPOOL_CF)?
+        } else {
+            self.cf_handle(SCRIPT_PUBKEYS_CF)?
+        };
+
+        let search_key = script_pubkey_search_key(script_pubkey);
+        let iter = self.db.iterator_cf(
+            &cf_handle,
+            IteratorMode::From(&search_key, Direction::Forward),
+        );
+
+        let mut outpoints = Vec::new();
         for item in iter {
             let (key, value) = item?;
-            script_pubkeys.insert(
-                ScriptBuf::from(key.to_vec()),
-                ScriptPubkeyEntry::load(value.to_vec()),
+            if !key.starts_with(&search_key) {
+                break;
+            }
+
+            outpoints.push(
+                parse_outpoint_from_script_pubkey_key(&key)
+                    .map_err(|_| RocksDBError::InvalidOutpoint)?,
             );
         }
-        Ok(script_pubkeys)
-    }
 
-    pub fn get_script_pubkey_entry(
-        &self,
-        script_pubkey: &ScriptBuf,
-        mempool: bool,
-    ) -> DBResult<ScriptPubkeyEntry> {
-        let cf_handle = if mempool {
-            self.cf_handle(SCRIPT_PUBKEYS_MEMPOOL_CF)?
-        } else {
-            self.cf_handle(SCRIPT_PUBKEYS_CF)?
-        };
-
-        let script_pubkey_entry_result = match self.db.get_cf(&cf_handle, script_pubkey.as_bytes())
-        {
-            Ok(val) => Ok(val),
-            Err(e) => Err(e)?,
-        };
-
-        let script_pubkey_entry = script_pubkey_entry_result
-            .mapped()?
-            .unwrap_or_else(ScriptPubkeyEntry::default);
-
-        Ok(script_pubkey_entry)
-    }
-
-    pub fn set_script_pubkey_entry(
-        &self,
-        script_pubkey: &ScriptBuf,
-        script_pubkey_entry: ScriptPubkeyEntry,
-        mempool: bool,
-    ) -> DBResult<()> {
-        let cf_handle = if mempool {
-            self.cf_handle(SCRIPT_PUBKEYS_MEMPOOL_CF)?
-        } else {
-            self.cf_handle(SCRIPT_PUBKEYS_CF)?
-        };
-
-        self.db.put_cf(
-            &cf_handle,
-            script_pubkey.as_bytes(),
-            script_pubkey_entry.store(),
-        )?;
-        Ok(())
-    }
-
-    pub fn get_script_pubkey_entries(
-        &self,
-        script_pubkeys: &Vec<ScriptBuf>,
-        mempool: bool,
-    ) -> DBResult<HashMap<ScriptBuf, ScriptPubkeyEntry>> {
-        let mut script_pubkey_entries = HashMap::with_capacity(script_pubkeys.len());
-        let cf_handle = if mempool {
-            self.cf_handle(SCRIPT_PUBKEYS_MEMPOOL_CF)?
-        } else {
-            self.cf_handle(SCRIPT_PUBKEYS_CF)?
-        };
-
-        let keys: Vec<_> = script_pubkeys
-            .iter()
-            .map(|script_pubkey| (&cf_handle, script_pubkey.as_bytes()))
-            .collect();
-
-        println!("keys: {:?}", keys.len());
-
-        let results = self.db.multi_get_cf(keys);
-
-        println!("results: {:?}", results.len());
-
-        for (i, result) in results.iter().enumerate() {
-            match result {
-                Ok(Some(bytes)) => {
-                    script_pubkey_entries.insert(
-                        script_pubkeys[i].clone(),
-                        ScriptPubkeyEntry::load(bytes.clone()),
-                    );
-                }
-                Ok(None) => {
-                    script_pubkey_entries
-                        .insert(script_pubkeys[i].clone(), ScriptPubkeyEntry::default());
-                }
-                Err(e) => return Err(e.clone().into()),
-            }
-        }
-
-        Ok(script_pubkey_entries)
+        Ok(outpoints)
     }
 
     pub fn get_outpoint_to_script_pubkey(
@@ -1450,12 +1390,21 @@ impl RocksDB {
                 self.cf_handle(SCRIPT_PUBKEYS_CF)?
             };
 
-            for (script_pubkey, script_pubkey_entry) in update.script_pubkeys.iter() {
-                batch.put_cf(
-                    &cf_handle,
-                    script_pubkey.as_bytes(),
-                    script_pubkey_entry.clone().store(),
-                );
+            for (script_pubkey, (new_ops, spent_ops)) in update.script_pubkeys.iter() {
+                for outpoint in new_ops.iter() {
+                    batch.put_cf(
+                        &cf_handle,
+                        script_pubkey_outpoint_to_bytes(script_pubkey, outpoint),
+                        vec![1],
+                    );
+                }
+
+                for outpoint in spent_ops.iter() {
+                    batch.delete_cf(
+                        &cf_handle,
+                        script_pubkey_outpoint_to_bytes(script_pubkey, outpoint),
+                    );
+                }
             }
         }
 
@@ -1593,7 +1542,11 @@ impl RocksDB {
         {
             let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(RUNES_CF)?;
             for (rune_id, rune_entry) in rollback.rune_entry.iter() {
-                batch.put_cf(&cf_handle, rune_id_to_bytes(&rune_id), rune_entry.clone().store());
+                batch.put_cf(
+                    &cf_handle,
+                    rune_id_to_bytes(&rune_id),
+                    rune_entry.clone().store(),
+                );
             }
         }
 
@@ -1606,7 +1559,11 @@ impl RocksDB {
             };
 
             for (outpoint, txout) in rollback.txouts.iter() {
-                batch.put_cf(&cf_handle, outpoint_to_bytes(&outpoint), txout.clone().store());
+                batch.put_cf(
+                    &cf_handle,
+                    outpoint_to_bytes(&outpoint),
+                    txout.clone().store(),
+                );
             }
         }
 
@@ -1618,12 +1575,21 @@ impl RocksDB {
                 self.cf_handle(SCRIPT_PUBKEYS_CF)?
             };
 
-            for (script_pubkey, script_pubkey_entry) in rollback.script_pubkey_entry.iter() {
-                batch.put_cf(
-                    &cf_handle,
-                    script_pubkey.as_bytes(),
-                    script_pubkey_entry.clone().store(),
-                );
+            for (script_pubkey, (new_ops, spent_ops)) in rollback.script_pubkey_entry.iter() {
+                for outpoint in new_ops.iter() {
+                    batch.put_cf(
+                        &cf_handle,
+                        script_pubkey_outpoint_to_bytes(script_pubkey, outpoint),
+                        vec![1],
+                    );
+                }
+
+                for outpoint in spent_ops.iter() {
+                    batch.delete_cf(
+                        &cf_handle,
+                        script_pubkey_outpoint_to_bytes(script_pubkey, outpoint),
+                    );
+                }
             }
         }
 

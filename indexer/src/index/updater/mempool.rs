@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tracing::{debug, error};
+use tracing::error;
 
 use crate::index::{RpcClientError, RpcClientProvider};
 

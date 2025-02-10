@@ -1,5 +1,5 @@
 use {
-    super::{BlockId, Inscription, RuneEntry, ScriptPubkeyEntry, TransactionStateChange},
+    super::{BlockId, Inscription, RuneEntry, TransactionStateChange},
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
     ordinals::RuneId,
     std::{
@@ -11,7 +11,7 @@ use {
 
 #[derive(Debug, Clone)]
 pub struct BatchUpdate {
-    pub script_pubkeys: HashMap<ScriptBuf, ScriptPubkeyEntry>,
+    pub script_pubkeys: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)>,
     pub script_pubkeys_outpoints: HashMap<OutPoint, ScriptBuf>,
     pub spent_outpoints_in_mempool: HashSet<OutPoint>,
     pub blocks: HashMap<BlockHash, Block>,

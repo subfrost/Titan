@@ -1,7 +1,7 @@
 use {
     crate::{
         index::{store::Store, StoreError},
-        models::{BatchRollback, RuneEntry, ScriptPubkeyEntry},
+        models::{BatchRollback, RuneEntry},
     },
     bitcoin::{OutPoint, ScriptBuf, Txid},
     ordinals::{Rune, RuneId},
@@ -116,24 +116,11 @@ impl<'a> RollbackCache<'a> {
         Ok(script_pubkeys)
     }
 
-    pub fn get_script_pubkey_entries(
+    pub fn set_script_pubkey_entries(
         &mut self,
-        script_pubkeys: &Vec<ScriptBuf>,
-    ) -> Result<HashMap<ScriptBuf, ScriptPubkeyEntry>> {
-        let script_pubkey_entries = self
-            .db
-            .get_script_pubkey_entries(script_pubkeys, self.mempool)?;
-        Ok(script_pubkey_entries)
-    }
-
-    pub fn set_script_pubkey_entry(
-        &mut self,
-        script_pubkey: ScriptBuf,
-        script_pubkey_entry: ScriptPubkeyEntry,
+        script_pubkey_entry: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)>,
     ) {
-        self.update
-            .script_pubkey_entry
-            .insert(script_pubkey, script_pubkey_entry);
+        self.update.script_pubkey_entry = script_pubkey_entry;
     }
 
     pub fn add_prev_outpoint_to_delete(&mut self, outpoints: &Vec<OutPoint>) {

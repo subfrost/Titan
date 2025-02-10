@@ -3,8 +3,7 @@ use {
     crate::{
         index::{store::StoreError, Settings},
         models::{
-            BatchDelete, BatchUpdate, BlockId, Inscription, RuneEntry, ScriptPubkeyEntry,
-            TransactionStateChange,
+            BatchDelete, BatchUpdate, BlockId, Inscription, RuneEntry, TransactionStateChange,
         },
     },
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
@@ -268,42 +267,11 @@ impl UpdaterCache {
         self.update.mempool_txs.insert(txid);
     }
 
-    pub fn get_script_pubkey_entries(
-        &self,
-        script_pubkeys: &Vec<ScriptBuf>,
-    ) -> Result<HashMap<ScriptBuf, ScriptPubkeyEntry>> {
-        let mut results = HashMap::new();
-        let mut to_fetch = HashSet::new();
-        for script_pubkey in script_pubkeys.iter() {
-            if let Some(script_pubkey_entry) = self.update.script_pubkeys.get(script_pubkey) {
-                results.insert(script_pubkey.clone(), script_pubkey_entry.clone());
-            } else {
-                to_fetch.insert(script_pubkey.clone());
-            }
-        }
-
-        if !to_fetch.is_empty() {
-            let script_pubkeys_entries = self.db.read().get_script_pubkey_entries(
-                &to_fetch.iter().cloned().collect(),
-                self.settings.mempool,
-            )?;
-
-            for (script_pubkey, script_pubkey_entry) in script_pubkeys_entries.iter() {
-                results.insert(script_pubkey.clone(), script_pubkey_entry.clone());
-            }
-        }
-
-        return Ok(results);
-    }
-
-    pub fn set_script_pubkey_entry(
+    pub fn set_script_pubkey_entries(
         &mut self,
-        script_pubkey: ScriptBuf,
-        script_pubkey_entry: ScriptPubkeyEntry,
+        script_pubkey_entry: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)>,
     ) -> () {
-        self.update
-            .script_pubkeys
-            .insert(script_pubkey, script_pubkey_entry);
+        self.update.script_pubkeys = script_pubkey_entry;
     }
 
     pub fn get_outpoints_to_script_pubkey(
@@ -336,12 +304,8 @@ impl UpdaterCache {
         return Ok(results);
     }
 
-    pub fn batch_set_outpoints_to_script_pubkey(&mut self, items: &[(OutPoint, ScriptBuf)]) {
-        for (outpoint, script_pubkey) in items {
-            self.update
-                .script_pubkeys_outpoints
-                .insert(*outpoint, script_pubkey.clone());
-        }
+    pub fn batch_set_outpoints_to_script_pubkey(&mut self, items: HashMap<OutPoint, ScriptBuf>) {
+        self.update.script_pubkeys_outpoints = items;
     }
 
     pub fn batch_set_spent_outpoints_in_mempool(&mut self, outpoints: Vec<OutPoint>) {
@@ -368,7 +332,7 @@ impl UpdaterCache {
 
         if !self.update.is_empty() {
             db.batch_update(&self.update, self.settings.mempool)?;
-            trace!("Flushed update: {}", self.update);
+            info!("Flushed update: {}", self.update);
         }
 
         if !self.delete.is_empty() {

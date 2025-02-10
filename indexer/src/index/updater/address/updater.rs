@@ -1,37 +1,30 @@
 use {
-    crate::{
-        index::{updater::cache::UpdaterCache, Chain, StoreError},
-        models::ScriptPubkeyEntry,
-    },
+    crate::index::{updater::cache::UpdaterCache, StoreError},
     bitcoin::{OutPoint, ScriptBuf},
-    std::collections::{HashMap, HashSet},
+    std::collections::HashMap,
 };
 
 #[derive(Default)]
 pub struct AddressUpdater {
     /// All outpoints newly created in this block: (outpoint, script_pubkey)
-    new_outpoints: Vec<(OutPoint, ScriptBuf)>,
+    new_outpoints: HashMap<OutPoint, ScriptBuf>,
 
     /// All outpoints spent in this block (except coinbase).
     spent_outpoints: Vec<OutPoint>,
-
-    /// The chain of the block we're indexing
-    chain: Chain,
 }
 
 impl AddressUpdater {
-    pub fn new(chain: Chain) -> Self {
+    pub fn new() -> Self {
         Self {
-            new_outpoints: Vec::new(),
+            new_outpoints: HashMap::new(),
             spent_outpoints: Vec::new(),
-            chain,
         }
     }
 
     /// Remember a newly created outpoint -> scriptPubKey
     pub fn add_new_outpoint(&mut self, outpoint: OutPoint, script_pubkey: ScriptBuf) {
-        if self.chain.address_from_script(&script_pubkey).is_ok() {
-            self.new_outpoints.push((outpoint, script_pubkey));
+        if !script_pubkey.is_op_return() {
+            self.new_outpoints.insert(outpoint, script_pubkey);
         }
     }
 
@@ -89,51 +82,13 @@ impl AddressUpdater {
             entry.1.push(outpoint); // spent
         }
 
-        // If there's nothing to update, return early
-        if spk_map.is_empty() {
-            return Ok(());
-        }
+        cache.set_script_pubkey_entries(spk_map);
 
         // ------------------------------------------------------
-        // 3. Fetch existing ScriptPubkeyEntry's in one DB call
-        // ------------------------------------------------------
-        let all_spks: Vec<ScriptBuf> = spk_map.keys().cloned().collect();
-        let mut entries = cache.get_script_pubkey_entries(&all_spks)?;
-
-        // ------------------------------------------------------
-        // 4. Update each script_pubkey's entry: add new, remove spent
-        // ------------------------------------------------------
-        //   For large 'spent' vectors, you can pre-build a HashSet
-        //   for O(N) removal instead of O(N*M).
-        for (spk, (new_ops, spent_ops)) in &spk_map {
-            // Find or create a new ScriptPubkeyEntry
-            let entry = entries
-                .entry(spk.clone())
-                .or_insert_with(ScriptPubkeyEntry::default);
-
-            // Add newly created outpoints
-            entry.utxos.extend(new_ops.iter().copied());
-
-            // Remove spent outpoints
-            if !spent_ops.is_empty() {
-                // For efficiency, remove in O(N) if we convert spent_ops to a HashSet
-                let spent_set: HashSet<OutPoint> = spent_ops.iter().copied().collect();
-                entry.utxos.retain(|op| !spent_set.contains(op));
-            }
-        }
-
-        // ------------------------------------------------------
-        // 5. Write all updated entries back to DB in a single pass
-        // ------------------------------------------------------
-        for (spk, entry) in entries {
-            cache.set_script_pubkey_entry(spk, entry);
-        }
-
-        // ------------------------------------------------------
-        // 6. Update OutPoint -> ScriptPubKey mapping for newly created outpoints
+        // 3. Update OutPoint -> ScriptPubKey mapping for newly created outpoints
         // ------------------------------------------------------
         if !self.new_outpoints.is_empty() {
-            cache.batch_set_outpoints_to_script_pubkey(&self.new_outpoints);
+            cache.batch_set_outpoints_to_script_pubkey(self.new_outpoints.clone());
         }
 
         Ok(())
@@ -143,31 +98,16 @@ impl AddressUpdater {
         &self,
         cache: &mut UpdaterCache,
     ) -> Result<(), StoreError> {
-        let mut spk_map: HashMap<ScriptBuf, Vec<OutPoint>> = HashMap::new();
+        let mut spk_map: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)> = HashMap::new();
 
         // a) Insert new outpoints
         for (outpoint, script_pubkey) in &self.new_outpoints {
             let entry = spk_map.entry(script_pubkey.clone()).or_default();
-            entry.push(*outpoint); // new
+            entry.0.push(*outpoint); // new
         }
 
-        let mut entries = cache.get_script_pubkey_entries(&spk_map.keys().cloned().collect())?;
-
-        for (spk, outpoints) in spk_map {
-            // Find or create a new ScriptPubkeyEntry
-            let entry = entries
-                .entry(spk.clone())
-                .or_insert_with(ScriptPubkeyEntry::default);
-
-            // Add newly created outpoints
-            entry.utxos.extend(outpoints.iter().copied());
-        }
-
-        for (spk, entry) in entries {
-            cache.set_script_pubkey_entry(spk, entry);
-        }
-
-        cache.batch_set_outpoints_to_script_pubkey(&self.new_outpoints);
+        cache.set_script_pubkey_entries(spk_map);
+        cache.batch_set_outpoints_to_script_pubkey(self.new_outpoints.clone());
 
         // b) Insert spent outpoints
         cache.batch_set_spent_outpoints_in_mempool(self.spent_outpoints.clone());

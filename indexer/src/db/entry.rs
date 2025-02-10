@@ -1,7 +1,5 @@
 use {
-    crate::models::{
-        BlockId, Inscription, RuneEntry, ScriptPubkeyEntry, TransactionStateChange, TxRuneIndexRef,
-    },
+    crate::models::{BlockId, Inscription, RuneEntry, TransactionStateChange, TxRuneIndexRef},
     borsh::{BorshDeserialize, BorshSerialize},
     titan_types::{Block, Subscription, TxOutEntry},
 };
@@ -26,5 +24,4 @@ impl Entry for TxRuneIndexRef {}
 impl Entry for Vec<TxRuneIndexRef> {}
 impl Entry for TransactionStateChange {}
 impl Entry for TxOutEntry {}
-impl Entry for ScriptPubkeyEntry {}
 impl Entry for Subscription {}

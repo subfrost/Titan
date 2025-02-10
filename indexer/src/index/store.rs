@@ -3,7 +3,7 @@ use {
         db::{RocksDB, RocksDBError},
         models::{
             BatchDelete, BatchRollback, BatchUpdate, BlockId, Inscription, RuneEntry,
-            ScriptPubkeyEntry, TransactionStateChange,
+            TransactionStateChange,
         },
     },
     bitcoin::{hex::HexToArrayError, BlockHash, OutPoint, ScriptBuf, Txid},
@@ -131,16 +131,11 @@ pub trait Store {
     fn get_inscription(&self, inscription_id: &InscriptionId) -> Result<Inscription, StoreError>;
 
     // address
-    fn get_script_pubkey_entry(
+    fn get_script_pubkey_outpoints(
         &self,
         script_pubkey: &ScriptBuf,
         mempool: Option<bool>,
-    ) -> Result<ScriptPubkeyEntry, StoreError>;
-    fn get_script_pubkey_entries(
-        &self,
-        script_pubkeys: &Vec<ScriptBuf>,
-        mempool: bool,
-    ) -> Result<HashMap<ScriptBuf, ScriptPubkeyEntry>, StoreError>;
+    ) -> Result<Vec<OutPoint>, StoreError>;
     fn get_outpoints_to_script_pubkey(
         &self,
         outpoints: &Vec<OutPoint>,
@@ -466,35 +461,25 @@ impl Store for RocksDB {
         }
     }
 
-    fn get_script_pubkey_entry(
+    fn get_script_pubkey_outpoints(
         &self,
         script_pubkey: &ScriptBuf,
         mempool: Option<bool>,
-    ) -> Result<ScriptPubkeyEntry, StoreError> {
+    ) -> Result<Vec<OutPoint>, StoreError> {
         if let Some(mempool) = mempool {
-            Ok(self.get_script_pubkey_entry(script_pubkey, mempool)?)
+            Ok(self.get_script_pubkey_outpoints(script_pubkey, mempool)?)
         } else {
-            let ledger_entry = self.get_script_pubkey_entry(script_pubkey, false)?;
-            let mempool_entry = self.get_script_pubkey_entry(script_pubkey, true)?;
+            let mut ledger_entry = self.get_script_pubkey_outpoints(script_pubkey, false)?;
+            let mempool_entry = self.get_script_pubkey_outpoints(script_pubkey, true)?;
 
-            let mut entry = ledger_entry.merge(mempool_entry);
+            ledger_entry.extend(mempool_entry);
 
             // Get spent outpoints in mempool.
-            let spent_outpoints = self.filter_spent_outpoints_in_mempool(&entry.utxos)?;
-            entry
-                .utxos
-                .retain(|outpoint| !spent_outpoints.contains(outpoint));
+            let spent_outpoints = self.filter_spent_outpoints_in_mempool(&ledger_entry)?;
+            ledger_entry.retain(|outpoint| !spent_outpoints.contains(outpoint));
 
-            Ok(entry)
+            Ok(ledger_entry)
         }
-    }
-
-    fn get_script_pubkey_entries(
-        &self,
-        script_pubkeys: &Vec<ScriptBuf>,
-        mempool: bool,
-    ) -> Result<HashMap<ScriptBuf, ScriptPubkeyEntry>, StoreError> {
-        Ok(self.get_script_pubkey_entries(script_pubkeys, mempool)?)
     }
 
     fn get_outpoints_to_script_pubkey(

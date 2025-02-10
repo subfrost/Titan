@@ -1,4 +1,4 @@
-use bitcoin::{hashes::Hash, OutPoint, Txid};
+use bitcoin::{hashes::Hash, OutPoint, ScriptBuf, Txid};
 use ordinals::RuneId;
 use std::convert::TryInto;
 
@@ -80,4 +80,26 @@ pub fn rune_id_from_bytes(bytes: &[u8]) -> Result<RuneId, &'static str> {
         block: u64::from_le_bytes(bytes[0..8].try_into().unwrap()),
         tx: u32::from_le_bytes(bytes[8..12].try_into().unwrap()),
     })
+}
+
+pub fn script_pubkey_outpoint_to_bytes(script_pubkey: &ScriptBuf, outpoint: &OutPoint) -> Vec<u8> {
+    let prefix = script_pubkey_search_key(script_pubkey);
+    let mut buffer: Vec<u8> = Vec::with_capacity(prefix.len() + 36);
+    buffer.extend_from_slice(&prefix);
+    buffer.extend_from_slice(&outpoint_to_bytes(outpoint));
+    buffer
+}
+
+pub fn script_pubkey_search_key(script_pubkey: &ScriptBuf) -> Vec<u8> {
+    let mut buffer: Vec<u8> = Vec::with_capacity(script_pubkey.len() + 1);
+    buffer.extend_from_slice(script_pubkey.as_bytes());
+    buffer.push(b':');
+    buffer
+}
+
+pub fn parse_outpoint_from_script_pubkey_key(key: &[u8]) -> Result<OutPoint, &'static str> {
+    // Find start of outpoint
+    let outpoint_start = key.iter().position(|b| *b == b':').unwrap();
+    let outpoint_bytes = &key[outpoint_start + 1..];
+    outpoint_from_bytes(outpoint_bytes)
 }

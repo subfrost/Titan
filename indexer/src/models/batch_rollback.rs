@@ -1,5 +1,5 @@
 use {
-    super::{RuneEntry, ScriptPubkeyEntry},
+    super::RuneEntry,
     bitcoin::{OutPoint, ScriptBuf, Txid},
     ordinals::{Rune, RuneId},
     std::{collections::HashMap, fmt::Display},
@@ -11,7 +11,7 @@ pub struct BatchRollback {
 
     pub rune_entry: HashMap<RuneId, RuneEntry>,
     pub txouts: HashMap<OutPoint, TxOutEntry>,
-    pub script_pubkey_entry: HashMap<ScriptBuf, ScriptPubkeyEntry>,
+    pub script_pubkey_entry: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)>,
 
     pub outpoints_to_delete: Vec<OutPoint>,
     pub prev_outpoints_to_delete: Vec<OutPoint>,
@@ -52,7 +52,9 @@ impl Display for BatchRollback {
              runes_ids_to_delete: {}, rune_numbers_to_delete: {}, inscriptions_to_delete: {}, \
              delete_all_rune_transactions: {}, txs_to_delete: {}
              ",
-            self.runes_count, self.txouts.len(), self.script_pubkey_entry.len(),
+            self.runes_count,
+            self.txouts.len(),
+            self.script_pubkey_entry.len(),
             self.outpoints_to_delete.len(),
             self.prev_outpoints_to_delete.len(),
             self.runes_to_delete.len(),

@@ -23,7 +23,8 @@ use {
         time::Duration,
     },
     titan_types::{
-        AddressData, AddressTxOut, Block, Event, InscriptionId, Pagination, PaginationResponse, RuneAmount, Transaction, TransactionStatus, TxOutEntry
+        AddressData, AddressTxOut, Block, Event, InscriptionId, Pagination, PaginationResponse,
+        RuneAmount, Transaction, TransactionStatus, TxOutEntry,
     },
     tokio::{runtime::Runtime, sync::mpsc::Sender},
     tracing::{error, info, warn},
@@ -255,15 +256,15 @@ impl Index {
     }
 
     pub fn get_script_pubkey_outpoints(&self, script: &ScriptBuf) -> Result<AddressData> {
-        let entry = self.db.get_script_pubkey_entry(script, None)?;
-        let outpoints = self.db.get_tx_outs(&entry.utxos, None)?;
-        let outpoint_txns: Vec<Txid> = outpoints.keys().map(|outpoint| outpoint.txid).collect();
+        let outpoints = self.db.get_script_pubkey_outpoints(script, None)?;
+        let outpoints_to_tx_out = self.db.get_tx_outs(&outpoints, None)?;
+        let outpoint_txns: Vec<Txid> = outpoints_to_tx_out.keys().map(|outpoint| outpoint.txid).collect();
         let txns_confirming_block = self.db.get_transaction_confirming_blocks(&outpoint_txns)?;
 
         let mut runes = HashMap::new();
         let mut value = 0;
         let mut outputs = Vec::new();
-        for (outpoint, tx_out) in outpoints {
+        for (outpoint, tx_out) in outpoints_to_tx_out {
             for rune in tx_out.runes.iter() {
                 runes
                     .entry(rune.rune_id)
