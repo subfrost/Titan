@@ -351,24 +351,22 @@ impl UpdaterCache {
         let db = self.db.write();
 
         if !self.settings.mempool {
-            let start = Instant::now();
             self.prepare_to_delete(
                 self.settings.max_recoverable_reorg_depth,
                 self.settings.index_spent_outputs,
             )?;
-            info!("Prepared to delete in {:?}", start.elapsed());
         }
 
         if !self.update.is_empty() {
             let start = Instant::now();
             db.batch_update(&self.update, self.settings.mempool)?;
-            info!("Flushed update: {} in {:?}", self.update, start.elapsed());
+            trace!("Flushed update: {} in {:?}", self.update, start.elapsed());
         }
 
         if !self.delete.is_empty() {
             let start = Instant::now();
             db.batch_delete(&self.delete)?;
-            info!("Flushed delete: {} in {:?}", self.delete, start.elapsed());
+            trace!("Flushed delete: {} in {:?}", self.delete, start.elapsed());
         }
 
         // Clear the cache

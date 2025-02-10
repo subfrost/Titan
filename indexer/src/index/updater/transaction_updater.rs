@@ -136,7 +136,7 @@ impl<'a> TransactionUpdater<'a> {
         }
 
         if self.settings.index_addresses {
-            self.update_script_pubkeys(txid, transaction, transaction_state_change);
+            self.update_script_pubkeys(txid, transaction);
         }
 
         if self.cache.settings.mempool {
@@ -146,30 +146,24 @@ impl<'a> TransactionUpdater<'a> {
         Ok(())
     }
 
-    fn update_script_pubkeys(
-        &mut self,
-        txid: Txid,
-        transaction: &Transaction,
-        transaction_state_change: &TransactionStateChange,
-    ) -> () {
-        // skip coinbase inputs
-        if !transaction_state_change.is_coinbase {
-            for input_outpoint in &transaction_state_change.inputs {
-                // Add the spent outpoint to the address_updater
-                if let Some(addr_updater) = self.address_updater.as_mut() {
-                    addr_updater.add_spent_outpoint(*input_outpoint);
+    fn update_script_pubkeys(&mut self, txid: Txid, transaction: &Transaction) -> () {
+        if let Some(addr_updater) = self.address_updater.as_mut() {
+            // skip coinbase inputs
+            if !transaction.is_coinbase() {
+                for input in &transaction.input {
+                    // Add the spent outpoint to the address_updater
+                    addr_updater.add_spent_outpoint(input.previous_output);
                 }
             }
-        }
 
-        // Add new outputs
-        for (vout, txout) in transaction.output.iter().enumerate() {
-            // (If you want to skip certain scriptPubKeys, that's up to you.)
-            let outpoint = OutPoint {
-                txid,
-                vout: vout as u32,
-            };
-            if let Some(addr_updater) = self.address_updater.as_mut() {
+            // Add new outputs
+            for (vout, txout) in transaction.output.iter().enumerate() {
+                // (If you want to skip certain scriptPubKeys, that's up to you.)
+                let outpoint = OutPoint {
+                    txid,
+                    vout: vout as u32,
+                };
+
                 addr_updater.add_new_outpoint(outpoint, txout.script_pubkey.clone());
             }
         }

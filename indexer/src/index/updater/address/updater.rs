@@ -1,7 +1,7 @@
 use {
     crate::index::{updater::cache::UpdaterCache, StoreError},
     bitcoin::{OutPoint, ScriptBuf},
-    std::collections::HashMap,
+    std::collections::{HashMap, HashSet},
 };
 
 #[derive(Default)]
@@ -52,19 +52,17 @@ impl AddressUpdater {
         &self,
         cache: &mut UpdaterCache,
     ) -> Result<(), StoreError> {
+        // For any spent outpoint that wasn't created in the same block,
+        // we need to fetch from DB or ephemeral memory in UpdaterCache.
+        let (old_spent_outpoints, new_spent_outpoints): (Vec<_>, Vec<_>) = self
+            .spent_outpoints
+            .iter()
+            .partition(|outpoint| !self.new_outpoints.contains_key(outpoint));
+
         // ------------------------------------------------------
         // 1. Map all spent outpoints to their scriptPubKey
         // ------------------------------------------------------
-        let spent_map = if !self.spent_outpoints.is_empty() {
-            // For any spent outpoint that wasn't created in the same block,
-            // we need to fetch from DB or ephemeral memory in UpdaterCache.
-            let old_spent_outpoints = self
-                .spent_outpoints
-                .iter()
-                .filter(|outpoint| !self.new_outpoints.contains_key(outpoint))
-                .cloned()
-                .collect::<Vec<_>>();
-
+        let spent_map = if !old_spent_outpoints.is_empty() {
             cache.get_outpoints_to_script_pubkey(&old_spent_outpoints, true)?
         } else {
             HashMap::new()
@@ -84,11 +82,13 @@ impl AddressUpdater {
         }
 
         // b) Insert new outpoints
+        let new_spent_outpoints = new_spent_outpoints.into_iter().collect::<HashSet<_>>();
         for (outpoint, script_pubkey) in &self.new_outpoints {
             let entry: &mut (Vec<OutPoint>, Vec<OutPoint>) =
                 spk_map.entry(script_pubkey.clone()).or_default();
+
             // add it only if it's not already in the spent list
-            if !entry.1.contains(outpoint) {
+            if !new_spent_outpoints.contains(outpoint) {
                 entry.0.push(*outpoint); // new
             }
         }
