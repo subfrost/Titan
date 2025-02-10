@@ -58,7 +58,14 @@ impl AddressUpdater {
         let spent_map = if !self.spent_outpoints.is_empty() {
             // For any spent outpoint that wasn't created in the same block,
             // we need to fetch from DB or ephemeral memory in UpdaterCache.
-            cache.get_outpoints_to_script_pubkey(self.spent_outpoints.clone(), true)?
+            let old_spent_outpoints = self
+                .spent_outpoints
+                .iter()
+                .filter(|outpoint| !self.new_outpoints.contains_key(outpoint))
+                .cloned()
+                .collect::<Vec<_>>();
+
+            cache.get_outpoints_to_script_pubkey(&old_spent_outpoints, true)?
         } else {
             HashMap::new()
         };
@@ -70,16 +77,20 @@ impl AddressUpdater {
         //   This allows us to do all grouping in one structure.
         let mut spk_map: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)> = HashMap::new();
 
-        // a) Insert new outpoints
-        for (outpoint, script_pubkey) in &self.new_outpoints {
-            let entry = spk_map.entry(script_pubkey.clone()).or_default();
-            entry.0.push(*outpoint); // new
-        }
-
-        // b) Insert spent outpoints
+        // a) Insert spent outpoints
         for (outpoint, script_pubkey) in spent_map {
             let entry = spk_map.entry(script_pubkey).or_default();
             entry.1.push(outpoint); // spent
+        }
+
+        // b) Insert new outpoints
+        for (outpoint, script_pubkey) in &self.new_outpoints {
+            let entry: &mut (Vec<OutPoint>, Vec<OutPoint>) =
+                spk_map.entry(script_pubkey.clone()).or_default();
+            // add it only if it's not already in the spent list
+            if !entry.1.contains(outpoint) {
+                entry.0.push(*outpoint); // new
+            }
         }
 
         cache.set_script_pubkey_entries(spk_map);

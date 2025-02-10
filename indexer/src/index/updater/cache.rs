@@ -6,13 +6,14 @@ use {
             BatchDelete, BatchUpdate, BlockId, Inscription, RuneEntry, TransactionStateChange,
         },
     },
-    bitcoin::{BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
+    bitcoin::{consensus, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
     ordinals::{Rune, RuneId},
     std::{
         cmp,
         collections::{HashMap, HashSet},
         str::FromStr,
         sync::Arc,
+        time::Instant,
     },
     titan_types::{Block, Event, InscriptionId, Location, TxOutEntry},
     tokio::sync::mpsc,
@@ -131,6 +132,51 @@ impl UpdaterCache {
 
     pub fn decrement_runes_count(&mut self) -> () {
         self.update.rune_count -= 1;
+    }
+
+    pub fn get_transaction(&self, txid: Txid) -> Result<Transaction> {
+        if let Some(transaction) = self.update.transactions.get(&txid) {
+            return Ok(transaction.clone());
+        } else {
+            let transaction = self.db.read().get_transaction_raw(&txid, None)?;
+            return Ok(consensus::deserialize(&transaction)?);
+        }
+    }
+
+    pub fn get_transaction_confirming_block(&self, txid: Txid) -> Result<BlockId> {
+        if let Some(block_id) = self.update.transaction_confirming_block.get(&txid) {
+            return Ok(block_id.clone());
+        } else {
+            let block_id = self.db.read().get_transaction_confirming_block(&txid)?;
+            return Ok(block_id);
+        }
+    }
+
+    pub fn precache_tx_outs(&mut self, txs: &Vec<Transaction>) -> Result<()> {
+        let outpoints: Vec<_> = txs
+            .iter()
+            .flat_map(|tx| tx.input.iter().map(|input| input.previous_output.into()))
+            .collect();
+
+        let mut to_fetch = HashSet::new();
+        for outpoint in outpoints.iter() {
+            if !self.update.txouts.contains_key(outpoint) {
+                to_fetch.insert(outpoint.clone());
+            }
+        }
+
+        if !to_fetch.is_empty() {
+            let tx_outs = self
+                .db
+                .read()
+                .get_tx_outs(&to_fetch.iter().cloned().collect(), None)?;
+
+            for (outpoint, tx_out) in tx_outs.iter() {
+                self.update.txouts.insert(outpoint.clone(), tx_out.clone());
+            }
+        }
+
+        Ok(())
     }
 
     pub fn get_tx_out(&self, outpoint: &OutPoint) -> Result<TxOutEntry> {
@@ -276,32 +322,13 @@ impl UpdaterCache {
 
     pub fn get_outpoints_to_script_pubkey(
         &self,
-        outpoints: Vec<OutPoint>,
+        outpoints: &Vec<OutPoint>,
         optimistic: bool,
     ) -> Result<HashMap<OutPoint, ScriptBuf>> {
-        let mut results = HashMap::new();
-        let mut to_fetch = HashSet::new();
-        for outpoint in outpoints.iter() {
-            if let Some(script_pubkey) = self.update.script_pubkeys_outpoints.get(outpoint) {
-                results.insert(outpoint.clone(), script_pubkey.clone());
-            } else {
-                to_fetch.insert(outpoint.clone());
-            }
-        }
-
-        if !to_fetch.is_empty() {
-            let script_pubkeys = self.db.read().get_outpoints_to_script_pubkey(
-                &to_fetch.iter().cloned().collect(),
-                None,
-                optimistic,
-            )?;
-
-            for (outpoint, script_pubkey) in script_pubkeys.iter() {
-                results.insert(outpoint.clone(), script_pubkey.clone());
-            }
-        }
-
-        return Ok(results);
+        return Ok(self
+            .db
+            .read()
+            .get_outpoints_to_script_pubkey(&outpoints, None, optimistic)?);
     }
 
     pub fn batch_set_outpoints_to_script_pubkey(&mut self, items: HashMap<OutPoint, ScriptBuf>) {
@@ -324,20 +351,24 @@ impl UpdaterCache {
         let db = self.db.write();
 
         if !self.settings.mempool {
+            let start = Instant::now();
             self.prepare_to_delete(
                 self.settings.max_recoverable_reorg_depth,
                 self.settings.index_spent_outputs,
             )?;
+            info!("Prepared to delete in {:?}", start.elapsed());
         }
 
         if !self.update.is_empty() {
+            let start = Instant::now();
             db.batch_update(&self.update, self.settings.mempool)?;
-            info!("Flushed update: {}", self.update);
+            info!("Flushed update: {} in {:?}", self.update, start.elapsed());
         }
 
         if !self.delete.is_empty() {
+            let start = Instant::now();
             db.batch_delete(&self.delete)?;
-            trace!("Flushed delete: {}", self.delete);
+            info!("Flushed delete: {} in {:?}", self.delete, start.elapsed());
         }
 
         // Clear the cache

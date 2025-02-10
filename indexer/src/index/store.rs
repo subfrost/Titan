@@ -6,7 +6,7 @@ use {
             TransactionStateChange,
         },
     },
-    bitcoin::{hex::HexToArrayError, BlockHash, OutPoint, ScriptBuf, Txid},
+    bitcoin::{consensus, hex::HexToArrayError, BlockHash, OutPoint, ScriptBuf, Txid},
     ordinals::{Rune, RuneId},
     std::collections::{HashMap, HashSet},
     thiserror::Error,
@@ -24,6 +24,8 @@ pub enum StoreError {
     HexToArray(#[from] HexToArrayError),
     #[error("not found: {0}")]
     NotFound(String),
+    #[error("deserialize error {0}")]
+    Deserialize(#[from] consensus::encode::Error),
 }
 
 impl StoreError {

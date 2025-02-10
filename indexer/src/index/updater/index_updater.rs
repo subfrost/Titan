@@ -372,13 +372,10 @@ impl Updater {
             .with_label_values(&["index_block"])
             .start_timer();
 
-        let mut transaction_parser = TransactionParser::new(
-            &rpc_client,
-            self.settings.chain,
-            height as u32,
-            false,
-            cache,
-        )?;
+        cache.precache_tx_outs(&bitcoin_block.txdata)?;
+
+        let mut transaction_parser =
+            TransactionParser::new(&rpc_client, self.settings.chain, height, false, cache)?;
 
         let block_header: bitcoin::block::Header = bitcoin_block.header.clone();
         let block_height = height;
@@ -387,8 +384,6 @@ impl Updater {
             .latency
             .with_label_values(&["parse_block"])
             .start_timer();
-
-        transaction_parser.pre_cache_tx_outs(&bitcoin_block.txdata)?;
 
         let block_data = bitcoin_block
             .txdata
@@ -514,7 +509,7 @@ impl Updater {
 
         let rpc_client = self.settings.get_new_rpc_client()?;
         let mut transaction_parser =
-            TransactionParser::new(&rpc_client, self.settings.chain, height as u32, true, cache)?;
+            TransactionParser::new(&rpc_client, self.settings.chain, height, true, cache)?;
 
         let result = transaction_parser.parse(now as u32, 0, tx, *txid)?;
         if result.has_rune_updates() || self.settings.index_addresses {

@@ -255,12 +255,6 @@ impl<'a> Rollback<'a> {
 
         let outpoints_to_script_pubkeys = self.cache.get_outpoints_to_script_pubkey(&outpoints)?;
 
-        // Get script pubkeys.
-        let script_pubkeys = outpoints_to_script_pubkeys
-            .values()
-            .cloned()
-            .collect::<HashSet<_>>();
-
         // Update script pubkey entries.
         let mut script_pubkey_entries: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)> =
             HashMap::new();
@@ -275,7 +269,7 @@ impl<'a> Rollback<'a> {
                 .entry(script_pubkey.clone())
                 .or_default();
 
-            // Add spent outpoint.
+            // Add "spent" outpoint.
             entry.1.push(outpoint);
         }
 
@@ -301,8 +295,10 @@ impl<'a> Rollback<'a> {
                     .entry(script_pubkey.clone())
                     .or_default();
 
-                // Restore outpoint.
-                entry.0.push(prev_outpoint);
+                // Restore outpoint only if it's not already in the spent list.
+                if !entry.1.contains(&prev_outpoint) {
+                    entry.0.push(prev_outpoint);
+                }
             }
         }
 

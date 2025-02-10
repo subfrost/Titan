@@ -31,7 +31,7 @@ type Result<T> = std::result::Result<T, TransactionParserError>;
 
 pub(super) struct TransactionParser<'a, 'client> {
     pub(super) client: &'client Client,
-    pub(super) height: u32,
+    pub(super) height: u64,
     pub(super) cache: &'a mut UpdaterCache,
     pub(super) minimum_rune: Rune,
     pub(super) should_index_runes: bool,
@@ -42,13 +42,13 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
     pub(super) fn new(
         client: &'client Client,
         chain: Chain,
-        height: u32,
+        height: u64,
         mempool: bool,
         cache: &'a mut UpdaterCache,
     ) -> Result<Self> {
-        let minimum_rune = Rune::minimum_at_height(chain.into(), Height(height));
+        let minimum_rune = Rune::minimum_at_height(chain.into(), Height(height as u32));
 
-        let min_rune_height = chain.first_rune_height();
+        let min_rune_height = chain.first_rune_height() as u64;
         let should_index_runes = height >= min_rune_height;
 
         Ok(Self {
@@ -59,21 +59,6 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
             should_index_runes,
             mempool,
         })
-    }
-
-    pub(super) fn pre_cache_tx_outs(&mut self, tx: &Vec<Transaction>) -> Result<()> {
-        let outpoints: Vec<_> = tx
-            .iter()
-            .flat_map(|tx| tx.input.iter().map(|input| input.previous_output.into()))
-            .collect();
-
-        let tx_outs = self.cache.get_tx_outs(&outpoints)?;
-
-        for (outpoint, tx_out) in tx_outs {
-            self.cache.set_tx_out(outpoint, tx_out);
-        }
-
-        Ok(())
     }
 
     pub(super) fn parse(
@@ -526,46 +511,73 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
                     continue;
                 }
 
-                let Some(tx_info) = self
-                    .client
-                    .get_raw_transaction_info(&input.previous_output.txid, None)
-                    .into_option()?
-                else {
-                    panic!(
-                        "can't get input transaction: {}",
-                        input.previous_output.txid
-                    );
-                };
-
-                let taproot = tx_info.vout[input.previous_output.vout.into_usize()]
-                    .script_pub_key
-                    .script()?
-                    .is_p2tr();
-
-                if !taproot {
-                    continue;
-                }
-
-                let commit_tx_height = self
-                    .client
-                    .get_block_header_info(&tx_info.blockhash.unwrap())
-                    .into_option()?
-                    .unwrap()
-                    .height;
-
-                let confirmations = self
-                    .height
-                    .checked_sub(commit_tx_height.try_into().unwrap())
-                    .unwrap()
-                    + 1;
-
-                if confirmations >= Runestone::COMMIT_CONFIRMATIONS.into() {
-                    return Ok(true);
+                match self.validate_commit_transaction_with_cache(input.previous_output) {
+                    Ok(true) => return Ok(true),
+                    Ok(false) => continue,
+                    Err(e) => {
+                        if matches!(e, TransactionParserError::Store(StoreError::NotFound(_))) {
+                            return self.validate_commit_transaction(input.previous_output);
+                        } else {
+                            return Err(e.into());
+                        }
+                    }
                 }
             }
         }
 
         Ok(false)
+    }
+
+    fn validate_commit_transaction_with_cache(&self, outpoint: OutPoint) -> Result<bool> {
+        let transaction = self.cache.get_transaction(outpoint.txid)?;
+
+        let taproot = transaction.output[outpoint.vout.into_usize()]
+            .script_pubkey
+            .is_p2tr();
+
+        if !taproot {
+            return Ok(false);
+        }
+
+        let block_id = self.cache.get_transaction_confirming_block(outpoint.txid)?;
+
+        let confirmations = self.height.checked_sub(block_id.height).unwrap() + 1;
+
+        Ok(confirmations >= Runestone::COMMIT_CONFIRMATIONS.into())
+    }
+
+    fn validate_commit_transaction(&self, outpoint: OutPoint) -> Result<bool> {
+        let Some(tx_info) = self
+            .client
+            .get_raw_transaction_info(&outpoint.txid, None)
+            .into_option()?
+        else {
+            panic!("can't get input transaction: {}", outpoint.txid);
+        };
+
+        let taproot = tx_info.vout[outpoint.vout.into_usize()]
+            .script_pub_key
+            .script()?
+            .is_p2tr();
+
+        if !taproot {
+            return Ok(false);
+        }
+
+        let commit_tx_height = self
+            .client
+            .get_block_header_info(&tx_info.blockhash.unwrap())
+            .into_option()?
+            .unwrap()
+            .height;
+
+        let confirmations = self
+            .height
+            .checked_sub(commit_tx_height.try_into().unwrap())
+            .unwrap()
+            + 1;
+
+        Ok(confirmations >= Runestone::COMMIT_CONFIRMATIONS.into())
     }
 
     fn unallocated(&self, tx: &Transaction) -> Result<HashMap<RuneId, Lot>> {
