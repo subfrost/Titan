@@ -220,7 +220,7 @@ impl Updater {
                     if self.settings.index_addresses {
                         let _timer = self
                             .latency
-                            .with_label_values(&["batch_update_script_pubkeys_for_block"])
+                            .with_label_values(&["batch_update_script_pubkeys_for_commit"])
                             .start_timer();
                         address_updater.batch_update_script_pubkey(&mut cache)?;
                     }
