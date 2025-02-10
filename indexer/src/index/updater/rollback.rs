@@ -144,24 +144,28 @@ impl<'a> Rollback<'a> {
         // if a reorg has happened and a rune was etched but it doesn't exist now,
         // we need to remove all mints and transfer edicts from other transactions
         // that might have happened.
-        if let Some((id, rune)) = transaction.etched {
-            let rune_entry = self.cache.get_rune(&id)?;
-            self.cache.add_rune_to_delete(id);
-            self.cache.add_rune_id_to_delete(rune);
-            self.cache.add_inscription_to_delete(InscriptionId {
-                txid: txid.clone(),
-                index: 0,
-            });
+        if !self.cache.mempool {
+            if let Some((id, rune)) = transaction.etched {
+                let rune_entry = self.cache.get_rune(&id);
+                if let Some(rune_entry) = rune_entry {
+                    self.cache.add_rune_to_delete(id);
+                    self.cache.add_rune_id_to_delete(rune);
+                    self.cache.add_inscription_to_delete(InscriptionId {
+                        txid: txid.clone(),
+                        index: 0,
+                    });
 
-            // Decrease rune count
-            self.cache.decrement_runes_count();
-            self.cache.add_rune_number_to_delete(rune_entry.number);
+                    // Decrease rune count
+                    self.cache.decrement_runes_count();
+                    self.cache.add_rune_number_to_delete(rune_entry.number);
 
-            // self.store.delete_rune_id_number(rune_entry.number)?;
-            // self.update_rune_numbers_after_revert(rune_entry.number, self.runes)?;
+                    // self.store.delete_rune_id_number(rune_entry.number)?;
+                    // self.update_rune_numbers_after_revert(rune_entry.number, self.runes)?;
 
-            // Delete all rune transactions
-            self.cache.add_delete_all_rune_transactions(id);
+                    // Delete all rune transactions
+                    self.cache.add_delete_all_rune_transactions(id);
+                }
+            }
         }
 
         // Remove mints if any.
@@ -199,41 +203,45 @@ impl<'a> Rollback<'a> {
     }
 
     fn update_mints(&mut self, rune_id: &RuneId, amount: i128) -> Result<()> {
-        let mut rune_entry = self.cache.get_rune(rune_id)?;
+        let rune_entry = self.cache.get_rune(rune_id);
 
-        if self.cache.mempool {
-            let result = rune_entry.pending_mints.saturating_add_signed(amount);
-            rune_entry.pending_mints = result;
-        } else {
-            let result = rune_entry.mints.saturating_add_signed(amount);
+        if let Some(mut rune_entry) = rune_entry {
+            if self.cache.mempool {
+                let result = rune_entry.pending_mints.saturating_add_signed(amount);
+                rune_entry.pending_mints = result;
+            } else {
+                let result = rune_entry.mints.saturating_add_signed(amount);
 
-            rune_entry.mints = result;
+                rune_entry.mints = result;
+            }
+
+            self.cache.set_rune(rune_id.clone(), rune_entry);
         }
-
-        self.cache.set_rune(rune_id.clone(), rune_entry);
 
         Ok(())
     }
 
     fn update_burn_balance(&mut self, rune_id: &RuneId, amount: i128) -> Result<()> {
-        let mut rune_entry = self.cache.get_rune(rune_id)?;
+        let rune_entry = self.cache.get_rune(rune_id);
 
-        if self.cache.mempool {
-            let result = rune_entry
-                .pending_burns
-                .checked_add_signed(amount)
-                .ok_or(RollbackError::Overflow("burn".to_string()))?;
-            rune_entry.pending_burns = result;
-        } else {
-            let result = rune_entry
-                .pending_burns
-                .checked_add_signed(amount)
-                .ok_or(RollbackError::Overflow("burn".to_string()))?;
+        if let Some(mut rune_entry) = rune_entry {
+            if self.cache.mempool {
+                let result = rune_entry
+                    .pending_burns
+                    .checked_add_signed(amount)
+                    .ok_or(RollbackError::Overflow("burn".to_string()))?;
+                rune_entry.pending_burns = result;
+            } else {
+                let result = rune_entry
+                    .pending_burns
+                    .checked_add_signed(amount)
+                    .ok_or(RollbackError::Overflow("burn".to_string()))?;
 
-            rune_entry.burned = result;
+                rune_entry.burned = result;
+            }
+
+            self.cache.set_rune(rune_id.clone(), rune_entry);
         }
-
-        self.cache.set_rune(rune_id.clone(), rune_entry);
 
         Ok(())
     }
@@ -253,7 +261,10 @@ impl<'a> Rollback<'a> {
             })
             .collect::<Vec<_>>();
 
-        let outpoints_to_script_pubkeys = self.cache.get_outpoints_to_script_pubkey(&outpoints)?;
+        // optimistic true because some of the outpoints might be op_return
+        let outpoints_to_script_pubkeys = self
+            .cache
+            .get_outpoints_to_script_pubkey(&outpoints, true)?;
 
         // Update script pubkey entries.
         let mut script_pubkey_entries: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)> =
@@ -261,16 +272,18 @@ impl<'a> Rollback<'a> {
 
         // Delete outpoints.
         for outpoint in outpoints {
-            let script_pubkey = outpoints_to_script_pubkeys
-                .get(&outpoint)
-                .unwrap_or_else(|| panic!("script pubkey not found"));
+            let script_pubkey = outpoints_to_script_pubkeys.get(&outpoint);
 
-            let entry = script_pubkey_entries
-                .entry(script_pubkey.clone())
-                .or_default();
+            if let Some(script_pubkey) = script_pubkey {
+                let entry = script_pubkey_entries
+                    .entry(script_pubkey.clone())
+                    .or_default();
 
-            // Add "spent" outpoint.
-            entry.1.push(outpoint);
+                // Add "spent" outpoint.
+                entry.1.push(outpoint);
+            } else {
+                // op_return outpoint
+            }
         }
 
         let prev_outpoints = tx_to_state_changes
@@ -283,8 +296,9 @@ impl<'a> Rollback<'a> {
             // Remove spent outpoints.
             self.cache.add_prev_outpoint_to_delete(&prev_outpoints);
         } else {
-            let outpoints_to_script_pubkeys: HashMap<OutPoint, ScriptBuf> =
-                self.cache.get_outpoints_to_script_pubkey(&prev_outpoints)?;
+            let outpoints_to_script_pubkeys: HashMap<OutPoint, ScriptBuf> = self
+                .cache
+                .get_outpoints_to_script_pubkey(&prev_outpoints, false)?;
 
             for prev_outpoint in prev_outpoints {
                 let script_pubkey = outpoints_to_script_pubkeys

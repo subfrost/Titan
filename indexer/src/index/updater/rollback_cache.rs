@@ -65,13 +65,8 @@ impl<'a> RollbackCache<'a> {
         self.update.runes_count -= 1;
     }
 
-    pub fn get_rune(&mut self, rune_id: &RuneId) -> Result<RuneEntry> {
-        Ok(self
-            .update
-            .rune_entry
-            .get(rune_id)
-            .ok_or(StoreError::NotFound(rune_id.to_string()))?
-            .clone())
+    pub fn get_rune(&mut self, rune_id: &RuneId) -> Option<RuneEntry> {
+        self.update.rune_entry.get(rune_id).cloned()
     }
 
     pub fn set_rune(&mut self, rune_id: RuneId, rune_entry: RuneEntry) {
@@ -109,10 +104,11 @@ impl<'a> RollbackCache<'a> {
     pub fn get_outpoints_to_script_pubkey(
         &self,
         outpoints: &Vec<OutPoint>,
+        optimistic: bool,
     ) -> Result<HashMap<OutPoint, ScriptBuf>> {
         let script_pubkeys =
             self.db
-                .get_outpoints_to_script_pubkey(outpoints, Some(self.mempool), false)?;
+                .get_outpoints_to_script_pubkey(outpoints, Some(self.mempool), optimistic)?;
         Ok(script_pubkeys)
     }
 
