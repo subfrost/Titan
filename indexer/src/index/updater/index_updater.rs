@@ -297,7 +297,7 @@ impl Updater {
                 self.db.clone(),
                 UpdaterCacheSettings::new(&self.settings, true),
             )?;
-            let mut address_updater = AddressUpdater::new();
+            let mut address_updater = AddressUpdater::new(self.settings.chain);
             for txid in tx_order {
                 let tx = tx_map.get(&txid).unwrap();
                 if self.index_tx(&txid, &tx, &mut cache, Some(&mut address_updater))? {
@@ -399,7 +399,7 @@ impl Updater {
             .collect::<Vec<_>>();
         drop(block_tx_timer);
 
-        let mut address_updater = AddressUpdater::new();
+        let mut address_updater = AddressUpdater::new(self.settings.chain);
         let mut transaction_updater = TransactionUpdater::new(
             cache,
             self.settings.clone().into(),
@@ -459,7 +459,7 @@ impl Updater {
             UpdaterCacheSettings::new(&self.settings, true),
         )?;
 
-        let mut address_updater = AddressUpdater::new();
+        let mut address_updater = AddressUpdater::new(self.settings.chain);
         if self.index_tx(txid, tx, &mut cache, Some(&mut address_updater))? {
             self.mempool_debouncer.write().unwrap().mark_as_added(*txid);
 

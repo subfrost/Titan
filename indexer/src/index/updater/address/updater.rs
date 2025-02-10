@@ -1,6 +1,8 @@
 use {
-    crate::index::{updater::cache::UpdaterCache, StoreError},
-    crate::models::ScriptPubkeyEntry,
+    crate::{
+        index::{updater::cache::UpdaterCache, Chain, StoreError},
+        models::ScriptPubkeyEntry,
+    },
     bitcoin::{OutPoint, ScriptBuf},
     std::collections::{HashMap, HashSet},
 };
@@ -12,19 +14,25 @@ pub struct AddressUpdater {
 
     /// All outpoints spent in this block (except coinbase).
     spent_outpoints: Vec<OutPoint>,
+
+    /// The chain of the block we're indexing
+    chain: Chain,
 }
 
 impl AddressUpdater {
-    pub fn new() -> Self {
+    pub fn new(chain: Chain) -> Self {
         Self {
             new_outpoints: Vec::new(),
             spent_outpoints: Vec::new(),
+            chain,
         }
     }
 
     /// Remember a newly created outpoint -> scriptPubKey
     pub fn add_new_outpoint(&mut self, outpoint: OutPoint, script_pubkey: ScriptBuf) {
-        self.new_outpoints.push((outpoint, script_pubkey));
+        if self.chain.address_from_script(&script_pubkey).is_ok() {
+            self.new_outpoints.push((outpoint, script_pubkey));
+        }
     }
 
     /// Remember a spent outpoint
