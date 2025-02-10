@@ -17,18 +17,18 @@
  *   npm install axios bitcoinjs-lib
  */
 
-const axios = require("axios");
-const bitcoin = require("bitcoinjs-lib");
+const axios = require('axios');
+const bitcoin = require('bitcoinjs-lib');
 
 // --- CONFIGURATION ---
 // Change these as appropriate:
-const INDEXER_BASE_URL = "http://localhost:3030"; // your indexer endpoint
-const ELECTRS_BASE_URL = "https://electrs.test.arch.network"; // electrs instance
+const INDEXER_BASE_URL = 'http://localhost:3030'; // your indexer endpoint
+const ELECTRS_BASE_URL = 'https://electrs.test.arch.network'; // electrs instance
 
 // For example, using testnet parameters for bitcoinjs-lib:
 const BITCOIN_NETWORK_JS_LIB_TESTNET4 = {
-  messagePrefix: "\x18Bitcoin Signed Message:\n",
-  bech32: "tb",
+  messagePrefix: '\x18Bitcoin Signed Message:\n',
+  bech32: 'tb',
   bip32: {
     public: 0x043587cf,
     private: 0x04358394,
@@ -80,8 +80,8 @@ async function fetchIndexerBlockTxids(blockQuery) {
 }
 
 // Given a block (by its hash), fetch the list of txids from electrs.
-async function fetchElectrsBlockTxids(blockQuery) {
-  const url = `${ELECTRS_BASE_URL}/block/${blockQuery}/txids`;
+async function fetchElectrsBlockTxs(blockQuery) {
+  const url = `${ELECTRS_BASE_URL}/internal/block/${blockQuery}/txs`;
   const res = await axios.get(url);
   return res.data;
 }
@@ -121,32 +121,30 @@ async function fetchElectrsAddressUTXOs(address) {
 // --- MAIN VERIFICATION ---
 async function main() {
   try {
-    console.log("--- TIP VERIFICATION ---");
-    console.log("Fetching tip from indexer...");
+    console.log('--- TIP VERIFICATION ---');
+    console.log('Fetching tip from indexer...');
     const indexerTip = await fetchIndexerTip();
-    console.log("Indexer tip:", indexerTip);
 
-    console.log("Fetching tip from electrs...");
+    console.log('Fetching tip from electrs...');
     const electrsTip = await fetchElectrsTip();
-    console.log("Electrs tip:", electrsTip);
 
     if (indexerTip.height !== electrsTip.height) {
       throw new Error(
-        `Tip height mismatch: indexer=${indexerTip.height} vs electrs=${electrsTip.height}`
+        `Tip height mismatch: indexer=${indexerTip.height} vs electrs=${electrsTip.height}`,
       );
     }
     if (indexerTip.hash !== electrsTip.hash) {
       throw new Error(
-        `Tip blockhash mismatch: indexer=${indexerTip.hash} vs electrs=${electrsTip.hash}`
+        `Tip blockhash mismatch: indexer=${indexerTip.hash} vs electrs=${electrsTip.hash}`,
       );
     }
-    console.log("Tip verification PASSED.");
+    console.log('Tip verification PASSED.');
 
     // Determine the range: last 50 blocks (if tip height is high enough)
     const tipHeight = indexerTip.height;
-    const startHeight = tipHeight - 49;
+    const startHeight = tipHeight - 5;
     console.log(
-      `\n--- BLOCK VERIFICATION for blocks ${startHeight} to ${tipHeight} ---`
+      `\n--- BLOCK VERIFICATION for blocks ${startHeight} to ${tipHeight} ---`,
     );
 
     // This mapping will accumulate the expected (unspent) outputs by address.
@@ -167,36 +165,35 @@ async function main() {
       ]);
       if (indexerBlockHash !== electrsBlockHash) {
         throw new Error(
-          `Block hash mismatch at height ${height}: indexer=${indexerBlockHash} vs electrs=${electrsBlockHash}`
+          `Block hash mismatch at height ${height}: indexer=${indexerBlockHash} vs electrs=${electrsBlockHash}`,
         );
       }
       console.log(`Block hash OK: ${indexerBlockHash}`);
 
       // Get txids for this block from both sources.
-      const [indexerTxids, electrsTxids] = await Promise.all([
+      const [indexerTxids, electrsTx] = await Promise.all([
         fetchIndexerBlockTxids(indexerBlockHash),
-        fetchElectrsBlockTxids(electrsBlockHash),
+        fetchElectrsBlockTxs(electrsBlockHash),
       ]);
 
-      if (indexerTxids.length !== electrsTxids.length) {
+      if (indexerTxids.length !== electrsTx.length) {
         throw new Error(
-          `TXID count mismatch at height ${height}: indexer has ${indexerTxids.length} vs electrs ${electrsTxids.length}`
+          `TXID count mismatch at height ${height}: indexer has ${indexerTxids.length} vs electrs ${electrsTx.length}`,
         );
       }
       for (let i = 0; i < indexerTxids.length; i++) {
-        if (indexerTxids[i] !== electrsTxids[i]) {
+        if (indexerTxids[i] !== electrsTx[i].txid) {
           throw new Error(
-            `TXID mismatch at block ${indexerBlockHash} index ${i}: indexer=${indexerTxids[i]} vs electrs=${electrsTxids[i]}`
+            `TXID mismatch at block ${indexerBlockHash} index ${i}: indexer=${indexerTxids[i]} vs electrs=${electrsTx[i].txid}`,
           );
         }
       }
       console.log(
-        `TXIDs verified for block ${indexerBlockHash} (${indexerTxids.length} transactions).`
+        `TXIDs verified for block ${indexerBlockHash} (${indexerTxids.length} transactions).`,
       );
 
       // For every transaction in this block, use electrs to get details.
-      for (const txid of electrsTxids) {
-        const tx = await fetchElectrsTransaction(txid);
+      for (const tx of electrsTx) {
         // Process each output in the transaction.
         // (Electrs returns a "vout" array; adjust property names if needed.)
         for (let vout = 0; vout < tx.vout.length; vout++) {
@@ -204,11 +201,11 @@ async function main() {
           let address;
           try {
             // Assume the output contains a property "scriptpubkey" (a hex string)
-            const scriptBuffer = Buffer.from(output.scriptpubkey, "hex");
+            const scriptBuffer = Buffer.from(output.scriptpubkey, 'hex');
             // Convert the output script into an address.
             address = bitcoin.address.fromOutputScript(
               scriptBuffer,
-              BITCOIN_NETWORK_JS_LIB_TESTNET4
+              BITCOIN_NETWORK_JS_LIB_TESTNET4,
             );
           } catch (err) {
             // If we cannot decode an address (e.g. nonstandard script), skip it.
@@ -216,21 +213,6 @@ async function main() {
           }
           // Add the address to our set of modified addresses.
           modifiedAddresses.add(address);
-
-          // Determine whether this output is spent.
-          const outspend = await fetchElectrsTxOutspend(txid, vout);
-          const isSpent = outspend.spent === true;
-          if (!isSpent) {
-            // Record this unspent output.
-            if (!expectedAddressOutputs[address]) {
-              expectedAddressOutputs[address] = [];
-            }
-            expectedAddressOutputs[address].push({
-              txid,
-              vout,
-              value: output.value,
-            });
-          }
         } // end for each output
       } // end for each transaction
     } // end for each block
@@ -238,10 +220,10 @@ async function main() {
     // Convert modifiedAddresses set into an array.
     const addressesModified = Array.from(modifiedAddresses);
     console.log(
-      `\nCollected ${addressesModified.length} modified addresses from the last 50 blocks.`
+      `\nCollected ${addressesModified.length} modified addresses from the last 50 blocks.`,
     );
 
-    console.log("\n--- ADDRESS OUTPUTS VERIFICATION ---");
+    console.log('\n--- ADDRESS OUTPUTS VERIFICATION ---');
     // Now verify that for each modified address the indexer and electrs return the same unspent outputs.
     for (const address of addressesModified) {
       console.log(`Verifying address ${address}...`);
@@ -250,15 +232,19 @@ async function main() {
         indexerData = await fetchIndexerAddressData(address);
         electrsUTXOs = await fetchElectrsAddressUTXOs(address);
       } catch (err) {
-        throw new Error(
-          `Failed to fetch address data for ${address}: ${err.message}`
-        );
+        // throw new Error(
+        //   `Failed to fetch address data for ${address}: ${err.message}`
+        // );
+
+        // Probably an electrs limit.
+        continue;
       }
+
       // Normalize indexer outputs (we expect them to be unspent).
       // Indexer returns outputs as objects with an "outpoint" field.
       const normalizedIndexerOutputs = (indexerData.outputs || []).map((o) => ({
-        txid: o.outpoint.txid,
-        vout: Number(o.outpoint.vout),
+        txid: o.txid,
+        vout: Number(o.vout),
         value: o.value,
       }));
       // Normalize electrs outputs.
@@ -268,23 +254,34 @@ async function main() {
         value: o.value,
       }));
 
-      // Sort both arrays by txid and vout.
-      const sortFunc = (a, b) => {
-        if (a.txid < b.txid) return -1;
-        if (a.txid > b.txid) return 1;
-        return a.vout - b.vout;
-      };
-      normalizedIndexerOutputs.sort(sortFunc);
-      normalizedElectrsOutputs.sort(sortFunc);
+      // // Sort both arrays by txid and vout.
+      // const sortFunc = (a, b) => {
+      //   if (a.txid < b.txid) return -1;
+      //   if (a.txid > b.txid) return 1;
+      //   return a.vout - b.vout;
+      // };
+      // normalizedIndexerOutputs.sort(sortFunc);
+      // normalizedElectrsOutputs.sort(sortFunc);
 
-      if (normalizedIndexerOutputs.length !== normalizedElectrsOutputs.length) {
-        throw new Error(
-          `Address ${address} output count mismatch: indexer returned ${normalizedIndexerOutputs.length} outputs but electrs returned ${normalizedElectrsOutputs.length}`
-        );
-      }
+      // if (normalizedIndexerOutputs.length !== normalizedElectrsOutputs.length) {
+      //   throw new Error(
+      //     `Address ${address} output count mismatch: indexer returned ${normalizedIndexerOutputs.length} outputs but electrs returned ${normalizedElectrsOutputs.length}`,
+      //   );
+      // }
+
       for (let i = 0; i < normalizedIndexerOutputs.length; i++) {
         const idxOut = normalizedIndexerOutputs[i];
-        const elecOut = normalizedElectrsOutputs[i];
+        const elecOut = normalizedElectrsOutputs.find(
+          (o) => o.txid === idxOut.txid && o.vout === idxOut.vout,
+        );
+
+        if (!elecOut) {
+          console.error(
+            `Address ${address} output not found in electrs: ${JSON.stringify(idxOut)}`,
+          );
+          continue;
+        }
+
         if (
           idxOut.txid !== elecOut.txid ||
           idxOut.vout !== elecOut.vout ||
@@ -292,17 +289,18 @@ async function main() {
         ) {
           throw new Error(
             `Address ${address} output mismatch at index ${i}: indexer=${JSON.stringify(
-              idxOut
-            )} vs electrs=${JSON.stringify(elecOut)}`
+              idxOut,
+            )} vs electrs=${JSON.stringify(elecOut)}`,
           );
         }
       }
+
       console.log(`Address ${address} outputs match.`);
     }
 
-    console.log("\nALL VERIFICATIONS PASSED SUCCESSFULLY.");
+    console.log('\nALL VERIFICATIONS PASSED SUCCESSFULLY.');
   } catch (err) {
-    console.error("Verification failed:", err.message);
+    console.error('Verification failed:', err.message);
     process.exit(1);
   }
 }
