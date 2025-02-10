@@ -4,11 +4,11 @@
  *
  * This script verifies that our bitcoin indexer is producing the correct data.
  * It compares:
- *   - The tip (block height and hash)
- *   - For the last 50 blocks, the block hash and txids (in order)
- *   - For all addresses modified (i.e. that appear in any output in these blocks),
- *     it fetches the address endpoint from both providers and compares that they
- *     return the same unspent outputs.
+ *   - The tip (block height and hash) between the indexer and electrs.
+ *   - For the last several blocks, it compares the block hash and the ordered list of txids between the indexer and electrs.
+ *   - For every address modified (i.e. that appears in any output in these blocks), it:
+ *       (a) Compares basic UTXO fields (txid, vout, value) from the indexer against electrs.
+ *       (b) Compares the rune arrays (per output) from the indexer against Maestro.
  *
  * Usage:
  *   node verify_indexer.js
@@ -25,6 +25,14 @@ const bitcoin = require('bitcoinjs-lib');
 const INDEXER_BASE_URL = 'http://localhost:3030'; // your indexer endpoint
 const ELECTRS_BASE_URL = 'https://electrs.test.arch.network'; // electrs instance
 
+// Maestro configuration – update the URL and API key as needed.
+const MAESTRO_BASE_URL = 'https://xbt-testnet.gomaestro-api.org/v0';
+const MAESTRO_API_KEY = process.env.MAESTRO_API_KEY;
+
+if (!MAESTRO_API_KEY) {
+  throw new Error('MAESTRO_API_KEY is not set');
+}
+
 // For example, using testnet parameters for bitcoinjs-lib:
 const BITCOIN_NETWORK_JS_LIB_TESTNET4 = {
   messagePrefix: '\x18Bitcoin Signed Message:\n',
@@ -40,7 +48,7 @@ const BITCOIN_NETWORK_JS_LIB_TESTNET4 = {
 
 // --- UTILITY FUNCTIONS ---
 
-// Fetch tip from our indexer. We expect JSON { height: number, hash: string }
+// Fetch tip from our indexer. Expected JSON: { height: number, hash: string }
 async function fetchIndexerTip() {
   const url = `${INDEXER_BASE_URL}/tip`;
   const res = await axios.get(url);
@@ -79,14 +87,15 @@ async function fetchIndexerBlockTxids(blockQuery) {
   return res.data; // expected array of txid strings
 }
 
-// Given a block (by its hash), fetch the list of txids from electrs.
+// Given a block (by its hash), fetch the list of transactions from electrs.
+// (Here we use an internal endpoint that returns full transaction objects.)
 async function fetchElectrsBlockTxs(blockQuery) {
   const url = `${ELECTRS_BASE_URL}/internal/block/${blockQuery}/txs`;
   const res = await axios.get(url);
   return res.data;
 }
 
-// Fetch a transaction’s details from electrs (the JSON includes a "vout" array).
+// Fetch a transaction’s details from electrs (expected to include a "vout" array).
 async function fetchElectrsTransaction(txid) {
   const url = `${ELECTRS_BASE_URL}/tx/${txid}`;
   const res = await axios.get(url);
@@ -102,7 +111,7 @@ async function fetchElectrsTxOutspend(txid, vout) {
 }
 
 // Fetch address data from our indexer.
-// Expected JSON: { value: number, runes: [...], outputs: [ { outpoint: { txid, vout }, value, ... } ] }
+// Expected JSON: { value: number, runes: [...], outputs: [ { txid, vout, value, runes, ... } ] }
 async function fetchIndexerAddressData(address) {
   const url = `${INDEXER_BASE_URL}/address/${address}`;
   const res = await axios.get(url);
@@ -110,12 +119,30 @@ async function fetchIndexerAddressData(address) {
 }
 
 // Fetch address UTXO data from electrs.
-// We assume electrs exposes an endpoint that returns an array of UTXOs for the given address,
-// each having { txid, vout, value }.
+// Expected to return an array of objects with { txid, vout, value }.
 async function fetchElectrsAddressUTXOs(address) {
   const url = `${ELECTRS_BASE_URL}/address/${address}/utxo`;
   const res = await axios.get(url);
   return res.data;
+}
+
+// Fetch address UTXO data from Maestro.
+// We assume Maestro returns a response matching the following structure:
+//
+// {
+//   data: [ { txid, vout, height, satoshis, script_pubkey, address, mempool, runes, ... }, ... ],
+//   indexer_info: { ... },
+//   next_cursor: string
+// }
+async function fetchMaestroUTXOs(address) {
+  const url = `${MAESTRO_BASE_URL}/mempool/addresses/${address}/utxos?order=desc`;
+  const res = await axios.get(url, {
+    headers: {
+      'api-key': MAESTRO_API_KEY,
+      'Content-Type': 'application/json',
+    },
+  });
+  return res.data.data;
 }
 
 // --- MAIN VERIFICATION ---
@@ -124,9 +151,11 @@ async function main() {
     console.log('--- TIP VERIFICATION ---');
     console.log('Fetching tip from indexer...');
     const indexerTip = await fetchIndexerTip();
+    console.log('Indexer tip:', indexerTip);
 
     console.log('Fetching tip from electrs...');
     const electrsTip = await fetchElectrsTip();
+    console.log('Electrs tip:', electrsTip);
 
     if (indexerTip.height !== electrsTip.height) {
       throw new Error(
@@ -140,21 +169,22 @@ async function main() {
     }
     console.log('Tip verification PASSED.');
 
-    // Determine the range: last 50 blocks (if tip height is high enough)
+    // Determine the range: last few blocks (adjust as needed).
     const tipHeight = indexerTip.height;
-    const startHeight = tipHeight - 5;
+    const startHeight = tipHeight - 5; // using 6 blocks for this example
     console.log(
       `\n--- BLOCK VERIFICATION for blocks ${startHeight} to ${tipHeight} ---`,
     );
 
-    // This mapping will accumulate the expected (unspent) outputs by address.
-    // Structure: { [address]: [ { txid, vout, value } ] }
+    // This mapping will accumulate expected (unspent) outputs by address.
+    // Structure: { [address]: [ { txid, vout, value, runes } ] }
+    // (We will use the address outputs later for UTXO verification.)
     const expectedAddressOutputs = {};
 
     // Also keep a set of all addresses encountered ("modified addresses")
     const modifiedAddresses = new Set();
 
-    // Loop through the last 50 blocks.
+    // Loop through each block.
     for (let height = startHeight; height <= tipHeight; height++) {
       console.log(`\nVerifying block at height ${height}...`);
 
@@ -213,6 +243,7 @@ async function main() {
           }
           // Add the address to our set of modified addresses.
           modifiedAddresses.add(address);
+          // (Optionally, you could also record expected outputs here.)
         } // end for each output
       } // end for each transaction
     } // end for each block
@@ -220,82 +251,134 @@ async function main() {
     // Convert modifiedAddresses set into an array.
     const addressesModified = Array.from(modifiedAddresses);
     console.log(
-      `\nCollected ${addressesModified.length} modified addresses from the last 50 blocks.`,
+      `\nCollected ${addressesModified.length} modified addresses from the last blocks.`,
     );
 
     console.log('\n--- ADDRESS OUTPUTS VERIFICATION ---');
-    // Now verify that for each modified address the indexer and electrs return the same unspent outputs.
+    // For each modified address, perform two checks:
+    //  (a) Compare basic UTXO fields (txid, vout, value) between indexer and electrs.
+    //  (b) Compare the rune arrays from indexer outputs against Maestro’s response.
     for (const address of addressesModified) {
       console.log(`Verifying address ${address}...`);
-      let indexerData, electrsUTXOs;
+      let indexerData, electrsUTXOs, maestroUTXOs;
       try {
         indexerData = await fetchIndexerAddressData(address);
         electrsUTXOs = await fetchElectrsAddressUTXOs(address);
+        maestroUTXOs = await fetchMaestroUTXOs(address);
       } catch (err) {
-        // throw new Error(
-        //   `Failed to fetch address data for ${address}: ${err.message}`
-        // );
-
-        // Probably an electrs limit.
+        console.error(
+          `Failed to fetch address data for ${address}: ${err.message}`,
+        );
         continue;
       }
 
-      // Normalize indexer outputs (we expect them to be unspent).
-      // Indexer returns outputs as objects with an "outpoint" field.
-      const normalizedIndexerOutputs = (indexerData.outputs || []).map((o) => ({
+      // Normalize indexer outputs (basic fields).
+      // We assume indexer outputs are objects with properties: txid, vout, value, runes.
+      const normalizedIndexerBasic = (indexerData.outputs || []).map((o) => ({
         txid: o.txid,
         vout: Number(o.vout),
         value: o.value,
       }));
-      // Normalize electrs outputs.
+
+      // Normalize electrs outputs (basic fields).
       const normalizedElectrsOutputs = (electrsUTXOs || []).map((o) => ({
         txid: o.txid,
         vout: Number(o.vout),
         value: o.value,
       }));
 
-      // // Sort both arrays by txid and vout.
-      // const sortFunc = (a, b) => {
-      //   if (a.txid < b.txid) return -1;
-      //   if (a.txid > b.txid) return 1;
-      //   return a.vout - b.vout;
-      // };
-      // normalizedIndexerOutputs.sort(sortFunc);
-      // normalizedElectrsOutputs.sort(sortFunc);
+      // Sort both arrays by txid and vout.
+      const sortFunc = (a, b) => {
+        if (a.txid < b.txid) return -1;
+        if (a.txid > b.txid) return 1;
+        return a.vout - b.vout;
+      };
+      normalizedIndexerBasic.sort(sortFunc);
+      normalizedElectrsOutputs.sort(sortFunc);
 
-      // if (normalizedIndexerOutputs.length !== normalizedElectrsOutputs.length) {
-      //   throw new Error(
-      //     `Address ${address} output count mismatch: indexer returned ${normalizedIndexerOutputs.length} outputs but electrs returned ${normalizedElectrsOutputs.length}`,
-      //   );
-      // }
-
-      for (let i = 0; i < normalizedIndexerOutputs.length; i++) {
-        const idxOut = normalizedIndexerOutputs[i];
-        const elecOut = normalizedElectrsOutputs.find(
-          (o) => o.txid === idxOut.txid && o.vout === idxOut.vout,
+      if (normalizedIndexerBasic.length !== normalizedElectrsOutputs.length) {
+        throw new Error(
+          `Address ${address} basic output count mismatch: indexer returned ${normalizedIndexerBasic.length} outputs vs electrs returned ${normalizedElectrsOutputs.length}`,
         );
+      }
 
-        if (!elecOut) {
-          console.error(
-            `Address ${address} output not found in electrs: ${JSON.stringify(idxOut)}`,
-          );
-          continue;
-        }
-
+      for (let i = 0; i < normalizedIndexerBasic.length; i++) {
+        const idxOut = normalizedIndexerBasic[i];
+        const elecOut = normalizedElectrsOutputs[i];
         if (
           idxOut.txid !== elecOut.txid ||
           idxOut.vout !== elecOut.vout ||
           idxOut.value !== elecOut.value
         ) {
           throw new Error(
-            `Address ${address} output mismatch at index ${i}: indexer=${JSON.stringify(
+            `Address ${address} basic output mismatch at index ${i}: indexer=${JSON.stringify(
               idxOut,
             )} vs electrs=${JSON.stringify(elecOut)}`,
           );
         }
       }
+      console.log(`Address ${address} basic outputs match with electrs.`);
 
-      console.log(`Address ${address} outputs match.`);
+      // Now check runes arrays using Maestro.
+      // Normalize Maestro outputs.
+      // Maestro returns each utxo with properties: txid, vout, satoshis (value), runes.
+      const normalizedMaestroOutputs = (maestroUTXOs || []).map((o) => ({
+        txid: o.txid,
+        vout: Number(o.vout),
+        value: o.satoshis,
+        runes: o.runes, // e.g., [ { rune_id: '...', amount: number }, ... ]
+      }));
+
+      // Sort indexer outputs and Maestro outputs by txid and vout.
+      const normalizedIndexerForRunes = (indexerData.outputs || []).map(
+        (o) => ({
+          txid: o.txid,
+          vout: Number(o.vout),
+          runes: o.runes, // e.g., [ { rune_id: '...', amount: '123' }, ... ]
+        }),
+      );
+
+      // Helper to normalize the runes array by converting rune amounts to numbers and sorting by rune_id.
+      const normalizeRunes = (runes) =>
+        (runes || [])
+          .map((r) => ({ rune_id: r.rune_id, amount: Number(r.amount) }))
+          .sort((a, b) => a.rune_id.localeCompare(b.rune_id));
+
+      for (let i = 0; i < normalizedIndexerForRunes.length; i++) {
+        const idxOut = normalizedIndexerForRunes[i];
+        const maestroOut = normalizedMaestroOutputs.find(
+          (o) => o.txid === idxOut.txid && o.vout === idxOut.vout,
+        );
+
+        if (!maestroOut) {
+          // We are sure indexer has the right amount of outputs because we have tested it against electrs. So
+          // we can skip this output. Maestro only returns 100 outputs per address.
+          continue;
+        }
+
+        const idxRunes = normalizeRunes(idxOut.runes);
+        const maestroRunes = normalizeRunes(maestroOut.runes);
+        if (idxRunes.length !== maestroRunes.length) {
+          throw new Error(
+            `Address ${address} output ${idxOut.txid}:${idxOut.vout} runes length mismatch: indexer has ${idxRunes.length} vs Maestro has ${maestroRunes.length}`,
+          );
+        }
+
+        for (let j = 0; j < idxRunes.length; j++) {
+          if (
+            idxRunes[j].rune_id !== maestroRunes[j].rune_id ||
+            idxRunes[j].amount !== maestroRunes[j].amount
+          ) {
+            throw new Error(
+              `Address ${address} output ${idxOut.txid}:${idxOut.vout} runes mismatch at index ${j}: indexer=${JSON.stringify(
+                idxRunes[j],
+              )} vs Maestro=${JSON.stringify(maestroRunes[j])}`,
+            );
+          }
+        }
+      }
+
+      console.log(`Address ${address} runes match with Maestro.`);
     }
 
     console.log('\nALL VERIFICATIONS PASSED SUCCESSFULLY.');
