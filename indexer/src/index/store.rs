@@ -2,8 +2,8 @@ use {
     crate::{
         db::{RocksDB, RocksDBError},
         models::{
-            BatchDelete, BatchUpdate, BlockId, Inscription, RuneEntry, ScriptPubkeyEntry,
-            TransactionStateChange,
+            BatchDelete, BatchRollback, BatchUpdate, BlockId, Inscription, RuneEntry,
+            ScriptPubkeyEntry, TransactionStateChange,
         },
     },
     bitcoin::{hex::HexToArrayError, BlockHash, OutPoint, ScriptBuf, Txid},
@@ -64,7 +64,6 @@ pub trait Store {
     // mempool
     fn is_tx_in_mempool(&self, txid: &Txid) -> Result<bool, StoreError>;
     fn get_mempool_txids(&self) -> Result<HashSet<Txid>, StoreError>;
-    fn remove_mempool_tx(&self, txid: &Txid) -> Result<(), StoreError>;
 
     // outpoint
     fn get_tx_out(
@@ -77,13 +76,6 @@ pub trait Store {
         outpoints: &Vec<OutPoint>,
         mempool: Option<bool>,
     ) -> Result<HashMap<OutPoint, TxOutEntry>, StoreError>;
-    fn set_tx_out(
-        &self,
-        outpoint: &OutPoint,
-        tx_out: TxOutEntry,
-        mempool: bool,
-    ) -> Result<(), StoreError>;
-    fn delete_tx_out(&self, outpoint: &OutPoint, mempool: bool) -> Result<(), StoreError>;
 
     // transaction changes
     fn get_tx_state_changes(
@@ -91,7 +83,11 @@ pub trait Store {
         txid: &Txid,
         mempool: Option<bool>,
     ) -> Result<TransactionStateChange, StoreError>;
-    fn delete_tx_state_changes(&self, txid: &Txid, mempool: bool) -> Result<(), StoreError>;
+    fn get_txs_state_changes(
+        &self,
+        txids: &Vec<Txid>,
+        mempool: bool,
+    ) -> Result<HashMap<Txid, TransactionStateChange>, StoreError>;
 
     // bitcoin transactions
     fn get_transaction_raw(
@@ -104,13 +100,11 @@ pub trait Store {
         txid: &Txid,
         mempool: Option<bool>,
     ) -> Result<Transaction, StoreError>;
-    fn delete_transaction(&self, txid: &Txid, mempool: bool) -> Result<(), StoreError>;
     fn get_transaction_confirming_block(&self, txid: &Txid) -> Result<BlockId, StoreError>;
     fn get_transaction_confirming_blocks(
         &self,
         txids: &Vec<Txid>,
     ) -> Result<HashMap<Txid, Option<BlockId>>, StoreError>;
-    fn delete_transaction_confirming_block(&self, txid: &Txid) -> Result<(), StoreError>;
 
     // rune transactions
     fn get_last_rune_transactions(
@@ -119,19 +113,15 @@ pub trait Store {
         pagination: Option<Pagination>,
         mempool: Option<bool>,
     ) -> Result<PaginationResponse<Txid>, StoreError>;
-    fn delete_all_rune_transactions(&self, id: &RuneId, mempool: bool) -> Result<(), StoreError>;
 
     // runes
     fn get_runes_count(&self) -> Result<u64, StoreError>;
-    fn set_runes_count(&self, count: u64) -> Result<(), StoreError>;
     fn get_rune(&self, rune_id: &RuneId) -> Result<RuneEntry, StoreError>;
-    fn set_rune(&self, rune_id: &RuneId, rune_entry: RuneEntry) -> Result<(), StoreError>;
-    fn get_rune_id_by_number(&self, number: u64) -> Result<RuneId, StoreError>;
-    fn set_rune_id_number(&self, number: u64, rune_id: RuneId) -> Result<(), StoreError>;
-    fn delete_rune_id_number(&self, number: u64) -> Result<(), StoreError>;
-    fn delete_rune(&self, rune_id: &RuneId) -> Result<(), StoreError>;
     fn get_rune_id(&self, rune: &Rune) -> Result<RuneId, StoreError>;
-    fn delete_rune_id(&self, rune: &Rune) -> Result<(), StoreError>;
+    fn get_runes_by_ids(
+        &self,
+        rune_ids: &Vec<RuneId>,
+    ) -> Result<HashMap<RuneId, RuneEntry>, StoreError>;
     fn get_runes(
         &self,
         pagination: Pagination,
@@ -139,7 +129,6 @@ pub trait Store {
 
     // inscription
     fn get_inscription(&self, inscription_id: &InscriptionId) -> Result<Inscription, StoreError>;
-    fn delete_inscription(&self, inscription_id: &InscriptionId) -> Result<(), StoreError>;
 
     // address
     fn get_script_pubkey_entry(
@@ -152,31 +141,17 @@ pub trait Store {
         script_pubkeys: &Vec<ScriptBuf>,
         mempool: bool,
     ) -> Result<HashMap<ScriptBuf, ScriptPubkeyEntry>, StoreError>;
-    fn set_script_pubkey_entry(
-        &self,
-        script_pubkey: &ScriptBuf,
-        script_pubkey_entry: ScriptPubkeyEntry,
-        mempool: bool,
-    ) -> Result<(), StoreError>;
     fn get_outpoints_to_script_pubkey(
         &self,
         outpoints: &Vec<OutPoint>,
         mempool: Option<bool>,
         optimistic: bool,
     ) -> Result<HashMap<OutPoint, ScriptBuf>, StoreError>;
-    fn delete_script_pubkey_outpoints(
-        &self,
-        outpoints: &Vec<OutPoint>,
-        mempool: bool,
-    ) -> Result<(), StoreError>;
-    fn delete_spent_outpoints_in_mempool(
-        &self,
-        outpoints: &Vec<OutPoint>,
-    ) -> Result<(), StoreError>;
 
     // batch
-    fn batch_update(&self, update: BatchUpdate, mempool: bool) -> Result<(), StoreError>;
-    fn batch_delete(&self, delete: BatchDelete) -> Result<(), StoreError>;
+    fn batch_update(&self, update: &BatchUpdate, mempool: bool) -> Result<(), StoreError>;
+    fn batch_delete(&self, delete: &BatchDelete) -> Result<(), StoreError>;
+    fn batch_rollback(&self, rollback: &BatchRollback, mempool: bool) -> Result<(), StoreError>;
 }
 
 impl Store for RocksDB {
@@ -232,6 +207,13 @@ impl Store for RocksDB {
         Ok(self.delete_block(&hash)?)
     }
 
+    fn get_runes_by_ids(
+        &self,
+        rune_ids: &Vec<RuneId>,
+    ) -> Result<HashMap<RuneId, RuneEntry>, StoreError> {
+        Ok(self.get_runes_by_ids(rune_ids)?)
+    }
+
     fn get_runes(
         &self,
         pagination: Pagination,
@@ -257,10 +239,6 @@ impl Store for RocksDB {
 
     fn get_mempool_txids(&self) -> Result<HashSet<Txid>, StoreError> {
         Ok(self.get_mempool_txids()?)
-    }
-
-    fn remove_mempool_tx(&self, txid: &Txid) -> Result<(), StoreError> {
-        Ok(self.remove_mempool_tx(txid)?)
     }
 
     fn is_tx_in_mempool(&self, txid: &Txid) -> Result<bool, StoreError> {
@@ -314,19 +292,6 @@ impl Store for RocksDB {
         }
     }
 
-    fn set_tx_out(
-        &self,
-        outpoint: &OutPoint,
-        tx_out: TxOutEntry,
-        mempool: bool,
-    ) -> Result<(), StoreError> {
-        Ok(self.set_tx_out(outpoint, tx_out, mempool)?)
-    }
-
-    fn delete_tx_out(&self, outpoint: &OutPoint, mempool: bool) -> Result<(), StoreError> {
-        Ok(self.delete_tx_out(outpoint, mempool)?)
-    }
-
     fn get_tx_state_changes(
         &self,
         txid: &Txid,
@@ -345,8 +310,12 @@ impl Store for RocksDB {
         }
     }
 
-    fn delete_tx_state_changes(&self, txid: &Txid, mempool: bool) -> Result<(), StoreError> {
-        Ok(self.delete_tx_state_changes(txid, mempool)?)
+    fn get_txs_state_changes(
+        &self,
+        txids: &Vec<Txid>,
+        mempool: bool,
+    ) -> Result<HashMap<Txid, TransactionStateChange>, StoreError> {
+        Ok(self.get_txs_state_changes(txids, mempool)?)
     }
 
     fn get_transaction(
@@ -427,10 +396,6 @@ impl Store for RocksDB {
         }
     }
 
-    fn delete_transaction(&self, txid: &Txid, mempool: bool) -> Result<(), StoreError> {
-        Ok(self.delete_transaction(txid, mempool)?)
-    }
-
     fn get_transaction_confirming_block(&self, txid: &Txid) -> Result<BlockId, StoreError> {
         Ok(self.get_transaction_confirming_block(txid)?)
     }
@@ -442,56 +407,20 @@ impl Store for RocksDB {
         Ok(self.get_transaction_confirming_blocks(txids)?)
     }
 
-    fn delete_transaction_confirming_block(&self, txid: &Txid) -> Result<(), StoreError> {
-        Ok(self.delete_transaction_confirming_block(txid)?)
-    }
-
     fn get_runes_count(&self) -> Result<u64, StoreError> {
         Ok(self.get_runes_count()?)
-    }
-
-    fn set_runes_count(&self, count: u64) -> Result<(), StoreError> {
-        Ok(self.set_runes_count(count)?)
     }
 
     fn get_rune(&self, rune_id: &RuneId) -> Result<RuneEntry, StoreError> {
         Ok(self.get_rune(&rune_id.to_string())?)
     }
 
-    fn set_rune(&self, rune_id: &RuneId, rune_entry: RuneEntry) -> Result<(), StoreError> {
-        Ok(self.set_rune(&rune_id.to_string(), rune_entry)?)
-    }
-
-    fn get_rune_id_by_number(&self, number: u64) -> Result<RuneId, StoreError> {
-        Ok(self.get_rune_id_by_number(number)?)
-    }
-
-    fn set_rune_id_number(&self, number: u64, rune_id: RuneId) -> Result<(), StoreError> {
-        Ok(self.set_rune_id_number(number, rune_id)?)
-    }
-
-    fn delete_rune_id_number(&self, number: u64) -> Result<(), StoreError> {
-        Ok(self.delete_rune_id_number(number)?)
-    }
-
-    fn delete_rune(&self, rune_id: &RuneId) -> Result<(), StoreError> {
-        Ok(self.delete_rune(&rune_id.to_string())?)
-    }
-
     fn get_rune_id(&self, rune: &Rune) -> Result<RuneId, StoreError> {
         Ok(self.get_rune_id(&rune.0)?)
     }
 
-    fn delete_rune_id(&self, rune: &Rune) -> Result<(), StoreError> {
-        Ok(self.delete_rune_id(&rune.0)?)
-    }
-
     fn get_inscription(&self, inscription_id: &InscriptionId) -> Result<Inscription, StoreError> {
         Ok(self.get_inscription(inscription_id)?)
-    }
-
-    fn delete_inscription(&self, inscription_id: &InscriptionId) -> Result<(), StoreError> {
-        Ok(self.delete_inscription(inscription_id)?)
     }
 
     fn get_last_rune_transactions(
@@ -537,44 +466,6 @@ impl Store for RocksDB {
         }
     }
 
-    fn delete_all_rune_transactions(&self, id: &RuneId, mempool: bool) -> Result<(), StoreError> {
-        // Get all tx related to the rune and delete their info.
-        let rune_transactions = self.get_last_rune_transactions(id, None, mempool)?;
-
-        for txid in rune_transactions.items {
-            let mut transaction_state_change = self.get_tx_state_changes(&txid, mempool)?;
-
-            let mut new_outputs = vec![];
-            for (index, output) in transaction_state_change.outputs.iter().enumerate() {
-                if output.runes.iter().any(|rune| rune.rune_id == *id) {
-                    let mut new_output = output.clone();
-                    new_output.runes.retain(|rune| rune.rune_id != *id);
-
-                    let outpoint = OutPoint {
-                        txid: txid.clone(),
-                        vout: index as u32,
-                    };
-
-                    self.set_tx_out(&outpoint, new_output.clone(), mempool)?;
-
-                    new_outputs.push(new_output);
-                } else {
-                    new_outputs.push(output.clone());
-                }
-            }
-
-            transaction_state_change.outputs = new_outputs;
-
-            // Delete rune transactions
-            self.delete_rune_transaction(&txid, mempool)?;
-
-            // Update transaction state change
-            self.set_tx_state_changes(&txid, transaction_state_change, mempool)?;
-        }
-
-        Ok(())
-    }
-
     fn get_script_pubkey_entry(
         &self,
         script_pubkey: &ScriptBuf,
@@ -604,15 +495,6 @@ impl Store for RocksDB {
         mempool: bool,
     ) -> Result<HashMap<ScriptBuf, ScriptPubkeyEntry>, StoreError> {
         Ok(self.get_script_pubkey_entries(script_pubkeys, mempool)?)
-    }
-
-    fn set_script_pubkey_entry(
-        &self,
-        script_pubkey: &ScriptBuf,
-        script_pubkey_entry: ScriptPubkeyEntry,
-        mempool: bool,
-    ) -> Result<(), StoreError> {
-        Ok(self.set_script_pubkey_entry(script_pubkey, script_pubkey_entry, mempool)?)
     }
 
     fn get_outpoints_to_script_pubkey(
@@ -645,26 +527,15 @@ impl Store for RocksDB {
         Ok(script_pubkeys)
     }
 
-    fn delete_script_pubkey_outpoints(
-        &self,
-        outpoints: &Vec<OutPoint>,
-        mempool: bool,
-    ) -> Result<(), StoreError> {
-        Ok(self.delete_script_pubkey_outpoints(outpoints, mempool)?)
-    }
-
-    fn delete_spent_outpoints_in_mempool(
-        &self,
-        outpoints: &Vec<OutPoint>,
-    ) -> Result<(), StoreError> {
-        Ok(self.delete_spent_outpoints_in_mempool(outpoints)?)
-    }
-
-    fn batch_update(&self, update: BatchUpdate, mempool: bool) -> Result<(), StoreError> {
+    fn batch_update(&self, update: &BatchUpdate, mempool: bool) -> Result<(), StoreError> {
         Ok(self.batch_update(update, mempool)?)
     }
 
-    fn batch_delete(&self, delete: BatchDelete) -> Result<(), StoreError> {
+    fn batch_delete(&self, delete: &BatchDelete) -> Result<(), StoreError> {
         Ok(self.batch_delete(delete)?)
+    }
+
+    fn batch_rollback(&self, rollback: &BatchRollback, mempool: bool) -> Result<(), StoreError> {
+        Ok(self.batch_rollback(rollback, mempool)?)
     }
 }

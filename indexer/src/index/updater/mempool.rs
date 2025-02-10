@@ -1,22 +1,26 @@
 use bitcoin::{Transaction, Txid};
 use bitcoincore_rpc::json::GetMempoolEntryResult;
-use bitcoincore_rpc::{Client, RpcApi};
+use bitcoincore_rpc::RpcApi;
 use rayon::prelude::*;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tracing::{debug, error};
+
+use crate::index::{RpcClientError, RpcClientProvider};
 
 #[derive(thiserror::Error, Debug)]
 pub enum MempoolError {
     #[error("rpc error: {0}")]
     RpcError(#[from] bitcoincore_rpc::Error),
+    #[error("rpc client error: {0}")]
+    RpcClientError(#[from] RpcClientError),
     #[error("cycle detected in transaction dependencies")]
     CycleDetected,
 }
 
 pub fn fetch_transactions(
-    client: &Client,
+    client_provider: Arc<dyn RpcClientProvider + Send + Sync>,
     txids: &Vec<Txid>,
     interrupt: Arc<AtomicBool>,
 ) -> HashMap<Txid, Transaction> {
@@ -27,43 +31,28 @@ pub fn fetch_transactions(
                 return None;
             }
 
-            match client.get_raw_transaction(txid, None) {
-                Ok(tx) => Some((*txid, tx)),
-                Err(e) => {
-                    error!("Failed to fetch transaction {}: {}", txid, e);
-                    None
+            let client = client_provider.get_new_rpc_client();
+
+            if let Ok(client) = client {
+                match client.get_raw_transaction(txid, None) {
+                    Ok(tx) => Some((*txid, tx)),
+                    Err(e) => {
+                        error!("Failed to fetch transaction {}: {}", txid, e);
+                        None
+                    }
                 }
+            } else {
+                error!("Failed to get new rpc client");
+                None
             }
         })
         .collect()
 }
 
 pub fn sort_transaction_order(
-    client: &Client,
+    mempool_entries: &HashMap<Txid, GetMempoolEntryResult>,
     tx_map: &HashMap<Txid, Transaction>,
-    interrupt: Arc<AtomicBool>,
 ) -> Result<Vec<Txid>, MempoolError> {
-    // Step 1: Pre-fetch mempool entries in parallel for dependency resolution
-    let mempool_entry_txids: HashSet<Txid> = tx_map
-        .values()
-        .flat_map(|tx| tx.input.iter().map(|input| input.previous_output.txid))
-        .collect();
-
-    debug!("Fetching {} mempool entries", mempool_entry_txids.len());
-
-    let mempool_entries: HashMap<Txid, GetMempoolEntryResult> = mempool_entry_txids
-        .par_iter()
-        .filter_map(|txid| {
-            if interrupt.load(Ordering::SeqCst) {
-                return None;
-            }
-            client
-                .get_mempool_entry(txid)
-                .ok()
-                .map(|entry| (*txid, entry))
-        })
-        .collect();
-
     // Step 2: Build dependency graph and indegree count
     let mut graph: HashMap<Txid, Vec<Txid>> = HashMap::new();
     let mut indegree: HashMap<Txid, usize> = HashMap::new();

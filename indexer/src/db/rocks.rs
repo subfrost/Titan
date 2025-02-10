@@ -1,8 +1,8 @@
 use {
     super::{entry::Entry, *},
     crate::models::{
-        BatchDelete, BatchUpdate, BlockId, Inscription, RuneEntry, ScriptPubkeyEntry,
-        TransactionStateChange, TxRuneIndexRef,
+        BatchDelete, BatchRollback, BatchUpdate, BlockId, Inscription, RuneEntry,
+        ScriptPubkeyEntry, TransactionStateChange, TxRuneIndexRef,
     },
     bitcoin::{consensus, hashes::Hash, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
     helpers::{rune_index_key, rune_transaction_key},
@@ -373,6 +373,25 @@ impl RocksDB {
             )))?)
     }
 
+    pub fn get_runes_by_ids(&self, rune_ids: &Vec<RuneId>) -> DBResult<HashMap<RuneId, RuneEntry>> {
+        let cf_handle = self.cf_handle(RUNES_CF)?;
+        let keys: Vec<_> = rune_ids
+            .iter()
+            .map(|id| (&cf_handle, id.to_string()))
+            .collect();
+
+        let values = self.db.multi_get_cf(keys);
+
+        let mut result = HashMap::new();
+        for (i, value) in values.iter().enumerate() {
+            if let Ok(Some(value)) = value {
+                result.insert(rune_ids[i], RuneEntry::load(value.clone()));
+            }
+        }
+
+        Ok(result)
+    }
+
     pub fn set_rune(&self, rune_id: &str, rune_entry: RuneEntry) -> DBResult<()> {
         let cf_handle = self.cf_handle(RUNES_CF)?;
         self.db.put_cf(&cf_handle, rune_id, rune_entry.store())?;
@@ -396,6 +415,25 @@ impl RocksDB {
             )))?;
 
         Ok(rune_id_wrapper.0)
+    }
+
+    pub fn get_rune_ids_by_numbers(&self, numbers: &Vec<u64>) -> DBResult<HashMap<u64, RuneId>> {
+        let cf_handle = self.cf_handle(RUNE_NUMBER_CF)?;
+        let keys: Vec<_> = numbers
+            .iter()
+            .map(|n| (&cf_handle, n.to_string()))
+            .collect();
+
+        let values = self.db.multi_get_cf(keys);
+
+        let mut result = HashMap::new();
+        for (i, value) in values.iter().enumerate() {
+            if let Ok(Some(value)) = value {
+                result.insert(numbers[i], RuneIdWrapper::load(value.clone()).0);
+            }
+        }
+
+        Ok(result)
     }
 
     pub fn set_rune_id_number(&self, number: u64, rune_id: RuneId) -> DBResult<()> {
@@ -501,6 +539,34 @@ impl RocksDB {
                 "transaction state change not found: {}",
                 tx_id
             )))?)
+    }
+
+    pub fn get_txs_state_changes(
+        &self,
+        txids: &Vec<Txid>,
+        mempool: bool,
+    ) -> DBResult<HashMap<Txid, TransactionStateChange>> {
+        let cf_handle = if mempool {
+            self.cf_handle(TRANSACTIONS_STATE_CHANGE_MEMPOOL_CF)?
+        } else {
+            self.cf_handle(TRANSACTIONS_STATE_CHANGE_CF)?
+        };
+
+        let keys: Vec<_> = txids
+            .iter()
+            .map(|id| (&cf_handle, txid_to_bytes(id)))
+            .collect();
+
+        let values = self.db.multi_get_cf(keys);
+
+        let mut result = HashMap::new();
+        for (i, value) in values.iter().enumerate() {
+            if let Ok(Some(value)) = value {
+                result.insert(txids[i], TransactionStateChange::load(value.clone()));
+            }
+        }
+
+        Ok(result)
     }
 
     pub fn set_tx_state_changes(
@@ -976,7 +1042,11 @@ impl RocksDB {
             .map(|script_pubkey| (&cf_handle, script_pubkey.as_bytes()))
             .collect();
 
+        println!("keys: {:?}", keys.len());
+
         let results = self.db.multi_get_cf(keys);
+
+        println!("results: {:?}", results.len());
 
         for (i, result) in results.iter().enumerate() {
             match result {
@@ -1226,17 +1296,17 @@ impl RocksDB {
         Ok(())
     }
 
-    pub fn batch_update(&self, update: BatchUpdate, mempool: bool) -> DBResult<()> {
+    pub fn batch_update(&self, update: &BatchUpdate, mempool: bool) -> DBResult<()> {
         let mut batch = WriteBatch::default();
 
         // 1. Update blocks
         {
             let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(BLOCKS_CF)?;
-            for (block_hash, block) in update.blocks {
+            for (block_hash, block) in update.blocks.iter() {
                 batch.put_cf(
                     &cf_handle,
                     block_hash.as_raw_hash().to_byte_array(),
-                    block.store(),
+                    block.clone().store(),
                 );
             }
         }
@@ -1244,7 +1314,7 @@ impl RocksDB {
         // 2. Update block_hashes
         {
             let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(BLOCK_HEIGHT_TO_HASH_CF)?;
-            for (block_height, block_hash) in update.block_hashes {
+            for (block_height, block_hash) in update.block_hashes.iter() {
                 batch.put_cf(
                     &cf_handle,
                     block_height.to_le_bytes(),
@@ -1261,8 +1331,12 @@ impl RocksDB {
                 self.cf_handle(OUTPOINTS_CF)?
             };
 
-            for (outpoint, txout) in update.txouts {
-                batch.put_cf(&cf_handle, outpoint_to_bytes(&outpoint), txout.store());
+            for (outpoint, txout) in update.txouts.iter() {
+                batch.put_cf(
+                    &cf_handle,
+                    outpoint_to_bytes(&outpoint),
+                    txout.clone().store(),
+                );
             }
         }
 
@@ -1274,8 +1348,12 @@ impl RocksDB {
                 self.cf_handle(TRANSACTIONS_STATE_CHANGE_CF)?
             };
 
-            for (txid, tx_state_change) in update.tx_state_changes {
-                batch.put_cf(&cf_handle, txid_to_bytes(&txid), tx_state_change.store());
+            for (txid, tx_state_change) in update.tx_state_changes.iter() {
+                batch.put_cf(
+                    &cf_handle,
+                    txid_to_bytes(&txid),
+                    tx_state_change.clone().store(),
+                );
             }
         }
 
@@ -1283,8 +1361,8 @@ impl RocksDB {
         {
             let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(RUNES_CF)?;
 
-            for (rune_id, rune) in update.runes {
-                batch.put_cf(&cf_handle, rune_id_to_bytes(&rune_id), rune.store());
+            for (rune_id, rune) in update.runes.iter() {
+                batch.put_cf(&cf_handle, rune_id_to_bytes(&rune_id), rune.clone().store());
             }
         }
 
@@ -1292,8 +1370,8 @@ impl RocksDB {
         {
             let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(RUNE_IDS_CF)?;
 
-            for (rune, rune_id) in update.rune_ids {
-                let rune_id_wrapper = RuneIdWrapper(rune_id);
+            for (rune, rune_id) in update.rune_ids.iter() {
+                let rune_id_wrapper = RuneIdWrapper(rune_id.clone());
                 batch.put_cf(&cf_handle, rune.to_le_bytes(), rune_id_wrapper.store());
             }
         }
@@ -1302,8 +1380,8 @@ impl RocksDB {
         {
             let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(RUNE_NUMBER_CF)?;
 
-            for (number, rune_id) in update.rune_numbers {
-                let rune_id_wrapper = RuneIdWrapper(rune_id);
+            for (number, rune_id) in update.rune_numbers.iter() {
+                let rune_id_wrapper = RuneIdWrapper(rune_id.clone());
                 batch.put_cf(&cf_handle, number.to_le_bytes(), rune_id_wrapper.store());
             }
         }
@@ -1312,11 +1390,11 @@ impl RocksDB {
         {
             let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(INSCRIPTIONS_CF)?;
 
-            for (inscription_id, inscription) in update.inscriptions {
+            for (inscription_id, inscription) in update.inscriptions.iter() {
                 batch.put_cf(
                     &cf_handle,
                     inscription_id_to_bytes(&inscription_id),
-                    inscription.store(),
+                    inscription.clone().store(),
                 );
             }
         }
@@ -1324,13 +1402,13 @@ impl RocksDB {
         // 9. Update mempool_txs
         {
             let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(MEMPOOL_CF)?;
-            for txid in update.mempool_txs {
+            for txid in update.mempool_txs.iter() {
                 batch.put_cf(&cf_handle, txid_to_bytes(&txid), vec![1]);
 
                 self.mempool_cache
                     .write()
                     .map_err(|_| RocksDBError::LockPoisoned)?
-                    .insert(txid);
+                    .insert(txid.clone());
             }
         }
 
@@ -1372,11 +1450,11 @@ impl RocksDB {
                 self.cf_handle(SCRIPT_PUBKEYS_CF)?
             };
 
-            for (script_pubkey, script_pubkey_entry) in update.script_pubkeys {
+            for (script_pubkey, script_pubkey_entry) in update.script_pubkeys.iter() {
                 batch.put_cf(
                     &cf_handle,
                     script_pubkey.as_bytes(),
-                    script_pubkey_entry.store(),
+                    script_pubkey_entry.clone().store(),
                 );
             }
         }
@@ -1389,8 +1467,12 @@ impl RocksDB {
                 self.cf_handle(OUTPOINT_TO_SCRIPT_PUBKEY_CF)?
             };
 
-            for (outpoint, script_pubkey) in update.script_pubkeys_outpoints {
-                batch.put_cf(&cf_handle, outpoint_to_bytes(&outpoint), script_pubkey);
+            for (outpoint, script_pubkey) in update.script_pubkeys_outpoints.iter() {
+                batch.put_cf(
+                    &cf_handle,
+                    outpoint_to_bytes(&outpoint),
+                    script_pubkey.clone(),
+                );
             }
         }
 
@@ -1398,7 +1480,7 @@ impl RocksDB {
         {
             let cf_handle: Arc<BoundColumnFamily<'_>> =
                 self.cf_handle(SPENT_OUTPOINTS_MEMPOOL_CF)?;
-            for outpoint in update.spent_outpoints_in_mempool {
+            for outpoint in update.spent_outpoints_in_mempool.iter() {
                 batch.put_cf(&cf_handle, outpoint_to_bytes(&outpoint), vec![1]);
             }
         }
@@ -1411,11 +1493,11 @@ impl RocksDB {
                 self.cf_handle(TRANSACTIONS_CF)?
             };
 
-            for (txid, transaction) in update.transactions {
+            for (txid, transaction) in update.transactions.iter() {
                 batch.put_cf(
                     &cf_handle,
                     txid_to_bytes(&txid),
-                    consensus::serialize(&transaction),
+                    consensus::serialize(&transaction.clone()),
                 );
             }
         }
@@ -1425,8 +1507,8 @@ impl RocksDB {
             let cf_handle: Arc<BoundColumnFamily<'_>> =
                 self.cf_handle(TRANSACTION_CONFIRMING_BLOCK_CF)?;
 
-            for (txid, block_id) in update.transaction_confirming_block {
-                batch.put_cf(&cf_handle, txid_to_bytes(&txid), block_id.store());
+            for (txid, block_id) in update.transaction_confirming_block.iter() {
+                batch.put_cf(&cf_handle, txid_to_bytes(&txid), block_id.clone().store());
             }
         }
 
@@ -1435,9 +1517,9 @@ impl RocksDB {
 
         // 12. Update rune_transactions. This can't be batched.
         {
-            for (rune_id, txids) in update.rune_transactions {
-                for txid in txids {
-                    self.add_rune_transaction(&rune_id, txid, mempool)?;
+            for (rune_id, txids) in update.rune_transactions.iter() {
+                for txid in txids.iter() {
+                    self.add_rune_transaction(&rune_id, txid.clone(), mempool)?;
                 }
             }
         }
@@ -1445,7 +1527,7 @@ impl RocksDB {
         Ok(())
     }
 
-    pub fn batch_delete(&self, delete: BatchDelete) -> DBResult<()> {
+    pub fn batch_delete(&self, delete: &BatchDelete) -> DBResult<()> {
         let mut batch = WriteBatch::default();
 
         // 1. Delete blocks
@@ -1453,7 +1535,7 @@ impl RocksDB {
             let cf_handle = self.cf_handle(OUTPOINTS_CF)?;
             let cf_handle_mempool = self.cf_handle(OUTPOINTS_MEMPOOL_CF)?;
 
-            for txout in delete.tx_outs {
+            for txout in delete.tx_outs.iter() {
                 batch.delete_cf(&cf_handle, outpoint_to_bytes(&txout));
                 batch.delete_cf(&cf_handle_mempool, outpoint_to_bytes(&txout));
             }
@@ -1464,7 +1546,7 @@ impl RocksDB {
             let cf_handle = self.cf_handle(TRANSACTIONS_STATE_CHANGE_CF)?;
             let cf_handle_mempool = self.cf_handle(TRANSACTIONS_STATE_CHANGE_MEMPOOL_CF)?;
 
-            for txid in delete.tx_state_changes {
+            for txid in delete.tx_state_changes.iter() {
                 batch.delete_cf(&cf_handle, txid_to_bytes(&txid));
                 batch.delete_cf(&cf_handle_mempool, txid_to_bytes(&txid));
             }
@@ -1475,7 +1557,7 @@ impl RocksDB {
             let cf_handle = self.cf_handle(OUTPOINT_TO_SCRIPT_PUBKEY_CF)?;
             let cf_handle_mempool = self.cf_handle(OUTPOINT_TO_SCRIPT_PUBKEY_MEMPOOL_CF)?;
 
-            for outpoint in delete.script_pubkeys_outpoints {
+            for outpoint in delete.script_pubkeys_outpoints.iter() {
                 batch.delete_cf(&cf_handle, outpoint_to_bytes(&outpoint));
                 batch.delete_cf(&cf_handle_mempool, outpoint_to_bytes(&outpoint));
             }
@@ -1485,9 +1567,273 @@ impl RocksDB {
         {
             let cf_handle: Arc<BoundColumnFamily<'_>> =
                 self.cf_handle(SPENT_OUTPOINTS_MEMPOOL_CF)?;
-            for outpoint in delete.spent_outpoints_in_mempool {
+            for outpoint in delete.spent_outpoints_in_mempool.iter() {
                 batch.delete_cf(&cf_handle, outpoint_to_bytes(&outpoint));
             }
+        }
+
+        self.db.write(batch)?;
+        Ok(())
+    }
+
+    pub fn batch_rollback(&self, rollback: &BatchRollback, mempool: bool) -> DBResult<()> {
+        let mut batch = WriteBatch::default();
+
+        // 1. Update runes count
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(STATS_CF)?;
+            batch.put_cf(
+                &cf_handle,
+                RUNES_COUNT_KEY,
+                rollback.runes_count.to_le_bytes().to_vec(),
+            );
+        }
+
+        // 2. Update rune_entry
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(RUNES_CF)?;
+            for (rune_id, rune_entry) in rollback.rune_entry.iter() {
+                batch.put_cf(&cf_handle, rune_id_to_bytes(&rune_id), rune_entry.clone().store());
+            }
+        }
+
+        // 3. Update txouts
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = if mempool {
+                self.cf_handle(OUTPOINTS_MEMPOOL_CF)?
+            } else {
+                self.cf_handle(OUTPOINTS_CF)?
+            };
+
+            for (outpoint, txout) in rollback.txouts.iter() {
+                batch.put_cf(&cf_handle, outpoint_to_bytes(&outpoint), txout.clone().store());
+            }
+        }
+
+        // 4. Update script_pubkey_entry
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = if mempool {
+                self.cf_handle(SCRIPT_PUBKEYS_MEMPOOL_CF)?
+            } else {
+                self.cf_handle(SCRIPT_PUBKEYS_CF)?
+            };
+
+            for (script_pubkey, script_pubkey_entry) in rollback.script_pubkey_entry.iter() {
+                batch.put_cf(
+                    &cf_handle,
+                    script_pubkey.as_bytes(),
+                    script_pubkey_entry.clone().store(),
+                );
+            }
+        }
+
+        // 5. Update outpoints_to_delete
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = if mempool {
+                self.cf_handle(OUTPOINTS_MEMPOOL_CF)?
+            } else {
+                self.cf_handle(OUTPOINTS_CF)?
+            };
+
+            for outpoint in rollback.outpoints_to_delete.iter() {
+                batch.delete_cf(&cf_handle, outpoint_to_bytes(outpoint));
+            }
+        }
+
+        // 6. Script pubkey outpoints
+        {
+            let cf_handle = if mempool {
+                self.cf_handle(OUTPOINT_TO_SCRIPT_PUBKEY_MEMPOOL_CF)?
+            } else {
+                self.cf_handle(OUTPOINT_TO_SCRIPT_PUBKEY_CF)?
+            };
+
+            for outpoint in rollback.outpoints_to_delete.iter() {
+                batch.delete_cf(&cf_handle, outpoint_to_bytes(outpoint));
+            }
+        }
+
+        // 7. Update prev_outpoints_to_delete
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = if mempool {
+                self.cf_handle(OUTPOINTS_MEMPOOL_CF)?
+            } else {
+                self.cf_handle(OUTPOINTS_CF)?
+            };
+
+            for outpoint in rollback.prev_outpoints_to_delete.iter() {
+                batch.delete_cf(&cf_handle, outpoint_to_bytes(outpoint));
+            }
+        }
+
+        // 8. Update runes_to_delete
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(RUNES_CF)?;
+            for rune_id in rollback.runes_to_delete.iter() {
+                batch.delete_cf(&cf_handle, rune_id_to_bytes(rune_id));
+            }
+        }
+
+        // 9. Update runes_ids_to_delete
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(RUNE_IDS_CF)?;
+            for rune in rollback.runes_ids_to_delete.iter() {
+                batch.delete_cf(&cf_handle, rune.0.to_le_bytes());
+            }
+        }
+
+        // 10. Update rune_numbers_to_delete
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(RUNE_NUMBER_CF)?;
+            for number in rollback.rune_numbers_to_delete.iter() {
+                batch.delete_cf(&cf_handle, number.to_le_bytes());
+            }
+        }
+
+        // 11. Update inscriptions_to_delete
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(INSCRIPTIONS_CF)?;
+            for inscription_id in rollback.inscriptions_to_delete.iter() {
+                batch.delete_cf(&cf_handle, inscription_id_to_bytes(inscription_id));
+            }
+        }
+
+        // 12. Update delete_all_rune_transactions in block
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(RUNE_TRANSACTIONS_CF)?;
+            for rune_id in rollback.delete_all_rune_transactions.iter() {
+                batch.delete_cf(&cf_handle, rune_id_to_bytes(rune_id));
+            }
+        }
+
+        // 13. Update delete_all_rune_transactions in mempool
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> =
+                self.cf_handle(RUNE_TRANSACTIONS_MEMPOOL_CF)?;
+            for rune_id in rollback.delete_all_rune_transactions.iter() {
+                batch.delete_cf(&cf_handle, rune_id_to_bytes(rune_id));
+            }
+        }
+
+        // 14. Update txs_to_delete
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = if mempool {
+                self.cf_handle(TRANSACTIONS_MEMPOOL_CF)?
+            } else {
+                self.cf_handle(TRANSACTIONS_CF)?
+            };
+
+            for txid in rollback.txs_to_delete.iter() {
+                batch.delete_cf(&cf_handle, txid_to_bytes(txid));
+            }
+        }
+
+        // 15. Update tx state changes
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = if mempool {
+                self.cf_handle(TRANSACTIONS_STATE_CHANGE_MEMPOOL_CF)?
+            } else {
+                self.cf_handle(TRANSACTIONS_STATE_CHANGE_CF)?
+            };
+
+            for txid in rollback.txs_to_delete.iter() {
+                batch.delete_cf(&cf_handle, txid_to_bytes(txid));
+            }
+        }
+
+        // 16. Update tx confirming block
+        if !mempool {
+            let cf_handle: Arc<BoundColumnFamily<'_>> =
+                self.cf_handle(TRANSACTION_CONFIRMING_BLOCK_CF)?;
+            for txid in rollback.txs_to_delete.iter() {
+                batch.delete_cf(&cf_handle, txid_to_bytes(txid));
+            }
+        }
+
+        // 17. Remove mempool txs
+        if mempool {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(MEMPOOL_CF)?;
+            for txid in rollback.txs_to_delete.iter() {
+                batch.delete_cf(&cf_handle, txid_to_bytes(txid));
+
+                // Update cache
+                self.mempool_cache
+                    .write()
+                    .map_err(|_| RocksDBError::LockPoisoned)?
+                    .remove(txid);
+            }
+        }
+
+        self.db.write(batch)?;
+
+        // Update runen numbers after revert.
+        let total_runes_before_delete =
+            rollback.runes_count + rollback.rune_numbers_to_delete.len() as u64;
+
+        self.update_rune_numbers_after_revert(
+            &rollback.rune_numbers_to_delete,
+            total_runes_before_delete,
+        )?;
+
+        Ok(())
+    }
+
+    fn update_rune_numbers_after_revert(
+        &self,
+        rune_numbers_deleted: &Vec<u64>,
+        total_runes: u64,
+    ) -> DBResult<()> {
+        if rune_numbers_deleted.is_empty() {
+            return Ok(());
+        }
+
+        // Sort rune numbers in ascending order
+        let mut rune_numbers_deleted = rune_numbers_deleted.clone();
+        rune_numbers_deleted.sort();
+
+        // Now we have to fill the gaps in the rune numbers.
+        let start = rune_numbers_deleted[0] + 1;
+        let mut to_substract = 1;
+        let mut rune_numbers_to_update = HashMap::new();
+        for i in start..total_runes {
+            if rune_numbers_deleted.contains(&i) {
+                to_substract += 1;
+                continue;
+            }
+
+            rune_numbers_to_update.insert(i, i - to_substract);
+        }
+
+        let rune_ids_to_update =
+            self.get_rune_ids_by_numbers(&rune_numbers_to_update.keys().cloned().collect())?;
+
+        let mut rune_entries_to_update = self.get_runes_by_ids(
+            &rune_ids_to_update
+                .values()
+                .cloned()
+                .collect::<Vec<RuneId>>(),
+        )?;
+
+        let mut batch = WriteBatch::default();
+
+        let runes_cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(RUNES_CF)?;
+        let rune_number_cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(RUNE_NUMBER_CF)?;
+
+        for (number, rune_id) in rune_ids_to_update {
+            let rune_entry = rune_entries_to_update.get_mut(&rune_id).unwrap();
+            let new_number = rune_numbers_to_update.get(&number).unwrap();
+            rune_entry.number = *new_number;
+            batch.put_cf(
+                &runes_cf_handle,
+                rune_id_to_bytes(&rune_id),
+                rune_entry.clone().store(),
+            );
+
+            batch.put_cf(
+                &rune_number_cf_handle,
+                new_number.to_le_bytes(),
+                rune_id_to_bytes(&rune_id),
+            );
         }
 
         self.db.write(batch)?;

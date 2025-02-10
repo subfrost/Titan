@@ -11,6 +11,7 @@ mod index_updater;
 mod mempool;
 mod mempool_removal_grace;
 mod rollback;
+mod rollback_cache;
 mod store_lock;
 mod transaction_parser;
 mod transaction_update;

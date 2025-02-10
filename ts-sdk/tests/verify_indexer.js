@@ -6,9 +6,9 @@
  * It compares:
  *   - The tip (block height and hash)
  *   - For the last 50 blocks, the block hash and txids (in order)
- *   - For each output of each transaction in these blocks, it checks that if the output is unspent
- *     (as per electrs’ /tx/:txid/outspend/:vout endpoint) then the indexer’s /address/:address endpoint
- *     returns that output (with the correct bitcoin value). Spent outputs should not appear.
+ *   - For all addresses modified (i.e. that appear in any output in these blocks),
+ *     it fetches the address endpoint from both providers and compares that they
+ *     return the same unspent outputs.
  *
  * Usage:
  *   node verify_indexer.js
@@ -24,6 +24,19 @@ const bitcoin = require("bitcoinjs-lib");
 // Change these as appropriate:
 const INDEXER_BASE_URL = "http://localhost:3030"; // your indexer endpoint
 const ELECTRS_BASE_URL = "https://electrs.test.arch.network"; // electrs instance
+
+// For example, using testnet parameters for bitcoinjs-lib:
+const BITCOIN_NETWORK_JS_LIB_TESTNET4 = {
+  messagePrefix: "\x18Bitcoin Signed Message:\n",
+  bech32: "tb",
+  bip32: {
+    public: 0x043587cf,
+    private: 0x04358394,
+  },
+  pubKeyHash: 0x6f,
+  scriptHash: 0xc4,
+  wif: 0x3f,
+};
 
 // --- UTILITY FUNCTIONS ---
 
@@ -73,7 +86,7 @@ async function fetchElectrsBlockTxids(blockQuery) {
   return res.data;
 }
 
-// Fetch a transaction’s details from electrs (the JSON includes an “output” array).
+// Fetch a transaction’s details from electrs (the JSON includes a "vout" array).
 async function fetchElectrsTransaction(txid) {
   const url = `${ELECTRS_BASE_URL}/tx/${txid}`;
   const res = await axios.get(url);
@@ -92,6 +105,15 @@ async function fetchElectrsTxOutspend(txid, vout) {
 // Expected JSON: { value: number, runes: [...], outputs: [ { outpoint: { txid, vout }, value, ... } ] }
 async function fetchIndexerAddressData(address) {
   const url = `${INDEXER_BASE_URL}/address/${address}`;
+  const res = await axios.get(url);
+  return res.data;
+}
+
+// Fetch address UTXO data from electrs.
+// We assume electrs exposes an endpoint that returns an array of UTXOs for the given address,
+// each having { txid, vout, value }.
+async function fetchElectrsAddressUTXOs(address) {
+  const url = `${ELECTRS_BASE_URL}/address/${address}/utxo`;
   const res = await axios.get(url);
   return res.data;
 }
@@ -131,6 +153,9 @@ async function main() {
     // Structure: { [address]: [ { txid, vout, value } ] }
     const expectedAddressOutputs = {};
 
+    // Also keep a set of all addresses encountered ("modified addresses")
+    const modifiedAddresses = new Set();
+
     // Loop through the last 50 blocks.
     for (let height = startHeight; height <= tipHeight; height++) {
       console.log(`\nVerifying block at height ${height}...`);
@@ -152,6 +177,7 @@ async function main() {
         fetchIndexerBlockTxids(indexerBlockHash),
         fetchElectrsBlockTxids(electrsBlockHash),
       ]);
+
       if (indexerTxids.length !== electrsTxids.length) {
         throw new Error(
           `TXID count mismatch at height ${height}: indexer has ${indexerTxids.length} vs electrs ${electrsTxids.length}`
@@ -172,25 +198,24 @@ async function main() {
       for (const txid of electrsTxids) {
         const tx = await fetchElectrsTransaction(txid);
         // Process each output in the transaction.
-        for (let vout = 0; vout < tx.output.length; vout++) {
-          const output = tx.output[vout];
-          // Decode the output script to a bitcoin address.
+        // (Electrs returns a "vout" array; adjust property names if needed.)
+        for (let vout = 0; vout < tx.vout.length; vout++) {
+          const output = tx.vout[vout];
           let address;
           try {
-            // Assume script_pubkey is a hex string.
-            const scriptBuffer = Buffer.from(output.script_pubkey, "hex");
-            // Using bitcoinjs-lib’s helper to convert the output script into an address.
-            // (Change the network if needed.)
+            // Assume the output contains a property "scriptpubkey" (a hex string)
+            const scriptBuffer = Buffer.from(output.scriptpubkey, "hex");
+            // Convert the output script into an address.
             address = bitcoin.address.fromOutputScript(
               scriptBuffer,
-              bitcoin.networks.bitcoin
+              BITCOIN_NETWORK_JS_LIB_TESTNET4
             );
           } catch (err) {
-            console.warn(
-              `Could not decode address for txid ${txid} vout ${vout}: ${err.message}`
-            );
+            // If we cannot decode an address (e.g. nonstandard script), skip it.
             continue;
           }
+          // Add the address to our set of modified addresses.
+          modifiedAddresses.add(address);
 
           // Determine whether this output is spent.
           const outspend = await fetchElectrsTxOutspend(txid, vout);
@@ -210,47 +235,69 @@ async function main() {
       } // end for each transaction
     } // end for each block
 
+    // Convert modifiedAddresses set into an array.
+    const addressesModified = Array.from(modifiedAddresses);
+    console.log(
+      `\nCollected ${addressesModified.length} modified addresses from the last 50 blocks.`
+    );
+
     console.log("\n--- ADDRESS OUTPUTS VERIFICATION ---");
-    // Now verify that for each address (from our 50 blocks) the indexer returns the correct unspent outputs.
-    for (const address of Object.keys(expectedAddressOutputs)) {
-      const expectedOutputs = expectedAddressOutputs[address];
-      console.log(
-        `Verifying address ${address} (expected ${expectedOutputs.length} unspent outputs)...`
-      );
-      let addressData;
+    // Now verify that for each modified address the indexer and electrs return the same unspent outputs.
+    for (const address of addressesModified) {
+      console.log(`Verifying address ${address}...`);
+      let indexerData, electrsUTXOs;
       try {
-        addressData = await fetchIndexerAddressData(address);
+        indexerData = await fetchIndexerAddressData(address);
+        electrsUTXOs = await fetchElectrsAddressUTXOs(address);
       } catch (err) {
         throw new Error(
           `Failed to fetch address data for ${address}: ${err.message}`
         );
       }
-      const indexedOutputs = addressData.outputs || [];
+      // Normalize indexer outputs (we expect them to be unspent).
+      // Indexer returns outputs as objects with an "outpoint" field.
+      const normalizedIndexerOutputs = (indexerData.outputs || []).map((o) => ({
+        txid: o.outpoint.txid,
+        vout: Number(o.outpoint.vout),
+        value: o.value,
+      }));
+      // Normalize electrs outputs.
+      const normalizedElectrsOutputs = (electrsUTXOs || []).map((o) => ({
+        txid: o.txid,
+        vout: Number(o.vout),
+        value: o.value,
+      }));
 
-      // Check that every expected output appears in the indexer’s data.
-      for (const exp of expectedOutputs) {
-        const found = indexedOutputs.find(
-          (o) =>
-            o.outpoint.txid === exp.txid && Number(o.outpoint.vout) === exp.vout
-        );
-        if (!found) {
-          throw new Error(
-            `Missing unspent output for address ${address}: ${exp.txid}:${exp.vout}`
-          );
-        }
-        if (found.value !== exp.value) {
-          throw new Error(
-            `Value mismatch for ${address} output ${exp.txid}:${exp.vout}: expected ${exp.value}, got ${found.value}`
-          );
-        }
-      }
-      // Also ensure that the indexer did not include any extra outputs.
-      if (indexedOutputs.length !== expectedOutputs.length) {
+      // Sort both arrays by txid and vout.
+      const sortFunc = (a, b) => {
+        if (a.txid < b.txid) return -1;
+        if (a.txid > b.txid) return 1;
+        return a.vout - b.vout;
+      };
+      normalizedIndexerOutputs.sort(sortFunc);
+      normalizedElectrsOutputs.sort(sortFunc);
+
+      if (normalizedIndexerOutputs.length !== normalizedElectrsOutputs.length) {
         throw new Error(
-          `Address ${address} returned extra outputs. Expected ${expectedOutputs.length} but got ${indexedOutputs.length}`
+          `Address ${address} output count mismatch: indexer returned ${normalizedIndexerOutputs.length} outputs but electrs returned ${normalizedElectrsOutputs.length}`
         );
       }
-      console.log(`Address ${address} verified.`);
+      for (let i = 0; i < normalizedIndexerOutputs.length; i++) {
+        const idxOut = normalizedIndexerOutputs[i];
+        const elecOut = normalizedElectrsOutputs[i];
+        if (
+          idxOut.txid !== elecOut.txid ||
+          idxOut.vout !== elecOut.vout ||
+          idxOut.value !== elecOut.value
+        ) {
+          throw new Error(
+            `Address ${address} output mismatch at index ${i}: indexer=${JSON.stringify(
+              idxOut
+            )} vs electrs=${JSON.stringify(elecOut)}`
+          );
+        }
+      }
+      console.log(`Address ${address} outputs match.`);
     }
 
     console.log("\nALL VERIFICATIONS PASSED SUCCESSFULLY.");

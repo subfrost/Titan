@@ -367,12 +367,12 @@ impl UpdaterCache {
         }
 
         if !self.update.is_empty() {
-            db.batch_update(self.update.clone(), self.settings.mempool)?;
+            db.batch_update(&self.update, self.settings.mempool)?;
             trace!("Flushed update: {}", self.update);
         }
 
         if !self.delete.is_empty() {
-            db.batch_delete(self.delete.clone())?;
+            db.batch_delete(&self.delete)?;
             trace!("Flushed delete: {}", self.delete);
         }
 

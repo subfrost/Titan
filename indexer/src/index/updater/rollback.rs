@@ -1,13 +1,18 @@
 use {
+    super::rollback_cache::RollbackCache,
     crate::{
         index::{store::Store, Settings, StoreError},
         models::TransactionStateChange,
     },
     bitcoin::{OutPoint, Txid},
     ordinals::RuneId,
-    std::sync::Arc,
+    std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    },
     thiserror::Error,
     titan_types::InscriptionId,
+    tracing::{info, trace, warn},
 };
 
 #[derive(Debug, Error)]
@@ -37,84 +42,86 @@ impl From<Settings> for RollbackSettings {
 pub(super) struct Rollback<'a> {
     store: &'a Arc<dyn Store + Send + Sync>,
     settings: RollbackSettings,
-    mempool: bool,
-    runes: u64,
+    cache: RollbackCache<'a>,
 }
 
 impl<'a> Rollback<'a> {
     pub(super) fn new(
         store: &'a Arc<dyn Store + Send + Sync>,
-        mempool: bool,
         settings: RollbackSettings,
+        mempool: bool,
     ) -> Result<Self> {
-        let runes = store.get_runes_count()?;
+        let cache = RollbackCache::new(store, mempool)?;
         Ok(Self {
             store,
             settings,
-            mempool,
-            runes,
+            cache,
         })
     }
 
-    fn update_spendable_input(&self, outpoint: &OutPoint, spent: bool) -> Result<()> {
-        match self.store.get_tx_out(outpoint, None) {
-            Ok(tx_out) => {
-                let mut tx_out = tx_out;
-                tx_out.spent = spent;
-                self.store.set_tx_out(&outpoint, tx_out, self.mempool)?;
-                Ok(())
-            }
-            Err(StoreError::NotFound(_)) => {
-                // We don't need to do anything.
-                Ok(())
-            }
-            Err(e) => {
-                return Err(RollbackError::Store(e));
+    pub(super) fn revert_transactions(&mut self, txids: &Vec<Txid>) -> Result<()> {
+        let txs_state_changes = self
+            .store
+            .get_txs_state_changes(txids, self.cache.mempool)?;
+
+        self.precache_transactions(&txs_state_changes)?;
+
+        for txid in txids.iter().rev() {
+            info!("Reverting transaction {}", txid);
+            let transaction = txs_state_changes.get(txid);
+            // .ok_or(RollbackError::Store(StoreError::NotFound(format!(
+            //     "transaction not found: {}",
+            //     txid
+            // ))))?;
+
+            if let Some(transaction) = transaction {
+                self.revert_transaction(txid, transaction)?;
+            } else {
+                warn!("Transaction to rollback not found: {}", txid);
+                if self.cache.mempool {
+                    self.cache.add_tx_to_delete(txid.clone());
+                }
             }
         }
-    }
 
-    fn update_mints(&self, rune_id: &RuneId, amount: i128) -> Result<()> {
-        let mut rune_entry = self.store.get_rune(rune_id)?;
-
-        if self.mempool {
-            let result = rune_entry.pending_mints.saturating_add_signed(amount);
-            rune_entry.pending_mints = result;
-        } else {
-            let result = rune_entry.mints.saturating_add_signed(amount);
-
-            rune_entry.mints = result;
+        if self.settings.index_addresses {
+            self.revert_transactions_script_pubkeys_modifications(&txs_state_changes)?;
         }
 
-        self.store.set_rune(&rune_id, rune_entry)?;
+        self.cache.flush()?;
 
         Ok(())
     }
 
-    fn update_burn_balance(&self, rune_id: &RuneId, amount: i128) -> Result<()> {
-        let mut rune_entry = self.store.get_rune(rune_id)?;
+    fn precache_transactions(
+        &mut self,
+        txs_state_changes: &HashMap<Txid, TransactionStateChange>,
+    ) -> Result<()> {
+        let mut tx_outs = Vec::new();
+        let mut runes = HashSet::new();
 
-        if self.mempool {
-            let result = rune_entry
-                .pending_burns
-                .checked_add_signed(amount)
-                .ok_or(RollbackError::Overflow("burn".to_string()))?;
-            rune_entry.pending_burns = result;
-        } else {
-            let result = rune_entry
-                .pending_burns
-                .checked_add_signed(amount)
-                .ok_or(RollbackError::Overflow("burn".to_string()))?;
+        for (_, tx) in txs_state_changes.iter() {
+            tx_outs.extend(tx.inputs.clone());
+            if let Some(mint) = &tx.minted {
+                runes.insert(mint.rune_id);
+            }
 
-            rune_entry.burned = result;
+            for (rune_id, _) in tx.burned.iter() {
+                runes.insert(*rune_id);
+            }
+
+            if let Some((id, _)) = tx.etched {
+                runes.insert(id);
+            }
         }
 
-        self.store.set_rune(&rune_id, rune_entry)?;
+        self.cache.precache_tx_outs(&tx_outs)?;
+        self.cache.precache_runes(&runes.into_iter().collect())?;
 
         Ok(())
     }
 
-    pub(super) fn revert_transaction(
+    fn revert_transaction(
         &mut self,
         txid: &Txid,
         transaction: &TransactionStateChange,
@@ -130,7 +137,7 @@ impl<'a> Rollback<'a> {
                 txid: txid.clone(),
                 vout: vout as u32,
             };
-            self.store.delete_tx_out(&outpoint, self.mempool)?;
+            self.cache.add_outpoint_to_delete(outpoint);
         }
 
         // Remove etched rune if any.
@@ -138,23 +145,23 @@ impl<'a> Rollback<'a> {
         // we need to remove all mints and transfer edicts from other transactions
         // that might have happened.
         if let Some((id, rune)) = transaction.etched {
-            let rune_entry = self.store.get_rune(&id)?;
-            self.store.delete_rune(&id)?;
-            self.store.delete_rune_id(&rune)?;
-            self.store.delete_inscription(&InscriptionId {
+            let rune_entry = self.cache.get_rune(&id)?;
+            self.cache.add_rune_to_delete(id);
+            self.cache.add_rune_id_to_delete(rune);
+            self.cache.add_inscription_to_delete(InscriptionId {
                 txid: txid.clone(),
                 index: 0,
-            })?;
+            });
 
             // Decrease rune count
-            self.runes -= 1;
-            self.store.set_runes_count(self.runes)?;
-            self.store.delete_rune_id_number(rune_entry.number)?;
-            self.update_rune_numbers_after_revert(rune_entry.number, self.runes)?;
+            self.cache.decrement_runes_count();
+            self.cache.add_rune_number_to_delete(rune_entry.number);
+
+            // self.store.delete_rune_id_number(rune_entry.number)?;
+            // self.update_rune_numbers_after_revert(rune_entry.number, self.runes)?;
 
             // Delete all rune transactions
-            self.store.delete_all_rune_transactions(&id, true)?;
-            self.store.delete_all_rune_transactions(&id, false)?;
+            self.cache.add_delete_all_rune_transactions(id);
         }
 
         // Remove mints if any.
@@ -167,59 +174,101 @@ impl<'a> Rollback<'a> {
             self.update_burn_balance(rune_id, -(amount.n() as i128))?;
         }
 
-        if self.settings.index_addresses {
-            self.revert_transaction_script_pubkeys_modifications(txid, transaction)?;
-        }
-
-        // Finally remove the transaction state change.
-        self.store.delete_tx_state_changes(txid, self.mempool)?;
-
-        if self.settings.index_bitcoin_transactions {
-            self.store.delete_transaction(txid, self.mempool)?;
-        }
-
-        if !self.mempool {
-            self.store.delete_transaction_confirming_block(txid)?;
-        }
+        // Finally remove the transaction.
+        self.cache.add_tx_to_delete(txid.clone());
 
         Ok(())
     }
 
-    fn revert_transaction_script_pubkeys_modifications(
-        &self,
-        txid: &Txid,
-        transaction: &TransactionStateChange,
+    fn update_spendable_input(&mut self, outpoint: &OutPoint, spent: bool) -> Result<()> {
+        match self.cache.get_tx_out(outpoint) {
+            Ok(tx_out) => {
+                let mut tx_out = tx_out;
+                tx_out.spent = spent;
+                self.cache.set_tx_out(outpoint.clone(), tx_out);
+                Ok(())
+            }
+            Err(StoreError::NotFound(_)) => {
+                // We don't need to do anything.
+                Ok(())
+            }
+            Err(e) => {
+                return Err(RollbackError::Store(e));
+            }
+        }
+    }
+
+    fn update_mints(&mut self, rune_id: &RuneId, amount: i128) -> Result<()> {
+        let mut rune_entry = self.cache.get_rune(rune_id)?;
+
+        if self.cache.mempool {
+            let result = rune_entry.pending_mints.saturating_add_signed(amount);
+            rune_entry.pending_mints = result;
+        } else {
+            let result = rune_entry.mints.saturating_add_signed(amount);
+
+            rune_entry.mints = result;
+        }
+
+        self.cache.set_rune(rune_id.clone(), rune_entry);
+
+        Ok(())
+    }
+
+    fn update_burn_balance(&mut self, rune_id: &RuneId, amount: i128) -> Result<()> {
+        let mut rune_entry = self.cache.get_rune(rune_id)?;
+
+        if self.cache.mempool {
+            let result = rune_entry
+                .pending_burns
+                .checked_add_signed(amount)
+                .ok_or(RollbackError::Overflow("burn".to_string()))?;
+            rune_entry.pending_burns = result;
+        } else {
+            let result = rune_entry
+                .pending_burns
+                .checked_add_signed(amount)
+                .ok_or(RollbackError::Overflow("burn".to_string()))?;
+
+            rune_entry.burned = result;
+        }
+
+        self.cache.set_rune(rune_id.clone(), rune_entry);
+
+        Ok(())
+    }
+
+    fn revert_transactions_script_pubkeys_modifications(
+        &mut self,
+        tx_to_state_changes: &HashMap<Txid, TransactionStateChange>,
     ) -> Result<()> {
         // Get outpoints.
-        let outpoints_to_script_pubkeys = self.store.get_outpoints_to_script_pubkey(
-            &transaction
-                .outputs
-                .iter()
-                .enumerate()
-                .map(|(vout, _)| OutPoint {
+        let outpoints = tx_to_state_changes
+            .iter()
+            .flat_map(|(txid, tx)| {
+                tx.outputs.iter().enumerate().map(|(vout, _)| OutPoint {
                     txid: txid.clone(),
                     vout: vout as u32,
                 })
-                .collect(),
-            Some(self.mempool),
-            false,
-        )?;
+            })
+            .collect::<Vec<_>>();
+
+        println!("outpoints: {:?}", outpoints.len());
+
+        let outpoints_to_script_pubkeys = self.cache.get_outpoints_to_script_pubkey(&outpoints)?;
 
         // Get script pubkeys.
-        let script_pubkeys = outpoints_to_script_pubkeys.values().cloned().collect();
+        let script_pubkeys = outpoints_to_script_pubkeys.values().cloned().collect::<Vec<_>>();
+
+        println!("script_pubkeys: {:?}", script_pubkeys.len());
 
         // Update script pubkey entries.
-        let mut script_pubkey_entries = self
-            .store
-            .get_script_pubkey_entries(&script_pubkeys, self.mempool)?;
+        let mut script_pubkey_entries = self.cache.get_script_pubkey_entries(&script_pubkeys)?;
+
+        println!("script_pubkey_entries: {:?}", script_pubkey_entries.len());
 
         // Delete outpoints.
-        for (vout, _tx_out) in transaction.outputs.iter().enumerate() {
-            let outpoint = OutPoint {
-                txid: txid.clone(),
-                vout: vout as u32,
-            };
-
+        for outpoint in outpoints {
             let script_pubkey = outpoints_to_script_pubkeys
                 .get(&outpoint)
                 .unwrap_or_else(|| panic!("script pubkey not found"));
@@ -231,76 +280,41 @@ impl<'a> Rollback<'a> {
             script_pubkey_entry
                 .utxos
                 .retain(|pubkey_outpoint| *pubkey_outpoint != outpoint);
-
-            // Update script pubkey entries.
-            self.store.set_script_pubkey_entry(
-                script_pubkey,
-                script_pubkey_entry.clone(),
-                self.mempool,
-            )?;
         }
 
-        self.store.delete_script_pubkey_outpoints(
-            &outpoints_to_script_pubkeys.keys().cloned().collect(),
-            self.mempool,
-        )?;
+        let prev_outpoints = tx_to_state_changes
+            .values()
+            .filter(|tx| !tx.is_coinbase)
+            .flat_map(|tx| tx.inputs.clone())
+            .collect::<Vec<_>>();
 
-        if self.mempool {
+        println!("prev_outpoints: {:?}", prev_outpoints.len());
+
+        if self.cache.mempool {
             // Remove spent outpoints.
-            self.store
-                .delete_spent_outpoints_in_mempool(&transaction.inputs)?;
-        } else if !transaction.is_coinbase {
-            let input_outpoints_to_script_pubkeys =
-                self.store
-                    .get_outpoints_to_script_pubkey(&transaction.inputs, None, false)?;
+            self.cache.add_prev_outpoint_to_delete(&prev_outpoints);
+        } else {
+            let outpoints_to_script_pubkeys =
+                self.cache.get_outpoints_to_script_pubkey(&prev_outpoints)?;
 
-            let input_script_pubkeys = input_outpoints_to_script_pubkeys
-                .values()
-                .cloned()
-                .collect();
+            for prev_outpoint in prev_outpoints {
+                let script_pubkey = outpoints_to_script_pubkeys
+                    .get(&prev_outpoint)
+                    .unwrap_or_else(|| panic!("script pubkey not found"));
 
-            let mut input_script_pubkeys_entries = self
-                .store
-                .get_script_pubkey_entries(&input_script_pubkeys, self.mempool)?;
-
-            for (outpoint, script_pubkey) in input_outpoints_to_script_pubkeys.iter() {
-                let script_pubkey_entry = input_script_pubkeys_entries
+                let script_pubkey_entry = script_pubkey_entries
                     .get_mut(script_pubkey)
                     .unwrap_or_else(|| panic!("script pubkey entry not found"));
 
-                script_pubkey_entry.utxos.push(outpoint.clone());
-
-                self.store.set_script_pubkey_entry(
-                    script_pubkey,
-                    script_pubkey_entry.clone(),
-                    self.mempool,
-                )?;
+                script_pubkey_entry.utxos.push(prev_outpoint);
             }
         }
 
-        Ok(())
-    }
+        println!("script_pubkey_entries: {:?}", script_pubkey_entries.len());
 
-    fn update_rune_numbers_after_revert(
-        &self,
-        rune_number_deleted: u64,
-        total_runes: u64,
-    ) -> Result<()> {
-        for i in rune_number_deleted..total_runes {
-            match self.store.get_rune_id_by_number(i + 1) {
-                Ok(rune_id) => {
-                    let mut rune_entry = self.store.get_rune(&rune_id)?;
-                    rune_entry.number = i;
-                    self.store.set_rune(&rune_id, rune_entry)?;
-                    self.store.set_rune_id_number(i, rune_id)?;
-                }
-                Err(StoreError::NotFound(_)) => {
-                    break;
-                }
-                Err(e) => {
-                    return Err(RollbackError::Store(e));
-                }
-            }
+        for (script_pubkey, script_pubkey_entry) in script_pubkey_entries {
+            self.cache
+                .set_script_pubkey_entry(script_pubkey, script_pubkey_entry);
         }
 
         Ok(())
