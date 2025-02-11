@@ -281,6 +281,12 @@ impl Server {
         Extension(config): Extension<Arc<ServerConfig>>,
         Path(address): Path<Address<NetworkUnchecked>>,
     ) -> ServerResult {
+        if !config.index_addresses {
+            return Err(ServerError::BadRequest(
+                "addresses are not indexed. Enable --index-addresses to index addresses".to_string(),
+            ));
+        }
+
         let address = address
             .require_network(config.chain.network())
             .map_err(|err| ServerError::BadRequest(err.to_string()))?;

@@ -14,6 +14,7 @@ pub struct ServerConfig {
     pub(crate) bitcoin_rpc_url: String,
     pub(crate) bitcoin_rpc_auth: Auth,
 
+    pub(crate) index_addresses: bool,
     pub(crate) enable_webhook_subscriptions: bool,
 }
 

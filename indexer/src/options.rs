@@ -216,6 +216,7 @@ impl From<Options> for ServerConfig {
             bitcoin_rpc_url: options.bitcoin_rpc_url,
             bitcoin_rpc_auth,
 
+            index_addresses: options.index_addresses,
             enable_webhook_subscriptions: options.enable_webhook_subscriptions,
         }
     }
