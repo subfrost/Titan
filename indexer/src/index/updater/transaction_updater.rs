@@ -71,7 +71,7 @@ impl<'a> TransactionUpdater<'a> {
                 txid,
                 rune_id,
                 amount.n(),
-            );
+            )?;
         }
 
         // Add minted rune if any.
@@ -82,7 +82,7 @@ impl<'a> TransactionUpdater<'a> {
                 txid,
                 &minted.rune_id,
                 minted.amount,
-            );
+            )?;
         }
 
         if let Some((id, rune)) = transaction_state_change.etched {
@@ -94,7 +94,7 @@ impl<'a> TransactionUpdater<'a> {
                 transaction,
                 &id,
                 rune,
-            );
+            )?;
         }
 
         for tx_in in transaction_state_change.inputs.iter() {

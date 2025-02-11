@@ -351,7 +351,12 @@ impl<'client> TransactionParser<'client> {
         Ok(Some(Lot(amount)))
     }
 
-    fn tx_commits_to_rune(&self, cache: &UpdaterCache, tx: &Transaction, rune: Rune) -> Result<bool> {
+    fn tx_commits_to_rune(
+        &self,
+        cache: &UpdaterCache,
+        tx: &Transaction,
+        rune: Rune,
+    ) -> Result<bool> {
         let commitment = rune.commitment();
 
         for input in &tx.input {
@@ -393,7 +398,11 @@ impl<'client> TransactionParser<'client> {
         Ok(false)
     }
 
-    fn validate_commit_transaction_with_cache(&self, cache: &UpdaterCache, outpoint: OutPoint) -> Result<bool> {
+    fn validate_commit_transaction_with_cache(
+        &self,
+        cache: &UpdaterCache,
+        outpoint: OutPoint,
+    ) -> Result<bool> {
         let transaction = cache.get_transaction(outpoint.txid)?;
 
         let taproot = transaction.output[outpoint.vout.into_usize()]

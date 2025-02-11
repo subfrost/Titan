@@ -270,13 +270,10 @@ impl Store for RocksDB {
         } else {
             let mut ledger_outpoints = self.get_tx_outs(outpoints, false)?;
 
-            let remaining = outpoints
+            let remaining: Vec<OutPoint> = outpoints
                 .iter()
                 .filter_map(|outpoint| {
-                    ledger_outpoints
-                        .iter()
-                        .any(|o| *o.0 == *outpoint)
-                        .then_some(outpoint.clone())
+                    (!ledger_outpoints.contains_key(outpoint)).then_some(outpoint.clone())
                 })
                 .collect();
 
