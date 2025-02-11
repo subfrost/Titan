@@ -191,6 +191,6 @@ impl TransactionStateChange {
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
 pub struct TxRuneIndexRef {
-    pub rune_id: String,
+    pub rune_id: Vec<u8>,
     pub index: u64,
 }

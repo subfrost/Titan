@@ -61,19 +61,19 @@ pub fn inscription_id_from_bytes(bytes: &[u8]) -> Result<InscriptionId, &'static
     })
 }
 
-/// Converts an `RuneId` to a 16-byte Vec<u8>.
+/// Converts an `RuneId` to a 12-byte Vec<u8>.
 pub fn rune_id_to_bytes(rune_id: &RuneId) -> Vec<u8> {
-    let mut buffer: Vec<u8> = Vec::with_capacity(16);
+    let mut buffer: Vec<u8> = Vec::with_capacity(12);
     buffer.extend_from_slice(&rune_id.block.to_le_bytes());
     buffer.extend_from_slice(&rune_id.tx.to_le_bytes());
     buffer
 }
 
-/// Creates an `RuneId` from a 16-byte slice.
-/// Returns an error if the slice is not exactly 16 bytes long.
+/// Creates an `RuneId` from a 12-byte slice.
+/// Returns an error if the slice is not exactly 12 bytes long.
 pub fn rune_id_from_bytes(bytes: &[u8]) -> Result<RuneId, &'static str> {
-    if bytes.len() != 16 {
-        return Err("Invalid length for RuneId, expected 16 bytes");
+    if bytes.len() != 12 {
+        return Err("Invalid length for RuneId, expected 12 bytes");
     }
 
     Ok(RuneId {
