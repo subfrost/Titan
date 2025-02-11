@@ -225,7 +225,7 @@ impl<'a> TransactionUpdater<'a> {
         rune_id: &RuneId,
         amount: u128,
     ) -> Result<()> {
-        self.update_mints(cache, rune_id, amount as i128)?;
+        self.increment_mint(cache, rune_id)?;
 
         cache.add_event(Event::RuneMinted {
             location: height.into(),
@@ -260,14 +260,14 @@ impl<'a> TransactionUpdater<'a> {
         Ok(())
     }
 
-    fn update_mints(&mut self, cache: &mut UpdaterCache, rune_id: &RuneId, amount: i128) -> Result<()> {
+    fn increment_mint(&mut self, cache: &mut UpdaterCache, rune_id: &RuneId) -> Result<()> {
         let mut rune_entry = cache.get_rune(rune_id)?;
 
         if cache.settings.mempool {
-            let result = rune_entry.pending_mints.saturating_add_signed(amount);
+            let result = rune_entry.pending_mints.saturating_add_signed(1);
             rune_entry.pending_mints = result;
         } else {
-            let result = rune_entry.mints.saturating_add_signed(amount);
+            let result = rune_entry.mints.saturating_add_signed(1);
 
             rune_entry.mints = result;
         }
@@ -309,8 +309,6 @@ impl<'a> TransactionUpdater<'a> {
         rune: Rune,
         artifact: &Artifact,
     ) -> Result<()> {
-        cache.increment_runes_count();
-
         let inscription = index_rune_icon(transaction, txid);
 
         if let Some((id, inscription)) = inscription.as_ref() {
@@ -373,7 +371,8 @@ impl<'a> TransactionUpdater<'a> {
         cache
             .set_rune_id_number(cache.get_runes_count(), id);
         cache.set_rune_id(rune, id);
-
+        cache.increment_runes_count();
+        
         Ok(())
     }
 

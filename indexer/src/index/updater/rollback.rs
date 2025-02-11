@@ -170,7 +170,7 @@ impl<'a> Rollback<'a> {
 
         // Remove mints if any.
         if let Some(mint) = transaction.minted.as_ref() {
-            self.update_mints(&mint.rune_id, -1)?;
+            self.decrement_mint(&mint.rune_id)?;
         }
 
         // Remove burned if any.
@@ -202,15 +202,15 @@ impl<'a> Rollback<'a> {
         }
     }
 
-    fn update_mints(&mut self, rune_id: &RuneId, amount: i128) -> Result<()> {
+    fn decrement_mint(&mut self, rune_id: &RuneId) -> Result<()> {
         let rune_entry = self.cache.get_rune(rune_id);
 
         if let Some(mut rune_entry) = rune_entry {
             if self.cache.mempool {
-                let result = rune_entry.pending_mints.saturating_add_signed(amount);
+                let result = rune_entry.pending_mints.saturating_add_signed(-1);
                 rune_entry.pending_mints = result;
             } else {
-                let result = rune_entry.mints.saturating_add_signed(amount);
+                let result = rune_entry.mints.saturating_add_signed(-1);
 
                 rune_entry.mints = result;
             }
