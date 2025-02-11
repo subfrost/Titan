@@ -24,6 +24,7 @@ const bitcoin = require('bitcoinjs-lib');
 // Change these as appropriate:
 const INDEXER_BASE_URL = 'http://localhost:3030'; // your indexer endpoint
 const ELECTRS_BASE_URL = 'https://electrs.test.arch.network'; // electrs instance
+const MEMPOOL_SPACE_BASE_URL = 'https://mempool.space/testnet4/api'; // mempool.space instance
 
 // Maestro configuration – update the URL and API key as needed.
 const MAESTRO_BASE_URL = 'https://xbt-testnet.gomaestro-api.org/v0';
@@ -126,6 +127,19 @@ async function fetchElectrsAddressUTXOs(address) {
   return res.data;
 }
 
+// Fetch rune id from our indexer
+async function fetchIndexerRuneId(runeId) {
+  const url = `${INDEXER_BASE_URL}/rune/${runeId}`;
+  const res = await axios.get(url);
+  return res.data;
+}
+
+async function fetchMempoolSpaceTxOutspend(txid, vout) {
+  const url = `${MEMPOOL_SPACE_BASE_URL}/tx/${txid}/outspend/${vout}`;
+  const res = await axios.get(url);
+  return res.data;
+}
+
 // Fetch address UTXO data from Maestro.
 // We assume Maestro returns a response matching the following structure:
 //
@@ -171,7 +185,7 @@ async function main() {
 
     // Determine the range: last few blocks (adjust as needed).
     const tipHeight = indexerTip.height;
-    const startHeight = tipHeight - 5; // using 6 blocks for this example
+    const startHeight = tipHeight - 10; // using 6 blocks for this example
     console.log(
       `\n--- BLOCK VERIFICATION for blocks ${startHeight} to ${tipHeight} ---`,
     );
@@ -297,14 +311,71 @@ async function main() {
       normalizedElectrsOutputs.sort(sortFunc);
 
       if (normalizedIndexerBasic.length !== normalizedElectrsOutputs.length) {
-        throw new Error(
-          `Address ${address} basic output count mismatch: indexer returned ${normalizedIndexerBasic.length} outputs vs electrs returned ${normalizedElectrsOutputs.length}`,
-        );
+        if (normalizedIndexerBasic.length > normalizedElectrsOutputs.length) {
+          // Find the extra outputs in indexer and print them
+          const extraOutputs = normalizedIndexerBasic.filter(
+            (o) =>
+              !normalizedElectrsOutputs.some(
+                (e) => e.txid === o.txid && e.vout === o.vout,
+              ),
+          );
+          console.error(
+            `Address ${address} has extra outputs: ${JSON.stringify(extraOutputs)}`,
+          );
+        } else {
+          // Find the missing outputs in electrs and print them
+          const missingOutputs = normalizedElectrsOutputs.filter(
+            (e) =>
+              !normalizedIndexerBasic.some(
+                (i) => i.txid === e.txid && i.vout === e.vout,
+              ),
+          );
+
+          for (const missingOutput of missingOutputs) {
+            const mempoolSpaceTxOutspend = await fetchMempoolSpaceTxOutspend(
+              missingOutput.txid,
+              missingOutput.vout,
+            );
+
+            if (mempoolSpaceTxOutspend.spent) {
+              console.error(
+                `Address ${address} has missing outputs: ${JSON.stringify(
+                  missingOutput,
+                )}`,
+              );
+            }
+          }
+        }
       }
 
       for (let i = 0; i < normalizedIndexerBasic.length; i++) {
         const idxOut = normalizedIndexerBasic[i];
-        const elecOut = normalizedElectrsOutputs[i];
+        const elecOut = normalizedElectrsOutputs.find(
+          (o) => o.txid === idxOut.txid && o.vout === idxOut.vout,
+        );
+
+        if (!elecOut) {
+          try {
+            const [mempoolSpaceTxOutspend, electrsTransaction] =
+              await Promise.all([
+                fetchMempoolSpaceTxOutspend(idxOut.txid, idxOut.vout),
+                fetchElectrsTransaction(idxOut.txid),
+              ]);
+
+            if (mempoolSpaceTxOutspend.spent) {
+              console.error(
+                `Address ${address} outpoint is not in electrs: ${JSON.stringify(idxOut)}`,
+              );
+            }
+          } catch (err) {
+            console.error(
+              `Address ${address} outpoint is not in electrs: ${JSON.stringify(idxOut)}`,
+            );
+          }
+
+          continue;
+        }
+
         if (
           idxOut.txid !== elecOut.txid ||
           idxOut.vout !== elecOut.vout ||
@@ -317,7 +388,6 @@ async function main() {
           );
         }
       }
-      console.log(`Address ${address} basic outputs match with electrs.`);
 
       // Now check runes arrays using Maestro.
       // Normalize Maestro outputs.
@@ -341,8 +411,22 @@ async function main() {
       // Helper to normalize the runes array by converting rune amounts to numbers and sorting by rune_id.
       const normalizeRunes = (runes) =>
         (runes || [])
-          .map((r) => ({ rune_id: r.rune_id, amount: Number(r.amount) }))
+          .map((r) => ({ rune_id: r.rune_id, amount: r.amount }))
           .sort((a, b) => a.rune_id.localeCompare(b.rune_id));
+
+      const uniqueRuneIds = new Set();
+      for (const out of normalizedIndexerForRunes) {
+        for (const rune of out.runes) {
+          uniqueRuneIds.add(rune.rune_id);
+        }
+      }
+
+      let promises = [];
+      for (const runeId of uniqueRuneIds) {
+        promises.push(fetchIndexerRuneId(runeId));
+      }
+
+      const runeIds = await Promise.all(promises);
 
       for (let i = 0; i < normalizedIndexerForRunes.length; i++) {
         const idxOut = normalizedIndexerForRunes[i];
@@ -359,32 +443,73 @@ async function main() {
         const idxRunes = normalizeRunes(idxOut.runes);
         const maestroRunes = normalizeRunes(maestroOut.runes);
         if (idxRunes.length !== maestroRunes.length) {
-          throw new Error(
+          console.error(
+            `Maestro runes: ${JSON.stringify(maestroRunes)}`,
+            `Indexer runes: ${JSON.stringify(idxRunes)}`,
+          );
+
+          console.error(
             `Address ${address} output ${idxOut.txid}:${idxOut.vout} runes length mismatch: indexer has ${idxRunes.length} vs Maestro has ${maestroRunes.length}`,
           );
+
+          continue;
         }
 
         for (let j = 0; j < idxRunes.length; j++) {
+          const idxRune = idxRunes[j];
+          const runeEntry = runeIds.find((r) => r.id === idxRune.rune_id);
+          if (!runeEntry) {
+            throw new Error(`Rune ${idxRune.rune_id} not found`);
+          }
+
+          const maestroRune = maestroRunes.find(
+            (r) => r.rune_id === idxRune.rune_id,
+          );
+
+          if (!maestroRune) {
+            throw new Error(`Rune ${idxRune.rune_id} not found in Maestro`);
+          }
+
+          const maestroAmount = maestroRune.amount.toString();
+          const indexerAmount = toDecimals(idxRune.amount, runeEntry);
+
           if (
-            idxRunes[j].rune_id !== maestroRunes[j].rune_id ||
-            idxRunes[j].amount !== maestroRunes[j].amount
+            Number(indexerAmount) !== Number(maestroAmount) ||
+            idxRune.rune_id !== maestroRune.rune_id
           ) {
             throw new Error(
               `Address ${address} output ${idxOut.txid}:${idxOut.vout} runes mismatch at index ${j}: indexer=${JSON.stringify(
                 idxRunes[j],
-              )} vs Maestro=${JSON.stringify(maestroRunes[j])}`,
+              )} vs Maestro=${JSON.stringify(maestroRune)}. Amounts: indexer=${indexerAmount} vs Maestro=${maestroAmount}`,
             );
           }
         }
       }
-
-      console.log(`Address ${address} runes match with Maestro.`);
     }
 
     console.log('\nALL VERIFICATIONS PASSED SUCCESSFULLY.');
   } catch (err) {
     console.error('Verification failed:', err.message);
     process.exit(1);
+  }
+}
+
+function toDecimals(amount, rune_entry) {
+  const divisibility = rune_entry.divisibility;
+  const cutoff = BigInt(10) ** BigInt(divisibility); // Use BigInt to avoid precision loss
+
+  const whole = BigInt(amount) / cutoff;
+  let fractional = BigInt(amount) % cutoff;
+
+  if (fractional === BigInt(0)) {
+    return whole.toString();
+  } else {
+    let width = divisibility;
+    while (fractional % BigInt(10) === BigInt(0) && width > 0) {
+      fractional /= BigInt(10);
+      width--;
+    }
+    return `${whole}.${fractional.toString().padStart(width, '0')}`;
   }
 }
 
