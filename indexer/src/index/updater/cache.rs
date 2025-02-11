@@ -310,10 +310,11 @@ impl UpdaterCache {
         outpoints: &Vec<OutPoint>,
         optimistic: bool,
     ) -> Result<HashMap<OutPoint, ScriptBuf>> {
-        return Ok(self
-            .db
-            .read()
-            .get_outpoints_to_script_pubkey(&outpoints, None, optimistic)?);
+        return Ok(self.db.read().get_outpoints_to_script_pubkey(
+            &outpoints,
+            Some(self.settings.mempool),
+            optimistic,
+        )?);
     }
 
     pub fn batch_set_outpoints_to_script_pubkey(&mut self, items: HashMap<OutPoint, ScriptBuf>) {
