@@ -126,13 +126,13 @@ impl RuneEntry {
             Err(_) => false,
         };
 
-        let mint: Option<MintResponse> = if mintable {
+        let mint = if let Some(terms) = self.terms {
             Some(MintResponse {
                 start: self.start(),
                 end: self.end(),
                 mintable,
-                cap: self.terms.unwrap().cap.unwrap_or_default(),
-                amount: self.terms.unwrap().amount.unwrap_or_default(),
+                cap: terms.cap.unwrap_or_default(),
+                amount: terms.amount.unwrap_or_default(),
                 mints: self.mints,
             })
         } else {
@@ -152,6 +152,7 @@ impl RuneEntry {
             spaced_rune: self.spaced_rune,
             symbol: self.symbol,
             mint,
+            burns: self.pending_burns,
             pending_burns: self.pending_burns,
             pending_mints: self.pending_mints,
             inscription_id: self.inscription_id.clone(),

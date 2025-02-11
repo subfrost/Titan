@@ -31,6 +31,7 @@ pub struct RuneResponse {
     pub spaced_rune: SpacedRune,
     pub symbol: Option<char>,
     pub mint: Option<MintResponse>,
+    pub burns: u128,
     pub pending_burns: u128,
     pub pending_mints: u128,
     pub inscription_id: Option<InscriptionId>,
