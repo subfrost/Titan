@@ -33,12 +33,15 @@ impl AddressUpdater {
         self.spent_outpoints.push(outpoint);
     }
 
-    pub fn batch_update_script_pubkey(&self, cache: &mut UpdaterCache) -> Result<(), StoreError> {
+    pub fn batch_update_script_pubkey(&mut self, cache: &mut UpdaterCache) -> Result<(), StoreError> {
         if cache.settings.mempool {
             self.batch_update_script_pubkeys_for_mempool(cache)?;
         } else {
             self.batch_update_script_pubkeys_for_block(cache)?;
         }
+
+        self.spent_outpoints.clear();
+        self.new_outpoints.clear();
 
         Ok(())
     }

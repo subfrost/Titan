@@ -169,7 +169,6 @@ impl<'a> TransactionUpdater<'a> {
 
             // Add new outputs
             for (vout, txout) in transaction.output.iter().enumerate() {
-                // (If you want to skip certain scriptPubKeys, that's up to you.)
                 let outpoint = OutPoint {
                     txid,
                     vout: vout as u32,
