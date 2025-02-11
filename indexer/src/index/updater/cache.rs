@@ -444,12 +444,45 @@ impl UpdaterCache {
         Ok(())
     }
 
+    fn get_txs_state_changes(
+        &self,
+        txids: &Vec<Txid>,
+    ) -> Result<HashMap<Txid, TransactionStateChange>> {
+        let mut total_tx_state_changes = HashMap::new();
+        let mut to_fetch = HashSet::new();
+        for txid in txids {
+            if let Some(tx_state_changes) = self.update.tx_state_changes.get(txid) {
+                total_tx_state_changes.insert(txid.clone(), tx_state_changes.clone());
+            } else {
+                to_fetch.insert(txid.clone());
+            }
+        }
+
+        if !to_fetch.is_empty() {
+            let tx_state_changes = self.db.read().get_txs_state_changes(
+                &to_fetch.iter().cloned().collect(),
+                self.settings.mempool,
+            )?;
+
+            total_tx_state_changes.extend(tx_state_changes);
+        }
+
+        Ok(total_tx_state_changes)
+    }
+
     fn purge_block(&mut self, height: u64, index_spent_outputs: bool) -> Result<()> {
         let block = self.get_block_by_height(height)?;
 
-        for txid in block.tx_ids.iter() {
-            let txid = Txid::from_str(txid)?;
-            let tx_state_changes = self.get_tx_state_changes(txid)?;
+        let txids = block
+            .tx_ids
+            .iter()
+            .map(|txid| Txid::from_str(txid).unwrap())
+            .collect();
+
+        let tx_state_changes = self.get_txs_state_changes(&txids)?;
+
+        for txid in txids {
+            let tx_state_changes = tx_state_changes.get(&txid).unwrap();
 
             for txin in tx_state_changes.inputs.iter() {
                 if !index_spent_outputs {
