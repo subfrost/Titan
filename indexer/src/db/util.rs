@@ -98,8 +98,15 @@ pub fn script_pubkey_search_key(script_pubkey: &ScriptBuf) -> Vec<u8> {
 }
 
 pub fn parse_outpoint_from_script_pubkey_key(key: &[u8]) -> Result<OutPoint, &'static str> {
-    // Find start of outpoint
-    let outpoint_start = key.iter().position(|b| *b == b':').unwrap();
-    let outpoint_bytes = &key[outpoint_start + 1..];
+    // Get the script_pubkey length from the search key
+    let script_pubkey_len = key.len() - 36; // total length minus outpoint length
+
+    // The delimiter should be right after the script pubkey
+    if key[script_pubkey_len - 1] != b':' {
+        return Err("Invalid key format: missing delimiter");
+    }
+
+    // Take exactly 36 bytes from the end
+    let outpoint_bytes = &key[script_pubkey_len..];
     outpoint_from_bytes(outpoint_bytes)
 }
