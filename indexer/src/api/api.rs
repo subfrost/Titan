@@ -4,7 +4,7 @@ use {
         query::{to_hash, to_rune_id},
     },
     crate::{
-        index::{Index, IndexError, StoreError},
+        index::{Index, IndexError},
         subscription::{self, WebhookSubscriptionManager},
     },
     bitcoin::{consensus, Address, OutPoint, Txid},
@@ -12,7 +12,8 @@ use {
     http::HeaderMap,
     std::sync::Arc,
     titan_types::{
-        query, AddressData, Block, BlockTip, InscriptionId, Pagination, PaginationResponse, RuneResponse, Status, Subscription, Transaction, TransactionStatus, TxOutEntry
+        query, AddressData, Block, BlockTip, InscriptionId, Pagination, PaginationResponse,
+        RuneResponse, Status, Subscription, Transaction, TransactionStatus, TxOutEntry,
     },
     tracing::error,
     uuid::Uuid,

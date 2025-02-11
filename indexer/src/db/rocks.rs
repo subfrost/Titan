@@ -2,8 +2,8 @@ use {
     super::{
         entry::Entry,
         util::{
-            parse_outpoint_from_script_pubkey_key, rune_id_from_bytes,
-            script_pubkey_outpoint_to_bytes, script_pubkey_search_key,
+            parse_outpoint_from_script_pubkey_key, rune_id_from_bytes, rune_index_key,
+            rune_transaction_key, script_pubkey_outpoint_to_bytes, script_pubkey_search_key,
         },
         *,
     },
@@ -13,7 +13,6 @@ use {
     },
     bitcoin::{consensus, hashes::Hash, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
     borsh::BorshDeserialize,
-    helpers::{rune_index_key, rune_transaction_key},
     mapper::DBResultMapper,
     ordinals::RuneId,
     rocksdb::{
