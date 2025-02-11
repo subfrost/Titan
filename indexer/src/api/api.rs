@@ -95,7 +95,7 @@ pub fn rune(index: Arc<Index>, rune_query: &query::Rune) -> Result<RuneResponse>
     let block_count = index.get_block_count()?;
     let rune_response = index
         .get_rune(&rune_id)?
-        .to_rune_response(rune_id, block_count);
+        .to_rune_response(rune_id, block_count - 1);
     Ok(rune_response)
 }
 

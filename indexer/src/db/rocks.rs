@@ -369,10 +369,10 @@ impl RocksDB {
         Ok(())
     }
 
-    pub fn get_rune(&self, rune_id: &str) -> DBResult<RuneEntry> {
+    pub fn get_rune(&self, rune_id: &RuneId) -> DBResult<RuneEntry> {
         let cf_handle = self.cf_handle(RUNES_CF)?;
         Ok(self
-            .get_option_vec_data(&cf_handle, rune_id)
+            .get_option_vec_data(&cf_handle, rune_id_to_bytes(rune_id))
             .mapped()?
             .ok_or(RocksDBError::NotFound(format!(
                 "rune not found: {}",
@@ -384,7 +384,7 @@ impl RocksDB {
         let cf_handle = self.cf_handle(RUNES_CF)?;
         let keys: Vec<_> = rune_ids
             .iter()
-            .map(|id| (&cf_handle, id.to_string()))
+            .map(|id| (&cf_handle, rune_id_to_bytes(id)))
             .collect();
 
         let values = self.db.multi_get_cf(keys);
@@ -414,7 +414,7 @@ impl RocksDB {
     pub fn get_rune_id_by_number(&self, number: u64) -> DBResult<RuneId> {
         let cf_handle = self.cf_handle(RUNE_NUMBER_CF)?;
         let rune_id_wrapper: RuneIdWrapper = self
-            .get_option_vec_data(&cf_handle, number.to_string().as_str())
+            .get_option_vec_data(&cf_handle, number.to_le_bytes())
             .mapped()?
             .ok_or(RocksDBError::NotFound(format!(
                 "rune id not found: {}",
@@ -428,7 +428,7 @@ impl RocksDB {
         let cf_handle = self.cf_handle(RUNE_NUMBER_CF)?;
         let keys: Vec<_> = numbers
             .iter()
-            .map(|n| (&cf_handle, n.to_string()))
+            .map(|n| (&cf_handle, n.to_le_bytes()))
             .collect();
 
         let values = self.db.multi_get_cf(keys);

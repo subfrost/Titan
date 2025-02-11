@@ -224,7 +224,7 @@ impl Store for RocksDB {
         let mut runes = Vec::new();
         for i in (end..start).rev() {
             let rune_id = self.get_rune_id_by_number(i)?;
-            let rune_entry = self.get_rune(&rune_id.to_string())?;
+            let rune_entry = self.get_rune(&rune_id)?;
             runes.push((rune_id, rune_entry));
         }
 
@@ -409,7 +409,7 @@ impl Store for RocksDB {
     }
 
     fn get_rune(&self, rune_id: &RuneId) -> Result<RuneEntry, StoreError> {
-        Ok(self.get_rune(&rune_id.to_string())?)
+        Ok(self.get_rune(rune_id)?)
     }
 
     fn get_rune_id(&self, rune: &Rune) -> Result<RuneId, StoreError> {
