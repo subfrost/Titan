@@ -287,6 +287,9 @@ impl<'client> TransactionParser<'client> {
         tx: &Transaction,
         artifact: &Artifact,
     ) -> Result<Option<(RuneId, Rune)>> {
+        // TODO: Currently we don't add etched runes.
+        // But that means that there are outputs that could have premined runes that we're not showing.
+        // so this is something that we should address soon.
         if self.mempool {
             return Ok(None);
         }
