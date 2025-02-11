@@ -96,8 +96,8 @@ export class TitanHttpClient {
     return response.data;
   }
 
-  async getOutput(outpoint: string): Promise<TxOutEntry> {
-    const response = await this.http.get<TxOutEntry>(`/output/${outpoint}`);
+  async getOutput(txid: string, vout: number): Promise<TxOutEntry> {
+    const response = await this.http.get<TxOutEntry>(`/output/${txid}:${vout}`);
     return response.data;
   }
 

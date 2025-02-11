@@ -3,6 +3,7 @@ use {
     bitcoin::{BlockHash, ScriptBuf, TxIn, Txid},
     borsh::{BorshDeserialize, BorshSerialize},
     serde::{Deserialize, Serialize},
+    std::io::{Read, Result, Write},
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -69,6 +70,35 @@ pub struct TxOut {
     pub value: u64,
     pub script_pubkey: ScriptBuf,
     pub runes: Vec<RuneAmount>,
+}
+
+impl BorshSerialize for TxOut {
+    fn serialize<W: Write>(&self, writer: &mut W) -> Result<()> {
+        BorshSerialize::serialize(&self.value, writer)?;
+        let script_bytes = self.script_pubkey.as_bytes();
+        BorshSerialize::serialize(&(script_bytes.len() as u32), writer)?;
+        writer.write_all(script_bytes)?;
+        BorshSerialize::serialize(&self.runes, writer)?;
+
+        Ok(())
+    }
+}
+
+impl BorshDeserialize for TxOut {
+    fn deserialize_reader<R: Read>(reader: &mut R) -> Result<Self> {
+        let value = u64::deserialize_reader(reader)?;
+        let script_len = u32::deserialize_reader(reader)? as usize;
+        let mut script_bytes = vec![0u8; script_len];
+        reader.read_exact(&mut script_bytes)?;
+        let script_pubkey = ScriptBuf::from_bytes(script_bytes);
+        let runes = Vec::<RuneAmount>::deserialize_reader(reader)?;
+
+        Ok(Self {
+            value,
+            script_pubkey,
+            runes,
+        })
+    }
 }
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
