@@ -375,73 +375,49 @@ impl Updater {
         cache.precache_tx_outs(&bitcoin_block.txdata)?;
 
         let mut transaction_parser =
-            TransactionParser::new(&rpc_client, self.settings.chain, height, false, cache)?;
+            TransactionParser::new(&rpc_client, self.settings.chain, height, false)?;
 
         let block_header: bitcoin::block::Header = bitcoin_block.header.clone();
         let block_height = height;
 
-        let block_tx_timer = self
+        let _block_tx_timer = self
             .latency
-            .with_label_values(&["parse_block"])
+            .with_label_values(&["parse_block&index_block_txs"])
             .start_timer();
 
-        let block_data = bitcoin_block
-            .txdata
-            .iter()
-            .enumerate()
-            .filter_map(|(i, tx)| {
-                let txid = tx.compute_txid();
-                match transaction_parser.parse(
-                    block_header.time,
-                    u32::try_from(i).unwrap(),
-                    tx,
-                    txid,
-                ) {
-                    Ok(result) => {
-                        if result.has_rune_updates() || self.settings.index_addresses {
-                            Some((i, txid, result))
-                        } else {
-                            None
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to index transaction {}: {}", txid, e);
-                        None
-                    }
-                }
-            })
-            .collect::<Vec<_>>();
-        drop(block_tx_timer);
-
         let mut transaction_updater =
-            TransactionUpdater::new(cache, self.settings.clone().into(), Some(address_updater))?;
+            TransactionUpdater::new(self.settings.clone().into(), Some(address_updater))?;
 
         let mut block = Block::empty_block(height, bitcoin_block.header);
 
-        {
-            let _timer = self
-                .latency
-                .with_label_values(&["index_block_txs"])
-                .start_timer();
+        let mut transaction_update = self
+            .transaction_update
+            .write()
+            .map_err(|_| UpdaterError::Mutex)?;
 
-            let mut transaction_update = self
-                .transaction_update
-                .write()
-                .map_err(|_| UpdaterError::Mutex)?;
-            for (i, txid, result) in block_data {
-                transaction_updater.save(
-                    Some(BlockId {
-                        hash: bitcoin_block.header.block_hash(),
-                        height: block_height,
-                    }),
-                    txid,
-                    &bitcoin_block.txdata[i],
-                    &result,
-                )?;
-                block.tx_ids.push(txid.to_string());
-                transaction_update.add_block_tx(txid);
-                if let Some((id, ..)) = result.etched {
-                    block.etched_runes.push(id);
+        for (i, tx) in bitcoin_block.txdata.iter().enumerate() {
+            let txid = tx.compute_txid();
+            match transaction_parser.parse(cache, u32::try_from(i).unwrap(), tx) {
+                Ok(result) => {
+                    transaction_updater.save(
+                        cache,
+                        block_header.time,
+                        Some(BlockId {
+                            hash: bitcoin_block.header.block_hash(),
+                            height: block_height,
+                        }),
+                        txid,
+                        &bitcoin_block.txdata[i],
+                        &result,
+                    )?;
+                    block.tx_ids.push(txid.to_string());
+                    transaction_update.add_block_tx(txid);
+                    if let Some((id, ..)) = result.etched {
+                        block.etched_runes.push(id);
+                    }
+                }
+                Err(e) => {
+                    panic!("Failed to index transaction {}: {}", txid, e);
                 }
             }
         }
@@ -509,19 +485,17 @@ impl Updater {
 
         let rpc_client = self.settings.get_new_rpc_client()?;
         let mut transaction_parser =
-            TransactionParser::new(&rpc_client, self.settings.chain, height, true, cache)?;
+            TransactionParser::new(&rpc_client, self.settings.chain, height, true)?;
 
-        let result = transaction_parser.parse(now as u32, 0, tx, *txid)?;
-        if result.has_rune_updates() || self.settings.index_addresses {
-            info!("Indexing tx {}", txid);
+        let result = transaction_parser.parse(cache, 0, tx)?;
+        info!("Indexing tx {}", txid);
 
-            // Create a TransactionUpdater that references the optional address_updater
-            let mut transaction_updater =
-                TransactionUpdater::new(cache, self.settings.clone().into(), address_updater)?;
+        // Create a TransactionUpdater that references the optional address_updater
+        let mut transaction_updater =
+            TransactionUpdater::new(self.settings.clone().into(), address_updater)?;
 
-            // The same "save" logic as before
-            transaction_updater.save(None, *txid, tx, &result)?;
-        }
+        // The same "save" logic as before
+        transaction_updater.save(cache, now as u32, None, *txid, tx, &result)?;
 
         if cache.settings.mempool {
             cache.set_mempool_tx(*txid);

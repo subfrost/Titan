@@ -1,11 +1,11 @@
 use {
     super::{address::AddressUpdater, cache::UpdaterCache},
     crate::{
-        index::{Settings, StoreError},
-        models::{BlockId, TransactionStateChange},
+        index::{inscription::index_rune_icon, Settings, StoreError},
+        models::{BlockId, RuneEntry, TransactionStateChange},
     },
     bitcoin::{OutPoint, Transaction, Txid},
-    ordinals::RuneId,
+    ordinals::{Artifact, Etching, Rune, RuneId, Runestone, SpacedRune},
     thiserror::Error,
     titan_types::{Event, TxOutEntry},
     tokio::sync::mpsc::error::SendError,
@@ -17,6 +17,8 @@ pub enum TransactionUpdaterError {
     Store(#[from] StoreError),
     #[error("event sender error {0}")]
     EventSender(#[from] SendError<Event>),
+    #[error("overflow in {0}")]
+    Overflow(String),
 }
 
 type Result<T> = std::result::Result<T, TransactionUpdaterError>;
@@ -38,26 +40,24 @@ impl From<Settings> for TransactionUpdaterSettings {
 
 pub(super) struct TransactionUpdater<'a> {
     pub(super) address_updater: Option<&'a mut AddressUpdater>,
-    pub(super) cache: &'a mut UpdaterCache,
-
     pub(super) settings: TransactionUpdaterSettings,
 }
 
 impl<'a> TransactionUpdater<'a> {
     pub(super) fn new(
-        cache: &'a mut UpdaterCache,
         settings: TransactionUpdaterSettings,
         address_updater: Option<&'a mut AddressUpdater>,
     ) -> Result<Self> {
         Ok(Self {
             address_updater,
-            cache,
             settings,
         })
     }
 
     pub(super) fn save(
         &mut self,
+        cache: &mut UpdaterCache,
+        block_time: u32,
         block_id: Option<BlockId>,
         txid: Txid,
         transaction: &Transaction,
@@ -66,6 +66,7 @@ impl<'a> TransactionUpdater<'a> {
         // Update burned rune
         for (rune_id, amount) in transaction_state_change.burned.iter() {
             self.burn_rune(
+                cache,
                 block_id.as_ref().map(|id| id.height),
                 txid,
                 rune_id,
@@ -76,6 +77,7 @@ impl<'a> TransactionUpdater<'a> {
         // Add minted rune if any.
         if let Some(minted) = transaction_state_change.minted.as_ref() {
             self.mint_rune(
+                cache,
                 block_id.as_ref().map(|id| id.height),
                 txid,
                 &minted.rune_id,
@@ -83,13 +85,21 @@ impl<'a> TransactionUpdater<'a> {
             );
         }
 
-        if let Some((id, _)) = transaction_state_change.etched {
-            self.etched_rune(block_id.as_ref().map(|id| id.height), txid, &id);
+        if let Some((id, rune)) = transaction_state_change.etched {
+            self.etched_rune(
+                cache,
+                block_time,
+                block_id.as_ref().map(|id| id.height),
+                txid,
+                transaction,
+                &id,
+                rune,
+            );
         }
 
         for tx_in in transaction_state_change.inputs.iter() {
             // Spend inputs
-            self.update_spendable_input(tx_in, true)?;
+            self.update_spendable_input(cache, tx_in, true)?;
         }
 
         // Create new outputs
@@ -104,9 +114,10 @@ impl<'a> TransactionUpdater<'a> {
                 vout: vout as u32,
             };
 
-            self.cache.set_tx_out(outpoint, output.clone());
+            cache.set_tx_out(outpoint, output.clone());
 
             self.transfer_rune(
+                cache,
                 block_id.as_ref().map(|id| id.height),
                 txid,
                 outpoint,
@@ -115,7 +126,7 @@ impl<'a> TransactionUpdater<'a> {
         }
 
         // Save transaction state change
-        self.cache
+        cache
             .set_tx_state_changes(txid, transaction_state_change.clone());
 
         // Save rune transactions
@@ -123,15 +134,15 @@ impl<'a> TransactionUpdater<'a> {
         let rune_ids = transaction_state_change.rune_ids();
 
         for rune_id in rune_ids {
-            self.cache.add_rune_transaction(rune_id, txid);
+            cache.add_rune_transaction(rune_id, txid);
         }
 
         if self.settings.index_bitcoin_transactions {
-            self.cache.set_transaction(txid, transaction.clone());
+            cache.set_transaction(txid, transaction.clone());
         }
 
-        if !self.cache.settings.mempool {
-            self.cache
+        if !cache.settings.mempool {
+            cache
                 .set_transaction_confirming_block(txid, block_id.unwrap());
         }
 
@@ -139,8 +150,8 @@ impl<'a> TransactionUpdater<'a> {
             self.update_script_pubkeys(txid, transaction);
         }
 
-        if self.cache.settings.mempool {
-            self.cache.set_mempool_tx(txid.clone());
+        if cache.settings.mempool {
+            cache.set_mempool_tx(txid.clone());
         }
 
         Ok(())
@@ -169,12 +180,12 @@ impl<'a> TransactionUpdater<'a> {
         }
     }
 
-    fn update_spendable_input(&mut self, outpoint: &OutPoint, spent: bool) -> Result<()> {
-        match self.cache.get_tx_out(outpoint) {
+    fn update_spendable_input(&mut self, cache: &mut UpdaterCache, outpoint: &OutPoint, spent: bool) -> Result<()> {
+        match cache.get_tx_out(outpoint) {
             Ok(tx_out) => {
                 let mut tx_out = tx_out;
                 tx_out.spent = spent;
-                self.cache.set_tx_out(outpoint.clone(), tx_out);
+                cache.set_tx_out(outpoint.clone(), tx_out);
                 Ok(())
             }
             Err(StoreError::NotFound(_)) => {
@@ -187,41 +198,196 @@ impl<'a> TransactionUpdater<'a> {
         }
     }
 
-    fn burn_rune(&mut self, height: Option<u64>, txid: Txid, rune_id: &RuneId, amount: u128) {
-        self.cache.add_event(Event::RuneBurned {
+    fn burn_rune(
+        &mut self,
+        cache: &mut UpdaterCache,
+        height: Option<u64>,
+        txid: Txid,
+        rune_id: &RuneId,
+        amount: u128,
+    ) -> Result<()> {
+        self.update_burn_balance(cache, rune_id, amount as i128)?;
+
+        cache.add_event(Event::RuneBurned {
             location: height.into(),
             txid,
             amount: amount as u128,
             rune_id: *rune_id,
         });
+
+        Ok(())
     }
 
-    fn mint_rune(&mut self, height: Option<u64>, txid: Txid, rune_id: &RuneId, amount: u128) {
-        self.cache.add_event(Event::RuneMinted {
+    fn mint_rune(
+        &mut self,
+        cache: &mut UpdaterCache,
+        height: Option<u64>,
+        txid: Txid,
+        rune_id: &RuneId,
+        amount: u128,
+    ) -> Result<()> {
+        self.update_mints(cache, rune_id, amount as i128)?;
+
+        cache.add_event(Event::RuneMinted {
             location: height.into(),
             txid,
             amount: amount as u128,
             rune_id: *rune_id,
         });
+
+        Ok(())
     }
 
-    fn etched_rune(&mut self, height: Option<u64>, txid: Txid, id: &RuneId) {
-        self.cache.add_event(Event::RuneEtched {
+    fn update_burn_balance(&mut self, cache: &mut UpdaterCache, rune_id: &RuneId, amount: i128) -> Result<()> {
+        let mut rune_entry = cache.get_rune(rune_id)?;
+
+        if cache.settings.mempool {
+            let result = rune_entry
+                .pending_burns
+                .checked_add_signed(amount)
+                .ok_or(TransactionUpdaterError::Overflow("burn".to_string()))?;
+            rune_entry.pending_burns = result;
+        } else {
+            let result = rune_entry
+                .pending_burns
+                .checked_add_signed(amount)
+                .ok_or(TransactionUpdaterError::Overflow("burn".to_string()))?;
+
+            rune_entry.burned = result;
+        }
+
+        cache.set_rune(*rune_id, rune_entry);
+
+        Ok(())
+    }
+
+    fn update_mints(&mut self, cache: &mut UpdaterCache, rune_id: &RuneId, amount: i128) -> Result<()> {
+        let mut rune_entry = cache.get_rune(rune_id)?;
+
+        if cache.settings.mempool {
+            let result = rune_entry.pending_mints.saturating_add_signed(amount);
+            rune_entry.pending_mints = result;
+        } else {
+            let result = rune_entry.mints.saturating_add_signed(amount);
+
+            rune_entry.mints = result;
+        }
+
+        cache.set_rune(*rune_id, rune_entry);
+
+        Ok(())
+    }
+
+    fn etched_rune(
+        &mut self,
+        cache: &mut UpdaterCache,
+        block_time: u32,
+        height: Option<u64>,
+        txid: Txid,
+        transaction: &Transaction,
+        id: &RuneId,
+        rune: Rune,
+    ) -> Result<()> {
+        let artifact = Runestone::decipher(transaction).unwrap();
+        self.create_rune_entry(cache, block_time, txid, transaction, *id, rune, &artifact)?;
+
+        cache.add_event(Event::RuneEtched {
             location: height.into(),
             txid,
             rune_id: *id,
         });
+
+        Ok(())
+    }
+
+    fn create_rune_entry(
+        &mut self,
+        cache: &mut UpdaterCache,
+        block_time: u32,
+        txid: Txid,
+        transaction: &Transaction,
+        id: RuneId,
+        rune: Rune,
+        artifact: &Artifact,
+    ) -> Result<()> {
+        cache.increment_runes_count();
+
+        let inscription = index_rune_icon(transaction, txid);
+
+        if let Some((id, inscription)) = inscription.as_ref() {
+            cache.set_inscription(id.clone(), inscription.clone());
+        }
+
+        let entry = match artifact {
+            Artifact::Cenotaph(_) => RuneEntry {
+                block: id.block,
+                burned: 0,
+                divisibility: 0,
+                etching: txid,
+                terms: None,
+                mints: 0,
+                number: cache.get_runes_count(),
+                premine: 0,
+                spaced_rune: SpacedRune { rune, spacers: 0 },
+                symbol: None,
+                pending_burns: 0,
+                pending_mints: 0,
+                inscription_id: inscription.map(|(id, _)| id),
+                timestamp: block_time.into(),
+                turbo: false,
+            },
+            Artifact::Runestone(Runestone { etching, .. }) => {
+                let Etching {
+                    divisibility,
+                    terms,
+                    premine,
+                    spacers,
+                    symbol,
+                    turbo,
+                    ..
+                } = etching.unwrap();
+
+                RuneEntry {
+                    block: id.block,
+                    burned: 0,
+                    divisibility: divisibility.unwrap_or_default(),
+                    etching: txid,
+                    terms,
+                    mints: 0,
+                    number: cache.get_runes_count(),
+                    premine: premine.unwrap_or_default(),
+                    spaced_rune: SpacedRune {
+                        rune,
+                        spacers: spacers.unwrap_or_default(),
+                    },
+                    symbol,
+                    pending_burns: 0,
+                    pending_mints: 0,
+                    inscription_id: inscription.map(|(id, _)| id),
+                    timestamp: block_time.into(),
+                    turbo,
+                }
+            }
+        };
+
+        cache.set_rune(id, entry);
+        cache
+            .set_rune_id_number(cache.get_runes_count(), id);
+        cache.set_rune_id(rune, id);
+
+        Ok(())
     }
 
     fn transfer_rune(
         &mut self,
+        cache: &mut UpdaterCache,
         height: Option<u64>,
         txid: Txid,
         outpoint: OutPoint,
         output: &TxOutEntry,
     ) {
         for rune_amount in output.runes.iter() {
-            self.cache.add_event(Event::RuneTransferred {
+            cache.add_event(Event::RuneTransferred {
                 location: height.into(),
                 txid,
                 outpoint,

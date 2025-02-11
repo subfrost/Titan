@@ -1,15 +1,13 @@
 use {
     super::cache::UpdaterCache,
     crate::{
-        index::{
-            bitcoin_rpc::BitcoinCoreRpcResultExt, inscription::index_rune_icon, Chain, StoreError,
-        },
-        models::{Lot, RuneEntry, TransactionStateChange},
+        index::{bitcoin_rpc::BitcoinCoreRpcResultExt, Chain, StoreError},
+        models::{Lot, TransactionStateChange},
         util::IntoUsize,
     },
-    bitcoin::{consensus::encode, OutPoint, Transaction, Txid},
+    bitcoin::{consensus::encode, OutPoint, Transaction},
     bitcoincore_rpc::{Client, RpcApi},
-    ordinals::{Artifact, Edict, Etching, Height, Rune, RuneId, Runestone, SpacedRune},
+    ordinals::{Artifact, Edict, Height, Rune, RuneId, Runestone},
     std::collections::HashMap,
     thiserror::Error,
     titan_types::{RuneAmount, TxOutEntry},
@@ -23,28 +21,24 @@ pub enum TransactionParserError {
     BitcoinRpc(#[from] bitcoincore_rpc::Error),
     #[error("encode error {0}")]
     Encode(#[from] encode::Error),
-    #[error("overflow in {0}")]
-    Overflow(String),
 }
 
 type Result<T> = std::result::Result<T, TransactionParserError>;
 
-pub(super) struct TransactionParser<'a, 'client> {
+pub(super) struct TransactionParser<'client> {
     pub(super) client: &'client Client,
     pub(super) height: u64,
-    pub(super) cache: &'a mut UpdaterCache,
     pub(super) minimum_rune: Rune,
     pub(super) should_index_runes: bool,
     pub(super) mempool: bool,
 }
 
-impl<'a, 'client> TransactionParser<'a, 'client> {
+impl<'client> TransactionParser<'client> {
     pub(super) fn new(
         client: &'client Client,
         chain: Chain,
         height: u64,
         mempool: bool,
-        cache: &'a mut UpdaterCache,
     ) -> Result<Self> {
         let minimum_rune = Rune::minimum_at_height(chain.into(), Height(height as u32));
 
@@ -54,7 +48,6 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
         Ok(Self {
             client,
             height,
-            cache,
             minimum_rune,
             should_index_runes,
             mempool,
@@ -63,13 +56,12 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
 
     pub(super) fn parse(
         &mut self,
-        block_time: u32,
+        cache: &UpdaterCache,
         tx_index: u32,
         tx: &Transaction,
-        txid: Txid,
     ) -> Result<TransactionStateChange> {
         let (allocated, minted, etched, burned) = if self.should_index_runes {
-            self.parse_runes(block_time, tx_index, tx, txid)?
+            self.parse_runes(cache, tx_index, tx)?
         } else {
             (
                 vec![HashMap::new(); tx.output.len()],
@@ -103,10 +95,6 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
             tx_outs.push(tx_out);
         }
 
-        for (id, balance) in burned.iter() {
-            self.update_burn_balance(&id, balance.0 as i128)?;
-        }
-
         let transaction_state_change = TransactionStateChange {
             burned,
             inputs: tx
@@ -128,10 +116,9 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
 
     fn parse_runes(
         &mut self,
-        block_time: u32,
+        cache: &UpdaterCache,
         tx_index: u32,
         tx: &Transaction,
-        txid: Txid,
     ) -> Result<(
         Vec<HashMap<RuneId, Lot>>,
         Option<RuneAmount>,
@@ -140,7 +127,7 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
     )> {
         let artifact = Runestone::decipher(tx);
 
-        let mut unallocated = self.unallocated(tx)?;
+        let mut unallocated = self.unallocated(cache, tx)?;
 
         let mut allocated: Vec<HashMap<RuneId, Lot>> = vec![HashMap::new(); tx.output.len()];
         let mut minted: Option<RuneAmount> = None;
@@ -148,7 +135,7 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
 
         if let Some(artifact) = &artifact {
             if let Some(id) = artifact.mint() {
-                if let Some(amount) = self.mint(id)? {
+                if let Some(amount) = self.mint(cache, id)? {
                     *unallocated.entry(id).or_default() += amount;
                     minted = Some(RuneAmount {
                         rune_id: id,
@@ -157,7 +144,7 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
                 }
             }
 
-            etched = self.etched(block_time, txid, tx_index, tx, artifact)?;
+            etched = self.etched(cache, tx_index, tx, artifact)?;
 
             if let Artifact::Runestone(runestone) = artifact {
                 if let Some((id, ..)) = etched {
@@ -295,8 +282,7 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
 
     fn etched(
         &mut self,
-        block_time: u32,
-        txid: Txid,
+        cache: &UpdaterCache,
         tx_index: u32,
         tx: &Transaction,
         artifact: &Artifact,
@@ -317,7 +303,7 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
         };
 
         let rune = if let Some(rune) = rune {
-            let rune_id = self.cache.get_rune_id(&rune);
+            let rune_id = cache.get_rune_id(&rune);
             match rune_id {
                 Ok(_) => return Ok(None),
                 Err(e) => {
@@ -329,7 +315,7 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
 
             if rune < self.minimum_rune
                 || rune.is_reserved()
-                || !self.tx_commits_to_rune(tx, rune)?
+                || !self.tx_commits_to_rune(cache, tx, rune)?
             {
                 return Ok(None);
             }
@@ -343,90 +329,11 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
             tx: tx_index,
         };
 
-        self.create_rune_entry(block_time, txid, tx, rune_id, rune, artifact)?;
-
         Ok(Some((rune_id, rune)))
     }
 
-    fn create_rune_entry(
-        &mut self,
-        block_time: u32,
-        txid: Txid,
-        transaction: &Transaction,
-        id: RuneId,
-        rune: Rune,
-        artifact: &Artifact,
-    ) -> Result<()> {
-        self.cache.increment_runes_count();
-
-        let inscription = index_rune_icon(transaction, txid);
-
-        if let Some((id, inscription)) = inscription.as_ref() {
-            self.cache.set_inscription(id.clone(), inscription.clone());
-        }
-
-        let entry = match artifact {
-            Artifact::Cenotaph(_) => RuneEntry {
-                block: id.block,
-                burned: 0,
-                divisibility: 0,
-                etching: txid,
-                terms: None,
-                mints: 0,
-                number: self.cache.get_runes_count(),
-                premine: 0,
-                spaced_rune: SpacedRune { rune, spacers: 0 },
-                symbol: None,
-                pending_burns: 0,
-                pending_mints: 0,
-                inscription_id: inscription.map(|(id, _)| id),
-                timestamp: block_time.into(),
-                turbo: false,
-            },
-            Artifact::Runestone(Runestone { etching, .. }) => {
-                let Etching {
-                    divisibility,
-                    terms,
-                    premine,
-                    spacers,
-                    symbol,
-                    turbo,
-                    ..
-                } = etching.unwrap();
-
-                RuneEntry {
-                    block: id.block,
-                    burned: 0,
-                    divisibility: divisibility.unwrap_or_default(),
-                    etching: txid,
-                    terms,
-                    mints: 0,
-                    number: self.cache.get_runes_count(),
-                    premine: premine.unwrap_or_default(),
-                    spaced_rune: SpacedRune {
-                        rune,
-                        spacers: spacers.unwrap_or_default(),
-                    },
-                    symbol,
-                    pending_burns: 0,
-                    pending_mints: 0,
-                    inscription_id: inscription.map(|(id, _)| id),
-                    timestamp: block_time.into(),
-                    turbo,
-                }
-            }
-        };
-
-        self.cache.set_rune(id, entry);
-        self.cache
-            .set_rune_id_number(self.cache.get_runes_count(), id);
-        self.cache.set_rune_id(rune, id);
-
-        Ok(())
-    }
-
-    fn mint(&mut self, id: RuneId) -> Result<Option<Lot>> {
-        let rune_entry = match self.cache.get_rune(&id) {
+    fn mint(&mut self, cache: &UpdaterCache, id: RuneId) -> Result<Option<Lot>> {
+        let rune_entry = match cache.get_rune(&id) {
             Ok(rune_entry) => rune_entry,
             Err(err) => {
                 if err.is_not_found() {
@@ -441,52 +348,10 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
             return Ok(None);
         };
 
-        self.update_mints(&id, amount as i128)?;
-
         Ok(Some(Lot(amount)))
     }
 
-    fn update_mints(&mut self, rune_id: &RuneId, amount: i128) -> Result<()> {
-        let mut rune_entry = self.cache.get_rune(rune_id)?;
-
-        if self.cache.settings.mempool {
-            let result = rune_entry.pending_mints.saturating_add_signed(amount);
-            rune_entry.pending_mints = result;
-        } else {
-            let result = rune_entry.mints.saturating_add_signed(amount);
-
-            rune_entry.mints = result;
-        }
-
-        self.cache.set_rune(*rune_id, rune_entry);
-
-        Ok(())
-    }
-
-    fn update_burn_balance(&mut self, rune_id: &RuneId, amount: i128) -> Result<()> {
-        let mut rune_entry = self.cache.get_rune(rune_id)?;
-
-        if self.cache.settings.mempool {
-            let result = rune_entry
-                .pending_burns
-                .checked_add_signed(amount)
-                .ok_or(TransactionParserError::Overflow("burn".to_string()))?;
-            rune_entry.pending_burns = result;
-        } else {
-            let result = rune_entry
-                .pending_burns
-                .checked_add_signed(amount)
-                .ok_or(TransactionParserError::Overflow("burn".to_string()))?;
-
-            rune_entry.burned = result;
-        }
-
-        self.cache.set_rune(*rune_id, rune_entry);
-
-        Ok(())
-    }
-
-    fn tx_commits_to_rune(&self, tx: &Transaction, rune: Rune) -> Result<bool> {
+    fn tx_commits_to_rune(&self, cache: &UpdaterCache, tx: &Transaction, rune: Rune) -> Result<bool> {
         let commitment = rune.commitment();
 
         for input in &tx.input {
@@ -511,7 +376,7 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
                     continue;
                 }
 
-                match self.validate_commit_transaction_with_cache(input.previous_output) {
+                match self.validate_commit_transaction_with_cache(cache, input.previous_output) {
                     Ok(true) => return Ok(true),
                     Ok(false) => continue,
                     Err(e) => {
@@ -528,8 +393,8 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
         Ok(false)
     }
 
-    fn validate_commit_transaction_with_cache(&self, outpoint: OutPoint) -> Result<bool> {
-        let transaction = self.cache.get_transaction(outpoint.txid)?;
+    fn validate_commit_transaction_with_cache(&self, cache: &UpdaterCache, outpoint: OutPoint) -> Result<bool> {
+        let transaction = cache.get_transaction(outpoint.txid)?;
 
         let taproot = transaction.output[outpoint.vout.into_usize()]
             .script_pubkey
@@ -539,7 +404,7 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
             return Ok(false);
         }
 
-        let block_id = self.cache.get_transaction_confirming_block(outpoint.txid)?;
+        let block_id = cache.get_transaction_confirming_block(outpoint.txid)?;
 
         let confirmations = self.height.checked_sub(block_id.height).unwrap() + 1;
 
@@ -580,7 +445,7 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
         Ok(confirmations >= Runestone::COMMIT_CONFIRMATIONS.into())
     }
 
-    fn unallocated(&self, tx: &Transaction) -> Result<HashMap<RuneId, Lot>> {
+    fn unallocated(&self, cache: &UpdaterCache, tx: &Transaction) -> Result<HashMap<RuneId, Lot>> {
         let mut unallocated = HashMap::new();
 
         // 1) Collect all outpoints:
@@ -591,7 +456,16 @@ impl<'a, 'client> TransactionParser<'a, 'client> {
             .collect();
 
         // 2) Do a single multi-get in the cache:
-        let tx_out_map = self.cache.get_tx_outs(&outpoints)?;
+        let tx_out_map = cache.get_tx_outs(&outpoints)?;
+
+        if !tx.is_coinbase() {
+            assert_eq!(
+                outpoints.len(),
+                tx_out_map.len(),
+                "outpoints and tx_out_map should have the same length in tx: {}",
+                tx.compute_txid()
+            );
+        }
 
         // 3) Accumulate unallocated:
         for (_, tx_out) in tx_out_map {

@@ -63,7 +63,7 @@ impl AddressUpdater {
         // 1. Map all spent outpoints to their scriptPubKey
         // ------------------------------------------------------
         let spent_map = if !old_spent_outpoints.is_empty() {
-            cache.get_outpoints_to_script_pubkey(&old_spent_outpoints, true)?
+            cache.get_outpoints_to_script_pubkey(&old_spent_outpoints, false)?
         } else {
             HashMap::new()
         };

@@ -171,9 +171,7 @@ impl UpdaterCache {
                 .read()
                 .get_tx_outs(&to_fetch.iter().cloned().collect(), None)?;
 
-            for (outpoint, tx_out) in tx_outs.iter() {
-                self.update.txouts.insert(outpoint.clone(), tx_out.clone());
-            }
+            self.update.txouts.extend(tx_outs);
         }
 
         Ok(())
@@ -204,9 +202,8 @@ impl UpdaterCache {
                 .db
                 .read()
                 .get_tx_outs(&to_fetch.iter().cloned().collect(), None)?;
-            for (outpoint, tx_out) in tx_outs.iter() {
-                results.insert(outpoint.clone(), tx_out.clone());
-            }
+
+            results.extend(tx_outs);
         }
 
         Ok(results)
@@ -214,18 +211,6 @@ impl UpdaterCache {
 
     pub fn set_tx_out(&mut self, outpoint: OutPoint, tx_out: TxOutEntry) -> () {
         self.update.txouts.insert(outpoint, tx_out);
-    }
-
-    pub fn get_tx_state_changes(&self, txid: Txid) -> Result<TransactionStateChange> {
-        if let Some(tx_state_changes) = self.update.tx_state_changes.get(&txid) {
-            return Ok(tx_state_changes.clone());
-        } else {
-            let tx_state_changes = self
-                .db
-                .read()
-                .get_tx_state_changes(&txid, Some(self.settings.mempool))?;
-            return Ok(tx_state_changes);
-        }
     }
 
     pub fn does_tx_exist(&self, txid: Txid) -> Result<bool> {

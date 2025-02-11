@@ -268,7 +268,7 @@ impl Store for RocksDB {
         if let Some(mempool) = mempool {
             Ok(self.get_tx_outs(outpoints, mempool)?)
         } else {
-            let ledger_outpoints = self.get_tx_outs(outpoints, false)?;
+            let mut ledger_outpoints = self.get_tx_outs(outpoints, false)?;
 
             let remaining = outpoints
                 .iter()
@@ -282,10 +282,9 @@ impl Store for RocksDB {
 
             let mempool_outpoints = self.get_tx_outs(&remaining, true)?;
 
-            Ok(ledger_outpoints
-                .into_iter()
-                .chain(mempool_outpoints.into_iter())
-                .collect())
+            ledger_outpoints.extend(mempool_outpoints);
+
+            Ok(ledger_outpoints)
         }
     }
 

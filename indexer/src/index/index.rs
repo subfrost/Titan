@@ -261,8 +261,15 @@ impl Index {
 
     pub fn get_script_pubkey_outpoints(&self, script: &ScriptBuf) -> Result<AddressData> {
         let outpoints = self.db.get_script_pubkey_outpoints(script, None)?;
-        let outpoints_to_tx_out = self.db.get_tx_outs(&outpoints, None)?;
-        let outpoint_txns: Vec<Txid> = outpoints_to_tx_out.keys().map(|outpoint| outpoint.txid).collect();
+        let outpoints_to_tx_out: HashMap<OutPoint, TxOutEntry> = self.db.get_tx_outs(&outpoints, None)?;
+
+        assert_eq!(
+            outpoints.len(),
+            outpoints_to_tx_out.len(),
+            "outpoints and outpoints_to_tx_out should have the same length"
+        );
+
+        let outpoint_txns: Vec<Txid> = outpoints.iter().map(|outpoint| outpoint.txid).collect();
         let txns_confirming_block = self.db.get_transaction_confirming_blocks(&outpoint_txns)?;
 
         let mut runes = HashMap::new();
