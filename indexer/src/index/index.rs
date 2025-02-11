@@ -221,6 +221,10 @@ impl Index {
         Ok(self.db.get_tx_out(outpoint, None)?)
     }
 
+    pub fn get_tx_outs(&self, outpoints: &Vec<OutPoint>) -> Result<HashMap<OutPoint, TxOutEntry>> {
+        Ok(self.db.get_tx_outs(outpoints, None)?)
+    }
+
     pub fn get_rune(&self, rune_id: &RuneId) -> Result<RuneEntry> {
         Ok(self.db.get_rune(rune_id)?)
     }

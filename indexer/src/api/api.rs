@@ -158,19 +158,26 @@ pub fn transaction(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Tra
         transaction
     });
 
-    for (vout, tx_out) in transaction.output.iter_mut().enumerate() {
-        match index.get_tx_out(&OutPoint {
+    let outpoints = transaction
+        .output
+        .iter()
+        .enumerate()
+        .map(|(vout, _)| OutPoint {
             txid: txid.clone(),
             vout: vout as u32,
-        }) {
-            Ok(tx_out_entry) => {
-                tx_out.runes = tx_out_entry.runes;
+        })
+        .collect();
+
+    let tx_outs = index.get_tx_outs(&outpoints)?;
+
+    for (vout, tx_out) in transaction.output.iter_mut().enumerate() {
+        let outpoint = outpoints[vout];
+        match tx_outs.get(&outpoint) {
+            Some(tx_out_entry) => {
+                tx_out.runes = tx_out_entry.runes.clone();
             }
-            Err(IndexError::StoreError(StoreError::NotFound(_))) => {
+            None => {
                 // Ignore.
-            }
-            Err(e) => {
-                error!("Error getting tx out: {}", e);
             }
         }
     }
