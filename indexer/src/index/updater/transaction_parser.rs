@@ -464,17 +464,12 @@ impl<'client> TransactionParser<'client> {
             .map(|input| input.previous_output.into())
             .collect();
 
+        if tx.is_coinbase() {
+            return Ok(unallocated);
+        }
+
         // 2) Do a single multi-get in the cache:
         let tx_out_map = cache.get_tx_outs(&outpoints)?;
-
-        if !tx.is_coinbase() {
-            assert_eq!(
-                outpoints.len(),
-                tx_out_map.len(),
-                "outpoints and tx_out_map should have the same length in tx: {}",
-                tx.compute_txid()
-            );
-        }
 
         // 3) Accumulate unallocated:
         for (_, tx_out) in tx_out_map {
