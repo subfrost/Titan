@@ -31,20 +31,46 @@ pub enum TcpClientError {
 /// then checks the shutdown flag again.
 ///
 /// The listener will continue until either the TCP connection is closed or the provided
-/// `shutdown_flag` is set to `true`.
+/// `shutdown` method is called.
 ///
 /// # Arguments
 ///
 /// * `addr` - The address of the TCP subscription server (e.g., "127.0.0.1:9000").
 /// * `subscription_request` - The subscription request to send to the server.
-/// * `shutdown_flag` - An `Arc<AtomicBool>` which, when set to `true`, signals the listener to shut down.
 ///
 /// # Returns
 ///
 /// A `Result` containing a `std::sync::mpsc::Receiver<Event>` that will receive events from the server,
 /// or an error.
 #[cfg(feature = "tcp_client_blocking")]
-pub fn subscribe(
+pub struct TcpClient {
+    shutdown_flag: Arc<AtomicBool>,
+}
+
+#[cfg(feature = "tcp_client_blocking")]
+impl TcpClient {
+    pub fn new() -> Self {
+        Self {
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub fn subscribe(
+        &self,
+        addr: &str,
+        subscription_request: TcpSubscriptionRequest,
+    ) -> Result<mpsc::Receiver<Event>, TcpClientError> {
+        let shutdown_flag = self.shutdown_flag.clone();
+        subscribe(addr, subscription_request, shutdown_flag)
+    }
+
+    pub fn shutdown(&self) {
+        self.shutdown_flag.store(true, Ordering::SeqCst);
+    }
+}
+
+
+fn subscribe(
     addr: &str,
     subscription_request: TcpSubscriptionRequest,
     shutdown_flag: Arc<AtomicBool>,

@@ -12,11 +12,11 @@ pub use http::{
 pub use titan_types::*;
 
 #[cfg(feature = "tcp_client")]
-pub use tcp_client::{subscribe as subscribe_to_titan, TcpClientError as TitanTcpClientError};
+pub use tcp_client::{AsyncTcpClient as AsyncTcpClient, TcpClientError as TitanTcpClientError};
 
 #[cfg(feature = "tcp_client_blocking")]
 pub use tcp_client_blocking::{
-    subscribe as subscribe_to_titan_blocking, TcpClientError as TitanTcpClientBlockingError,
+    TcpClient as TcpClientBlocking, TcpClientError as TitanTcpClientBlockingError,
 };
 
 #[cfg(test)]
@@ -32,7 +32,7 @@ mod tests {
     // Import the HTTP and TCP client functions.
     use crate::http::{AsyncClient as HttpClient, TitanApiAsync as TitanApi};
     #[cfg(feature = "tcp_client")]
-    use crate::tcp_client::subscribe;
+    use crate::tcp_client::AsyncTcpClient;
 
     /// End-to-end test for the TCP subscription client.
     ///
@@ -55,11 +55,9 @@ mod tests {
             ],
         };
 
-        // Create a watch channel to signal shutdown.
-        let (shutdown_tx, shutdown_rx) = watch::channel(());
-
         // Connect to the TCP server and subscribe.
-        let mut rx = subscribe(tcp_addr, subscription_request, shutdown_rx).await?;
+        let client = AsyncTcpClient::new();
+        let mut rx = client.subscribe(tcp_addr, subscription_request).await?;
 
         println!("Connected to TCP subscription server at {}.", tcp_addr);
 
@@ -88,7 +86,7 @@ mod tests {
         println!("Total events received in 10 seconds: {}", events.len());
 
         // Signal shutdown to the subscription task.
-        let _ = shutdown_tx.send(());
+        client.shutdown();
         println!("Shutdown signal sent to TCP subscription task.");
 
         Ok(())
