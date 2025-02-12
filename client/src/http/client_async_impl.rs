@@ -23,89 +23,105 @@ impl AsyncClient {
             base_url: base_url.trim_end_matches('/').to_string(),
         }
     }
+
+    async fn call_text(&self, path: &str) -> Result<String, Error> {
+        let url = format!("{}{}", self.base_url, path);
+        let response = self.http_client.get(&url).send().await?;
+        if response.status().is_success() {
+            Ok(response.text().await?)
+        } else {
+            Err(Error::TitanError(response.status(), response.text().await?))
+        }
+    }
+
+    async fn call_bytes(&self, path: &str) -> Result<Vec<u8>, Error> {
+        let url = format!("{}{}", self.base_url, path);
+        let response = self.http_client.get(&url).send().await?;
+        if response.status().is_success() {
+            Ok(response.bytes().await?.to_vec())
+        } else {
+            Err(Error::TitanError(response.status(), response.text().await?))
+        }
+    }
+
+    async fn post_text(&self, path: &str, body: String) -> Result<String, Error> {
+        let url = format!("{}{}", self.base_url, path);
+        let response = self.http_client.post(&url).body(body).send().await?;
+        if response.status().is_success() {
+            Ok(response.text().await?)
+        } else {
+            Err(Error::TitanError(response.status(), response.text().await?))
+        }
+    }
+
+    async fn delete(&self, path: &str) -> Result<(), Error> {
+        let url = format!("{}{}", self.base_url, path);
+        let response = self.http_client.delete(&url).send().await?;
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(Error::TitanError(response.status(), response.text().await?))
+        }
+    }
 }
 
 #[async_trait::async_trait]
 impl TitanApiAsync for AsyncClient {
     async fn get_status(&self) -> Result<Status, Error> {
-        let url = format!("{}/status", self.base_url);
-        let resp = self.http_client.get(&url).send().await?;
-        Ok(resp.json().await?)
+        let text = self.call_text("/status").await?;
+        serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn get_tip(&self) -> Result<BlockTip, Error> {
-        let url = format!("{}/tip", self.base_url);
-        let resp = self.http_client.get(&url).send().await?;
-        Ok(resp.json().await?)
+        let text = self.call_text("/tip").await?;
+        serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn get_block(&self, query: &query::Block) -> Result<Block, Error> {
-        let url = format!("{}/block/{}", self.base_url, query);
-        let resp = self.http_client.get(&url).send().await?;
-        Ok(resp.json().await?)
+        let text = self.call_text(&format!("/block/{}", query)).await?;
+        serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn get_block_hash_by_height(&self, height: u64) -> Result<String, Error> {
-        let url = format!("{}/block/{}/hash", self.base_url, height);
-        let resp = self.http_client.get(&url).send().await?;
-        Ok(resp.text().await?)
+        self.call_text(&format!("/block/{}/hash", height)).await
     }
 
     async fn get_block_txids(&self, query: &query::Block) -> Result<Vec<String>, Error> {
-        let url = format!("{}/block/{}/txids", self.base_url, query);
-        let resp = self.http_client.get(&url).send().await?;
-        Ok(resp.json().await?)
+        let text = self.call_text(&format!("/block/{}/txids", query)).await?;
+        serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn get_address(&self, address: &str) -> Result<AddressData, Error> {
-        let url = format!("{}/address/{}", self.base_url, address);
-        let resp = self.http_client.get(&url).send().await?;
-        Ok(resp.json().await?)
+        let text = self.call_text(&format!("/address/{}", address)).await?;
+        serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn get_transaction(&self, txid: &str) -> Result<Transaction, Error> {
-        let url = format!("{}/tx/{}", self.base_url, txid);
-        let resp = self.http_client.get(&url).send().await?;
-        Ok(resp.json().await?)
+        let text = self.call_text(&format!("/tx/{}", txid)).await?;
+        serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn get_transaction_raw(&self, txid: &str) -> Result<Vec<u8>, Error> {
-        let url = format!("{}/tx/{}/raw", self.base_url, txid);
-        let resp = self.http_client.get(&url).send().await?;
-        Ok(resp.bytes().await?.to_vec())
+        self.call_bytes(&format!("/tx/{}/raw", txid)).await
     }
 
     async fn get_transaction_hex(&self, txid: &str) -> Result<String, Error> {
-        let url = format!("{}/tx/{}/hex", self.base_url, txid);
-        let resp = self.http_client.get(&url).send().await?;
-        Ok(resp.text().await?)
+        self.call_text(&format!("/tx/{}/hex", txid)).await
     }
 
     async fn get_transaction_status(&self, txid: &str) -> Result<TransactionStatus, Error> {
-        let url = format!("{}/tx/{}/status", self.base_url, txid);
-        let resp = self.http_client.get(&url).send().await?;
-        Ok(resp.json().await?)
+        let text = self.call_text(&format!("/tx/{}/status", txid)).await?;
+        serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn send_transaction(&self, tx_hex: String) -> Result<Txid, Error> {
-        let url = format!("{}/tx/broadcast", self.base_url);
-        let resp = self.http_client.post(&url).body(tx_hex).send().await?;
-        let status = resp.status();
-        let body_text = resp.text().await?;
-        if !status.is_success() {
-            return Err(Error::Runtime(format!(
-                "Broadcast failed: HTTP {} - {}",
-                status, body_text
-            )));
-        }
-        let txid = Txid::from_str(&body_text)?;
-        Ok(txid)
+        let text = self.post_text("/tx/broadcast", tx_hex).await?;
+        Txid::from_str(&text).map_err(Error::from)
     }
 
     async fn get_output(&self, outpoint: &str) -> Result<TxOutEntry, Error> {
-        let url = format!("{}/output/{}", self.base_url, outpoint);
-        let resp = self.http_client.get(&url).send().await?;
-        Ok(resp.json().await?)
+        let text = self.call_text(&format!("/output/{}", outpoint)).await?;
+        serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn get_inscription(&self, inscription_id: &str) -> Result<(HeaderMap, Vec<u8>), Error> {
@@ -114,10 +130,7 @@ impl TitanApiAsync for AsyncClient {
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(Error::Runtime(format!(
-                "Inscription request failed: HTTP {} - {}",
-                status, body
-            )));
+            return Err(Error::TitanError(status, body));
         }
         let headers = resp.headers().clone();
         let bytes = resp.bytes().await?.to_vec();
@@ -128,19 +141,17 @@ impl TitanApiAsync for AsyncClient {
         &self,
         pagination: Option<Pagination>,
     ) -> Result<PaginationResponse<RuneResponse>, Error> {
-        let url = format!("{}/runes", self.base_url);
-        let mut req = self.http_client.get(&url);
-        if let Some(ref p) = pagination {
-            req = req.query(&[("skip", p.skip), ("limit", p.limit)]);
+        let mut path = "/runes".to_string();
+        if let Some(p) = pagination {
+            path = format!("{}?skip={}&limit={}", path, p.skip, p.limit);
         }
-        let resp = req.send().await?;
-        Ok(resp.json().await?)
+        let text = self.call_text(&path).await?;
+        serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn get_rune(&self, rune: &str) -> Result<RuneResponse, Error> {
-        let url = format!("{}/rune/{}", self.base_url, rune);
-        let resp = self.http_client.get(&url).send().await?;
-        Ok(resp.json().await?)
+        let text = self.call_text(&format!("/rune/{}", rune)).await?;
+        serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn get_rune_transactions(
@@ -148,55 +159,35 @@ impl TitanApiAsync for AsyncClient {
         rune: &str,
         pagination: Option<Pagination>,
     ) -> Result<PaginationResponse<Txid>, Error> {
-        let url = format!("{}/rune/{}/transactions", self.base_url, rune);
-        let mut req = self.http_client.get(&url);
-        if let Some(ref p) = pagination {
-            req = req.query(&[("skip", p.skip), ("limit", p.limit)]);
+        let mut path = format!("/rune/{}/transactions", rune);
+        if let Some(p) = pagination {
+            path = format!("{}?skip={}&limit={}", path, p.skip, p.limit);
         }
-        let resp = req.send().await?;
-        Ok(resp.json().await?)
+        let text = self.call_text(&path).await?;
+        serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn get_mempool_txids(&self) -> Result<Vec<Txid>, Error> {
-        let url = format!("{}/mempool/txids", self.base_url);
-        let resp = self.http_client.get(&url).send().await?;
-        Ok(resp.json().await?)
+        let text = self.call_text("/mempool/txids").await?;
+        serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn get_subscription(&self, id: &str) -> Result<Subscription, Error> {
-        let url = format!("{}/subscription/{}", self.base_url, id);
-        let resp = self.http_client.get(&url).send().await?;
-        Ok(resp.json().await?)
+        let text = self.call_text(&format!("/subscription/{}", id)).await?;
+        serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn list_subscriptions(&self) -> Result<Vec<Subscription>, Error> {
-        let url = format!("{}/subscriptions", self.base_url);
-        let resp = self.http_client.get(&url).send().await?;
-        Ok(resp.json().await?)
+        let text = self.call_text("/subscriptions").await?;
+        serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn add_subscription(&self, subscription: &Subscription) -> Result<Subscription, Error> {
-        let url = format!("{}/subscription", self.base_url);
-        let resp = self
-            .http_client
-            .post(&url)
-            .json(subscription)
-            .send()
-            .await?;
-        Ok(resp.json().await?)
+        let text = self.post_text("/subscription", serde_json::to_string(subscription)?).await?;
+        serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn delete_subscription(&self, id: &str) -> Result<(), Error> {
-        let url = format!("{}/subscription/{}", self.base_url, id);
-        let resp = self.http_client.delete(&url).send().await?;
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        if !status.is_success() {
-            return Err(Error::Runtime(format!(
-                "Delete subscription failed: HTTP {} - {}",
-                status, body
-            )));
-        }
-        Ok(())
+        self.delete(&format!("/subscription/{}", id)).await
     }
 }

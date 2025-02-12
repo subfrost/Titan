@@ -12,9 +12,6 @@ pub enum Error {
     #[error("serde error")]
     SerdeError(#[from] serde_json::Error),
 
-    #[error("runtime error: {0}")]
-    Runtime(String),
-
     #[error("hex error: {0}")]
     HexToArrayError(#[from] HexToArrayError),
 
