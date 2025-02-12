@@ -14,6 +14,16 @@ export interface RuneAmount {
   amount: string;
 }
 
+export interface SpenderReference {
+  txid: string;
+  vin: number;
+}
+
+export interface SpentStatus {
+  spent: boolean;
+  vin?: SpenderReference;
+}
+
 export interface TransactionStatus {
   confirmed: boolean;
   block_height?: number;
@@ -26,6 +36,7 @@ export interface AddressTxOut {
   value: number;
   runes: RuneAmount[];
   status?: TransactionStatus;
+  spent: SpentStatus;
 }
 
 export interface AddressData {
@@ -38,12 +49,13 @@ export interface TxOut {
   value: number;
   script_pubkey: string;
   runes: RuneAmount[];
+  spent: SpentStatus;
 }
 
 export interface TxOutEntry {
   runes: RuneAmount[];
   value: number;
-  spent: boolean;
+  spent: SpentStatus;
 }
 
 export interface Transaction {
