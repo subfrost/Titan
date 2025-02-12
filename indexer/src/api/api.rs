@@ -176,6 +176,7 @@ pub fn transaction(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Tra
         match tx_outs.get(&outpoint) {
             Some(tx_out_entry) => {
                 tx_out.runes = tx_out_entry.runes.clone();
+                tx_out.risky_runes = tx_out_entry.risky_runes.clone();
             }
             None => {
                 // Ignore.

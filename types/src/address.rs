@@ -17,6 +17,7 @@ pub struct AddressTxOut {
     pub vout: u32,
     pub value: u64,
     pub runes: Vec<RuneAmount>,
+    pub risky_runes: Vec<RuneAmount>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<TransactionStatus>,
 }
@@ -28,6 +29,7 @@ impl From<(OutPoint, TxOutEntry, Option<TransactionStatus>)> for AddressTxOut {
             vout: outpoint.vout,
             value: tx_out.value,
             runes: tx_out.runes,
+            risky_runes: tx_out.risky_runes,
             status,
         }
     }

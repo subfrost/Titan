@@ -58,6 +58,7 @@ impl From<bitcoin::Transaction> for Transaction {
                     value: tx_out.value.to_sat(),
                     script_pubkey: tx_out.script_pubkey.clone(),
                     runes: vec![],
+                    risky_runes: vec![],
                 })
                 .collect(),
             status: None,
@@ -70,6 +71,7 @@ pub struct TxOut {
     pub value: u64,
     pub script_pubkey: ScriptBuf,
     pub runes: Vec<RuneAmount>,
+    pub risky_runes: Vec<RuneAmount>,
 }
 
 impl BorshSerialize for TxOut {
@@ -79,7 +81,7 @@ impl BorshSerialize for TxOut {
         BorshSerialize::serialize(&(script_bytes.len() as u32), writer)?;
         writer.write_all(script_bytes)?;
         BorshSerialize::serialize(&self.runes, writer)?;
-
+        BorshSerialize::serialize(&self.risky_runes, writer)?;
         Ok(())
     }
 }
@@ -92,11 +94,13 @@ impl BorshDeserialize for TxOut {
         reader.read_exact(&mut script_bytes)?;
         let script_pubkey = ScriptBuf::from_bytes(script_bytes);
         let runes = Vec::<RuneAmount>::deserialize_reader(reader)?;
+        let risky_runes = Vec::<RuneAmount>::deserialize_reader(reader)?;
 
         Ok(Self {
             value,
             script_pubkey,
             runes,
+            risky_runes,
         })
     }
 }
@@ -104,6 +108,7 @@ impl BorshDeserialize for TxOut {
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub struct TxOutEntry {
     pub runes: Vec<RuneAmount>,
+    pub risky_runes: Vec<RuneAmount>,
     pub value: u64,
     pub spent: bool,
 }

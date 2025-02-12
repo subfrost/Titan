@@ -60,10 +60,11 @@ impl<'client> TransactionParser<'client> {
         tx_index: u32,
         tx: &Transaction,
     ) -> Result<TransactionStateChange> {
-        let (allocated, minted, etched, burned) = if self.should_index_runes {
+        let (allocated, risky_allocated, minted, etched, burned) = if self.should_index_runes {
             self.parse_runes(cache, tx_index, tx)?
         } else {
             (
+                vec![HashMap::new(); tx.output.len()],
                 vec![HashMap::new(); tx.output.len()],
                 None,
                 None,
@@ -81,12 +82,27 @@ impl<'client> TransactionParser<'client> {
 
             let mut tx_out = TxOutEntry {
                 runes: vec![],
+                risky_runes: vec![],
                 spent: false,
                 value: tx.output[vout].value.to_sat(),
             };
 
             for (id, balance) in balances {
                 tx_out.runes.push(RuneAmount {
+                    rune_id: id,
+                    amount: balance.0,
+                });
+            }
+
+            let mut risky_runes_vec = risky_allocated[vout]
+                .clone()
+                .into_iter()
+                .collect::<Vec<(RuneId, Lot)>>();
+
+            risky_runes_vec.sort();
+
+            for (id, balance) in risky_runes_vec {
+                tx_out.risky_runes.push(RuneAmount {
                     rune_id: id,
                     amount: balance.0,
                 });
@@ -120,23 +136,31 @@ impl<'client> TransactionParser<'client> {
         tx_index: u32,
         tx: &Transaction,
     ) -> Result<(
-        Vec<HashMap<RuneId, Lot>>,
-        Option<RuneAmount>,
-        Option<(RuneId, Rune)>,
-        HashMap<RuneId, Lot>,
+        Vec<HashMap<RuneId, Lot>>, // allocated runes per output
+        Vec<HashMap<RuneId, Lot>>, // allocated risky runes per output
+        Option<RuneAmount>,        // minted rune at transaction level
+        Option<(RuneId, Rune)>,    // etched rune, if any
+        HashMap<RuneId, Lot>,      // burned runes
     )> {
         let artifact = Runestone::decipher(tx);
+        let (mut unallocated, mut risky_unallocated) = self.unallocated(cache, tx)?;
 
-        let mut unallocated = self.unallocated(cache, tx)?;
-
+        // Create per-output allocation maps
         let mut allocated: Vec<HashMap<RuneId, Lot>> = vec![HashMap::new(); tx.output.len()];
+        let mut allocated_risky: Vec<HashMap<RuneId, Lot>> = vec![HashMap::new(); tx.output.len()];
         let mut minted: Option<RuneAmount> = None;
         let mut etched: Option<(RuneId, Rune)> = None;
 
+        // If there is a mintable rune, add its amount into the unallocated maps.
         if let Some(artifact) = &artifact {
             if let Some(id) = artifact.mint() {
                 if let Some(amount) = self.mint(cache, id)? {
-                    *unallocated.entry(id).or_default() += amount;
+                    if self.mempool {
+                        *risky_unallocated.entry(id).or_default() += amount;
+                    } else {
+                        *unallocated.entry(id).or_default() += amount;
+                    }
+
                     minted = Some(RuneAmount {
                         rune_id: id,
                         amount: amount.0,
@@ -148,80 +172,43 @@ impl<'client> TransactionParser<'client> {
 
             if let Artifact::Runestone(runestone) = artifact {
                 if let Some((id, ..)) = etched {
-                    *unallocated.entry(id).or_default() +=
-                        runestone.etching.unwrap().premine.unwrap_or_default();
+                    if self.mempool {
+                        *risky_unallocated.entry(id).or_default() +=
+                            runestone.etching.unwrap().premine.unwrap_or_default();
+                    } else {
+                        *unallocated.entry(id).or_default() +=
+                            runestone.etching.unwrap().premine.unwrap_or_default();
+                    }
                 }
 
                 for Edict { id, amount, output } in runestone.edicts.iter().copied() {
                     let amount = Lot(amount);
-
-                    // edicts with output values greater than the number of outputs
-                    // should never be produced by the edict parser
                     let output = usize::try_from(output).unwrap();
                     assert!(output <= tx.output.len());
 
                     let id = if id == RuneId::default() {
+                        // If the edict did not specify an id, use the etched id (if available)
                         let Some((id, ..)) = etched else {
                             continue;
                         };
-
                         id
                     } else {
                         id
                     };
 
-                    let Some(balance) = unallocated.get_mut(&id) else {
-                        continue;
-                    };
+                    if let Some(balance) = unallocated.get_mut(&id) {
+                        self.allocate_edicts(tx, &mut allocated, balance, id, amount, output);
+                    }
 
-                    let mut allocate = |balance: &mut Lot, amount: Lot, output: usize| {
-                        if amount > 0 {
-                            *balance -= amount;
-                            *allocated[output].entry(id).or_default() += amount;
-                        }
-                    };
-
-                    if output == tx.output.len() {
-                        // find non-OP_RETURN outputs
-                        let destinations = tx
-                            .output
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(output, tx_out)| {
-                                (!tx_out.script_pubkey.is_op_return()).then_some(output)
-                            })
-                            .collect::<Vec<usize>>();
-
-                        if !destinations.is_empty() {
-                            if amount == 0 {
-                                // if amount is zero, divide balance between eligible outputs
-                                let amount = *balance / destinations.len() as u128;
-                                let remainder =
-                                    usize::try_from(*balance % destinations.len() as u128).unwrap();
-
-                                for (i, output) in destinations.iter().enumerate() {
-                                    allocate(
-                                        balance,
-                                        if i < remainder { amount + 1 } else { amount },
-                                        *output,
-                                    );
-                                }
-                            } else {
-                                // if amount is non-zero, distribute amount to eligible outputs
-                                for output in destinations {
-                                    allocate(balance, amount.min(*balance), output);
-                                }
-                            }
-                        }
-                    } else {
-                        // Get the allocatable amount
-                        let amount = if amount == 0 {
-                            *balance
-                        } else {
-                            amount.min(*balance)
-                        };
-
-                        allocate(balance, amount, output);
+                    if let Some(risky_balance) = risky_unallocated.get_mut(&id) {
+                        self.allocate_edicts(
+                            tx,
+                            &mut allocated_risky,
+                            risky_balance,
+                            id,
+                            amount,
+                            output,
+                        );
                     }
                 }
             }
@@ -241,8 +228,6 @@ impl<'client> TransactionParser<'client> {
                 })
                 .unwrap_or_default();
 
-            // assign all un-allocated runes to the default output, or the first non
-            // OP_RETURN output if there is no default
             if let Some(vout) = pointer
                 .map(|pointer| pointer.try_into().unwrap())
                 .inspect(|&pointer| assert!(pointer < allocated.len()))
@@ -254,11 +239,12 @@ impl<'client> TransactionParser<'client> {
                         .map(|(vout, _tx_out)| vout)
                 })
             {
-                for (id, balance) in unallocated {
-                    if balance > 0 {
-                        *allocated[vout].entry(id).or_default() += balance;
-                    }
-                }
+                self.allocate_remaining_in_pointer(&mut unallocated, &mut allocated, vout);
+                self.allocate_remaining_in_pointer(
+                    &mut risky_unallocated,
+                    &mut allocated_risky,
+                    vout,
+                );
             } else {
                 for (id, balance) in unallocated {
                     if balance > 0 {
@@ -268,8 +254,8 @@ impl<'client> TransactionParser<'client> {
             }
         }
 
+        // If an output is an OP_RETURN then mark all runes there as burned.
         for (vout, balances) in allocated.iter().enumerate() {
-            // increment burned balances
             if tx.output[vout].script_pubkey.is_op_return() {
                 for (id, balance) in balances {
                     *burned.entry(*id).or_default() += *balance;
@@ -277,7 +263,77 @@ impl<'client> TransactionParser<'client> {
             }
         }
 
-        Ok((allocated, minted, etched, burned))
+        Ok((allocated, allocated_risky, minted, etched, burned))
+    }
+
+    fn allocate_edicts(
+        &mut self,
+        tx: &Transaction,
+        allocated: &mut Vec<HashMap<RuneId, Lot>>,
+        balance: &mut Lot,
+        id: RuneId,
+        amount: Lot,
+        output: usize,
+    ) {
+        // allocate function that also flags minted allocations
+        let mut allocate = |balance: &mut Lot, amount: Lot, output: usize| {
+            if amount > 0 {
+                *balance -= amount;
+                *allocated[output].entry(id).or_default() += amount;
+            }
+        };
+
+        if output == tx.output.len() {
+            // When output equals the number of outputs, distribute among eligible outputs.
+            let destinations: Vec<usize> = tx
+                .output
+                .iter()
+                .enumerate()
+                .filter_map(|(output, tx_out)| {
+                    (!tx_out.script_pubkey.is_op_return()).then_some(output)
+                })
+                .collect();
+
+            if !destinations.is_empty() {
+                if amount == 0 {
+                    let amount_div = *balance / destinations.len() as u128;
+                    let remainder = usize::try_from(*balance % destinations.len() as u128).unwrap();
+
+                    for (i, dest) in destinations.iter().enumerate() {
+                        let alloc_amount = if i < remainder {
+                            amount_div + 1
+                        } else {
+                            amount_div
+                        };
+                        allocate(balance, alloc_amount, *dest);
+                    }
+                } else {
+                    for dest in destinations {
+                        allocate(balance, amount.min(*balance), dest);
+                    }
+                }
+            }
+        } else {
+            let alloc_amount = if amount == 0 {
+                *balance
+            } else {
+                amount.min(*balance)
+            };
+            allocate(balance, alloc_amount, output);
+        }
+    }
+
+    fn allocate_remaining_in_pointer(
+        &mut self,
+        unallocated: &mut HashMap<RuneId, Lot>,
+        allocated: &mut Vec<HashMap<RuneId, Lot>>,
+        vout: usize,
+    ) {
+        for (id, balance) in unallocated {
+            if *balance > 0 {
+                *allocated[vout].entry(*id).or_default() += *balance;
+            }
+        }
     }
 
     fn etched(
@@ -457,8 +513,13 @@ impl<'client> TransactionParser<'client> {
         Ok(confirmations >= Runestone::COMMIT_CONFIRMATIONS.into())
     }
 
-    fn unallocated(&self, cache: &UpdaterCache, tx: &Transaction) -> Result<HashMap<RuneId, Lot>> {
+    fn unallocated(
+        &self,
+        cache: &UpdaterCache,
+        tx: &Transaction,
+    ) -> Result<(HashMap<RuneId, Lot>, HashMap<RuneId, Lot>)> {
         let mut unallocated = HashMap::new();
+        let mut risky_unallocated = HashMap::new();
 
         // 1) Collect all outpoints:
         let outpoints: Vec<_> = tx
@@ -468,7 +529,7 @@ impl<'client> TransactionParser<'client> {
             .collect();
 
         if tx.is_coinbase() {
-            return Ok(unallocated);
+            return Ok((unallocated, risky_unallocated));
         }
 
         // 2) Do a single multi-get in the cache:
@@ -479,8 +540,15 @@ impl<'client> TransactionParser<'client> {
             for rune_amount in tx_out.runes {
                 *unallocated.entry(rune_amount.rune_id).or_default() += rune_amount.amount;
             }
+
+            if self.mempool {
+                for rune_amount in tx_out.risky_runes {
+                    *risky_unallocated.entry(rune_amount.rune_id).or_default() +=
+                        rune_amount.amount;
+                }
+            }
         }
 
-        Ok(unallocated)
+        Ok((unallocated, risky_unallocated))
     }
 }

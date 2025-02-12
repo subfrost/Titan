@@ -283,6 +283,13 @@ impl Index {
                     .or_insert(rune.amount);
             }
 
+            for rune in tx_out.risky_runes.iter() {
+                runes
+                    .entry(rune.rune_id)
+                    .and_modify(|amount| *amount += rune.amount)
+                    .or_insert(rune.amount);
+            }
+
             value += tx_out.value;
 
             let output = AddressTxOut::from((
