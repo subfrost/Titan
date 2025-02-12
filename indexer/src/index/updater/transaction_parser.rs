@@ -10,7 +10,7 @@ use {
     ordinals::{Artifact, Edict, Height, Rune, RuneId, Runestone},
     std::collections::HashMap,
     thiserror::Error,
-    titan_types::{RuneAmount, TxOutEntry},
+    titan_types::{RuneAmount, SpentStatus, TxOutEntry},
 };
 
 #[derive(Debug, Error)]
@@ -83,7 +83,7 @@ impl<'client> TransactionParser<'client> {
             let mut tx_out = TxOutEntry {
                 runes: vec![],
                 risky_runes: vec![],
-                spent: false,
+                spent: SpentStatus::Unspent,
                 value: tx.output[vout].value.to_sat(),
             };
 

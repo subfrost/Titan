@@ -11,7 +11,7 @@ use {
         sync::Arc,
     },
     thiserror::Error,
-    titan_types::InscriptionId,
+    titan_types::{InscriptionId, SpentStatus},
     tracing::{info, trace, warn},
 };
 
@@ -128,7 +128,7 @@ impl<'a> Rollback<'a> {
     ) -> Result<()> {
         // Make spendable the inputs again.
         for tx_in in transaction.inputs.iter() {
-            self.update_spendable_input(&tx_in, false)?;
+            self.update_spendable_input(&tx_in, SpentStatus::Unspent)?;
         }
 
         // Remove tx_outs
@@ -184,7 +184,7 @@ impl<'a> Rollback<'a> {
         Ok(())
     }
 
-    fn update_spendable_input(&mut self, outpoint: &OutPoint, spent: bool) -> Result<()> {
+    fn update_spendable_input(&mut self, outpoint: &OutPoint, spent: SpentStatus) -> Result<()> {
         match self.cache.get_tx_out(outpoint) {
             Ok(tx_out) => {
                 let mut tx_out = tx_out;

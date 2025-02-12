@@ -7,7 +7,7 @@ use {
     bitcoin::{OutPoint, Transaction, Txid},
     ordinals::{Artifact, Etching, Rune, RuneId, Runestone, SpacedRune},
     thiserror::Error,
-    titan_types::{Event, TxOutEntry},
+    titan_types::{Event, SpenderReference, SpentStatus, TxOutEntry},
     tokio::sync::mpsc::error::SendError,
 };
 
@@ -97,9 +97,16 @@ impl<'a> TransactionUpdater<'a> {
             )?;
         }
 
-        for tx_in in transaction_state_change.inputs.iter() {
+        for (vin, tx_in) in transaction_state_change.inputs.iter().enumerate() {
             // Spend inputs
-            self.update_spendable_input(cache, tx_in, true)?;
+            self.update_spendable_input(
+                cache,
+                tx_in,
+                SpentStatus::Spent(SpenderReference {
+                    txid,
+                    vin: vin as u32,
+                }),
+            )?;
         }
 
         // Create new outputs
@@ -126,8 +133,7 @@ impl<'a> TransactionUpdater<'a> {
         }
 
         // Save transaction state change
-        cache
-            .set_tx_state_changes(txid, transaction_state_change.clone());
+        cache.set_tx_state_changes(txid, transaction_state_change.clone());
 
         // Save rune transactions
         // Get all modified rune ids.
@@ -142,8 +148,7 @@ impl<'a> TransactionUpdater<'a> {
         }
 
         if !cache.settings.mempool {
-            cache
-                .set_transaction_confirming_block(txid, block_id.unwrap());
+            cache.set_transaction_confirming_block(txid, block_id.unwrap());
         }
 
         if self.settings.index_addresses {
@@ -179,7 +184,12 @@ impl<'a> TransactionUpdater<'a> {
         }
     }
 
-    fn update_spendable_input(&mut self, cache: &mut UpdaterCache, outpoint: &OutPoint, spent: bool) -> Result<()> {
+    fn update_spendable_input(
+        &mut self,
+        cache: &mut UpdaterCache,
+        outpoint: &OutPoint,
+        spent: SpentStatus,
+    ) -> Result<()> {
         match cache.get_tx_out(outpoint) {
             Ok(tx_out) => {
                 let mut tx_out = tx_out;
@@ -237,7 +247,12 @@ impl<'a> TransactionUpdater<'a> {
         Ok(())
     }
 
-    fn update_burn_balance(&mut self, cache: &mut UpdaterCache, rune_id: &RuneId, amount: i128) -> Result<()> {
+    fn update_burn_balance(
+        &mut self,
+        cache: &mut UpdaterCache,
+        rune_id: &RuneId,
+        amount: i128,
+    ) -> Result<()> {
         let mut rune_entry = cache.get_rune(rune_id)?;
 
         if cache.settings.mempool {
@@ -368,11 +383,10 @@ impl<'a> TransactionUpdater<'a> {
         };
 
         cache.set_rune(id, entry);
-        cache
-            .set_rune_id_number(cache.get_runes_count(), id);
+        cache.set_rune_id_number(cache.get_runes_count(), id);
         cache.set_rune_id(rune, id);
         cache.increment_runes_count();
-        
+
         Ok(())
     }
 

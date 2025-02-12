@@ -7,7 +7,8 @@ pub use {
     rune::{MintResponse, RuneAmount, RuneResponse},
     stats::{BlockTip, Status},
     subscription::{Subscription, TcpSubscriptionRequest},
-    transaction::{Transaction, TransactionStatus, TxOut, TxOutEntry},
+    transaction::{Transaction, TransactionStatus, TxOut},
+    tx_out::{SpenderReference, SpentStatus, TxOutEntry},
 };
 
 mod address;
@@ -20,3 +21,4 @@ mod rune;
 mod stats;
 mod subscription;
 mod transaction;
+mod tx_out;

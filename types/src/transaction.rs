@@ -1,5 +1,6 @@
 use {
     crate::rune::RuneAmount,
+    crate::tx_out::SpentStatus,
     bitcoin::{BlockHash, ScriptBuf, TxIn, Txid},
     borsh::{BorshDeserialize, BorshSerialize},
     serde::{Deserialize, Serialize},
@@ -59,6 +60,7 @@ impl From<bitcoin::Transaction> for Transaction {
                     script_pubkey: tx_out.script_pubkey.clone(),
                     runes: vec![],
                     risky_runes: vec![],
+                    spent: SpentStatus::Unspent,
                 })
                 .collect(),
             status: None,
@@ -72,6 +74,7 @@ pub struct TxOut {
     pub script_pubkey: ScriptBuf,
     pub runes: Vec<RuneAmount>,
     pub risky_runes: Vec<RuneAmount>,
+    pub spent: SpentStatus,
 }
 
 impl BorshSerialize for TxOut {
@@ -82,6 +85,7 @@ impl BorshSerialize for TxOut {
         writer.write_all(script_bytes)?;
         BorshSerialize::serialize(&self.runes, writer)?;
         BorshSerialize::serialize(&self.risky_runes, writer)?;
+        BorshSerialize::serialize(&self.spent, writer)?;
         Ok(())
     }
 }
@@ -95,26 +99,14 @@ impl BorshDeserialize for TxOut {
         let script_pubkey = ScriptBuf::from_bytes(script_bytes);
         let runes = Vec::<RuneAmount>::deserialize_reader(reader)?;
         let risky_runes = Vec::<RuneAmount>::deserialize_reader(reader)?;
+        let spent = SpentStatus::deserialize_reader(reader)?;
 
         Ok(Self {
             value,
             script_pubkey,
             runes,
             risky_runes,
+            spent,
         })
-    }
-}
-
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
-pub struct TxOutEntry {
-    pub runes: Vec<RuneAmount>,
-    pub risky_runes: Vec<RuneAmount>,
-    pub value: u64,
-    pub spent: bool,
-}
-
-impl TxOutEntry {
-    pub fn has_runes(&self) -> bool {
-        !self.runes.is_empty()
     }
 }
