@@ -1,10 +1,12 @@
 use bitcoin::{Transaction, Txid};
 use bitcoincore_rpc::json::GetMempoolEntryResult;
 use bitcoincore_rpc::RpcApi;
-use rayon::prelude::*;
+use std::cmp::min;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::Arc;
+use threadpool::ThreadPool;
 use tracing::error;
 
 use crate::index::{RpcClientError, RpcClientProvider};
@@ -19,36 +21,62 @@ pub enum MempoolError {
     CycleDetected,
 }
 
+/// Fetches transactions concurrently using a dedicated thread pool.
+/// Each task gets a new RPC client from the provider and fetches the raw transaction.
+/// The results are sent over a channel and then collected into a HashMap.
 pub fn fetch_transactions(
     client_provider: Arc<dyn RpcClientProvider + Send + Sync>,
     txids: &Vec<Txid>,
     interrupt: Arc<AtomicBool>,
 ) -> HashMap<Txid, Transaction> {
-    txids
-        .par_iter()
-        .filter_map(|txid| {
+    // Create an MPSC channel to collect fetched transactions.
+    let (sender, receiver) = mpsc::channel();
+    // Create a thread pool sized for I/O-bound tasks.
+    // Adjust `num_threads` based on your environment and expected concurrency.
+    let num_threads = min(50, txids.len());
+    let pool = ThreadPool::new(num_threads);
+
+    // For each txid, submit a task to the pool.
+    for &txid in txids.iter() {
+        let client_provider = client_provider.clone();
+        let sender = sender.clone();
+        let interrupt = interrupt.clone();
+        pool.execute(move || {
+            // If an interrupt has been signaled, skip fetching.
             if interrupt.load(Ordering::SeqCst) {
-                return None;
+                return;
             }
-
-            let client = client_provider.get_new_rpc_client();
-
-            if let Ok(client) = client {
-                match client.get_raw_transaction(txid, None) {
-                    Ok(tx) => Some((*txid, tx)),
-                    Err(e) => {
-                        error!("Failed to fetch transaction {}: {}", txid, e);
-                        None
+            // Get a new RPC client.
+            let client = match client_provider.get_new_rpc_client() {
+                Ok(c) => c,
+                Err(e) => {
+                    error!("Failed to get new RPC client for txid {}: {}", txid, e);
+                    return;
+                }
+            };
+            // Fetch the transaction.
+            match client.get_raw_transaction(&txid, None) {
+                Ok(tx) => {
+                    if let Err(e) = sender.send((txid, tx)) {
+                        error!("Failed to send transaction {} over channel: {}", txid, e);
                     }
                 }
-            } else {
-                error!("Failed to get new rpc client");
-                None
+                Err(e) => {
+                    error!("Failed to fetch transaction {}: {}", txid, e);
+                }
             }
-        })
-        .collect()
+        });
+    }
+    // Drop the original sender so that the channel closes when all tasks are done.
+    drop(sender);
+    // Wait for all tasks in the pool to complete.
+    pool.join();
+
+    // Collect all received transactions into a HashMap.
+    receiver.into_iter().collect()
 }
 
+/// Sort transactions in dependency order using Kahn's algorithm.
 pub fn sort_transaction_order(
     mempool_entries: &HashMap<Txid, GetMempoolEntryResult>,
     tx_map: &HashMap<Txid, Transaction>,
