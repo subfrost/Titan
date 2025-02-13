@@ -24,8 +24,9 @@ pub fn fetch_blocks_from(
 ) -> Result<mpsc::Receiver<Block>, bitcoincore_rpc::Error> {
     // Final channel for ordered blocks.
     let (final_sender, final_rx) = mpsc::sync_channel(32);
+
     // Intermediate channel for unordered (height, block) tuples.
-    let (intermediate_sender, intermediate_receiver) = mpsc::channel();
+    let (intermediate_sender, intermediate_receiver) = mpsc::sync_channel(1000);
 
     // Spawn a thread to reorder blocks.
     thread::spawn({

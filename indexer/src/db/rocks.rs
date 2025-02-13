@@ -820,7 +820,7 @@ impl RocksDB {
     }
 
     fn read_all_mempool_txids(db: &DBWithThreadMode<MultiThreaded>) -> DBResult<HashSet<Txid>> {
-        let mut db_txids: HashSet<Txid> = HashSet::with_capacity(300_000); // Pre-allocate for ~300k txs
+        let mut db_txids: HashSet<Txid> = HashSet::with_capacity(5000);
 
         let cf_handle: Arc<BoundColumnFamily<'_>> = db
             .cf_handle(MEMPOOL_CF)

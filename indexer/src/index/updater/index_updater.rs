@@ -235,6 +235,18 @@ impl Updater {
 
                 first_block = false;
                 progress_bar.inc(1);
+
+                if self
+                    .transaction_update
+                    .read()
+                    .unwrap()
+                    .enough_events_to_send()
+                    // it hasn't been a reorg.
+                    && bitcoin_block_count - cache.get_block_height_tip() > 50
+                {
+                    // clear notifications.
+                    self.notify_tx_updates()?;
+                }
             }
 
             if self.shutdown_flag.load(Ordering::SeqCst) {

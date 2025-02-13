@@ -73,6 +73,10 @@ impl TransactionUpdate {
             && self.block_removed.is_empty()
     }
 
+    pub fn enough_events_to_send(&self) -> bool {
+        self.block_added.len() > 10_000
+    }
+
     pub fn add_block_tx(&mut self, txid: Txid) {
         self.block_added.insert(txid);
     }
