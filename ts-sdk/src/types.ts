@@ -30,11 +30,15 @@ export interface TransactionStatus {
   block_hash?: string;
 }
 
-export interface AddressTxOut {
+export interface OutPoint {
   txid: string;
   vout: number;
+}
+
+export interface AddressTxOut extends OutPoint {
   value: number;
   runes: RuneAmount[];
+  risky_runes: RuneAmount[];
   status?: TransactionStatus;
   spent: SpentStatus;
 }
@@ -49,19 +53,28 @@ export interface TxOut {
   value: number;
   script_pubkey: string;
   runes: RuneAmount[];
+  risky_runes: RuneAmount[];
   spent: SpentStatus;
 }
 
 export interface TxOutEntry {
   runes: RuneAmount[];
+  risky_runes: RuneAmount[];
   value: number;
   spent: SpentStatus;
+}
+
+export interface TxIn {
+  previous_output: OutPoint;
+  script_sig: string;
+  sequence: number;
+  witness: string[];
 }
 
 export interface Transaction {
   version: number;
   lock_time: number;
-  input: any[]; // You may wish to further define the TxIn type.
+  input: TxIn[];
   output: TxOut[];
   status?: TransactionStatus;
 }

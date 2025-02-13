@@ -119,19 +119,26 @@ async function fetchIndexerBlockTxids(blockQuery: string): Promise<string[]> {
   return res.data;
 }
 
-async function fetchElectrsBlockTxs(blockQuery: string): Promise<ElectrsTransaction[]> {
+async function fetchElectrsBlockTxs(
+  blockQuery: string,
+): Promise<ElectrsTransaction[]> {
   const url = `${ELECTRS_BASE_URL}/internal/block/${blockQuery}/txs`;
   const res = await axios.get<ElectrsTransaction[]>(url);
   return res.data;
 }
 
-async function fetchElectrsTransaction(txid: string): Promise<ElectrsTransaction> {
+async function fetchElectrsTransaction(
+  txid: string,
+): Promise<ElectrsTransaction> {
   const url = `${ELECTRS_BASE_URL}/tx/${txid}`;
   const res = await axios.get<ElectrsTransaction>(url);
   return res.data;
 }
 
-async function fetchElectrsTxOutspend(txid: string, vout: number): Promise<TxOutSpend> {
+async function fetchElectrsTxOutspend(
+  txid: string,
+  vout: number,
+): Promise<TxOutSpend> {
   const url = `${ELECTRS_BASE_URL}/tx/${txid}/outspend/${vout}`;
   const res = await axios.get<TxOutSpend>(url);
   return res.data;
@@ -143,7 +150,9 @@ async function fetchIndexerAddressData(address: string): Promise<AddressData> {
   return res.data;
 }
 
-async function fetchElectrsAddressUTXOs(address: string): Promise<ElectrsUTXO[]> {
+async function fetchElectrsAddressUTXOs(
+  address: string,
+): Promise<ElectrsUTXO[]> {
   const url = `${ELECTRS_BASE_URL}/address/${address}/utxo`;
   const res = await axios.get<ElectrsUTXO[]>(url);
   return res.data;
@@ -166,7 +175,10 @@ async function fetchIndexerRuneId(runeId: string): Promise<RuneResponse> {
   return res.data;
 }
 
-async function fetchMempoolSpaceTxOutspend(txid: string, vout: number): Promise<TxOutSpend> {
+async function fetchMempoolSpaceTxOutspend(
+  txid: string,
+  vout: number,
+): Promise<TxOutSpend> {
   const url = `${MEMPOOL_SPACE_BASE_URL}/tx/${txid}/outspend/${vout}`;
   const res = await axios.get<TxOutSpend>(url);
   return res.data;
@@ -205,12 +217,12 @@ async function main(): Promise<void> {
 
     if (indexerTip.height !== electrsTip.height) {
       throw new Error(
-        `Tip height mismatch: indexer=${indexerTip.height} vs electrs=${electrsTip.height}`
+        `Tip height mismatch: indexer=${indexerTip.height} vs electrs=${electrsTip.height}`,
       );
     }
     if (indexerTip.hash !== electrsTip.hash) {
       throw new Error(
-        `Tip blockhash mismatch: indexer=${indexerTip.hash} vs electrs=${electrsTip.hash}`
+        `Tip blockhash mismatch: indexer=${indexerTip.hash} vs electrs=${electrsTip.hash}`,
       );
     }
     console.log('Tip verification PASSED.');
@@ -218,7 +230,9 @@ async function main(): Promise<void> {
     // Determine the range: last several blocks.
     const tipHeight = indexerTip.height;
     const startHeight = tipHeight - 10;
-    console.log(`\n--- BLOCK VERIFICATION for blocks ${startHeight} to ${tipHeight} ---`);
+    console.log(
+      `\n--- BLOCK VERIFICATION for blocks ${startHeight} to ${tipHeight} ---`,
+    );
 
     // Set to accumulate modified addresses.
     const modifiedAddresses = new Set<string>();
@@ -234,7 +248,7 @@ async function main(): Promise<void> {
       ]);
       if (indexerBlockHash !== electrsBlockHash) {
         throw new Error(
-          `Block hash mismatch at height ${height}: indexer=${indexerBlockHash} vs electrs=${electrsBlockHash}`
+          `Block hash mismatch at height ${height}: indexer=${indexerBlockHash} vs electrs=${electrsBlockHash}`,
         );
       }
       console.log(`Block hash OK: ${indexerBlockHash}`);
@@ -247,18 +261,18 @@ async function main(): Promise<void> {
 
       if (indexerTxids.length !== electrsTx.length) {
         throw new Error(
-          `TXID count mismatch at height ${height}: indexer has ${indexerTxids.length} vs electrs ${electrsTx.length}`
+          `TXID count mismatch at height ${height}: indexer has ${indexerTxids.length} vs electrs ${electrsTx.length}`,
         );
       }
       for (let i = 0; i < indexerTxids.length; i++) {
         if (indexerTxids[i] !== electrsTx[i].txid) {
           throw new Error(
-            `TXID mismatch at block ${indexerBlockHash} index ${i}: indexer=${indexerTxids[i]} vs electrs=${electrsTx[i].txid}`
+            `TXID mismatch at block ${indexerBlockHash} index ${i}: indexer=${indexerTxids[i]} vs electrs=${electrsTx[i].txid}`,
           );
         }
       }
       console.log(
-        `TXIDs verified for block ${indexerBlockHash} (${indexerTxids.length} transactions).`
+        `TXIDs verified for block ${indexerBlockHash} (${indexerTxids.length} transactions).`,
       );
 
       // For every transaction in this block, use electrs to get details.
@@ -270,7 +284,7 @@ async function main(): Promise<void> {
             const scriptBuffer = Buffer.from(output.scriptpubkey, 'hex');
             address = bitcoin.address.fromOutputScript(
               scriptBuffer,
-              BITCOIN_NETWORK_JS_LIB_TESTNET4
+              BITCOIN_NETWORK_JS_LIB_TESTNET4,
             );
           } catch (err) {
             // If decoding fails (e.g. nonstandard script), skip.
@@ -282,7 +296,9 @@ async function main(): Promise<void> {
     }
 
     const addressesModified = Array.from(modifiedAddresses);
-    console.log(`\nCollected ${addressesModified.length} modified addresses from the last blocks.`);
+    console.log(
+      `\nCollected ${addressesModified.length} modified addresses from the last blocks.`,
+    );
 
     console.log('\n--- ADDRESS OUTPUTS VERIFICATION ---');
     // For each modified address, perform checks.
@@ -296,7 +312,9 @@ async function main(): Promise<void> {
         electrsUTXOs = await fetchElectrsAddressUTXOs(address);
         maestroUTXOs = await fetchMaestroUTXOs(address);
       } catch (err: any) {
-        console.error(`Failed to fetch address data for ${address}: ${err.message}`);
+        console.error(
+          `Failed to fetch address data for ${address}: ${err.message}`,
+        );
         continue;
       }
 
@@ -315,7 +333,10 @@ async function main(): Promise<void> {
       }));
 
       // Sort both arrays by txid and vout.
-      const sortFunc = (a: { txid: string; vout: number }, b: { txid: string; vout: number }) => {
+      const sortFunc = (
+        a: { txid: string; vout: number },
+        b: { txid: string; vout: number },
+      ) => {
         if (a.txid < b.txid) return -1;
         if (a.txid > b.txid) return 1;
         return a.vout - b.vout;
@@ -327,24 +348,30 @@ async function main(): Promise<void> {
         if (normalizedIndexerBasic.length > normalizedElectrsOutputs.length) {
           const extraOutputs = normalizedIndexerBasic.filter(
             (o) =>
-              !normalizedElectrsOutputs.some((e) => e.txid === o.txid && e.vout === o.vout)
+              !normalizedElectrsOutputs.some(
+                (e) => e.txid === o.txid && e.vout === o.vout,
+              ),
           );
-          console.error(`Address ${address} has extra outputs: ${JSON.stringify(extraOutputs)}`);
+          console.error(
+            `Address ${address} has extra outputs: ${JSON.stringify(extraOutputs)}`,
+          );
         } else {
           const missingOutputs = normalizedElectrsOutputs.filter(
             (e) =>
-              !normalizedIndexerBasic.some((i) => i.txid === e.txid && i.vout === e.vout)
+              !normalizedIndexerBasic.some(
+                (i) => i.txid === e.txid && i.vout === e.vout,
+              ),
           );
 
           for (const missingOutput of missingOutputs) {
             const mempoolSpaceTxOutspend = await fetchMempoolSpaceTxOutspend(
               missingOutput.txid,
-              missingOutput.vout
+              missingOutput.vout,
             );
 
             if (mempoolSpaceTxOutspend.spent) {
               console.error(
-                `Address ${address} has missing outputs: ${JSON.stringify(missingOutput)}`
+                `Address ${address} has missing outputs: ${JSON.stringify(missingOutput)}`,
               );
             }
           }
@@ -355,24 +382,25 @@ async function main(): Promise<void> {
       for (let i = 0; i < normalizedIndexerBasic.length; i++) {
         const idxOut = normalizedIndexerBasic[i];
         const elecOut = normalizedElectrsOutputs.find(
-          (o) => o.txid === idxOut.txid && o.vout === idxOut.vout
+          (o) => o.txid === idxOut.txid && o.vout === idxOut.vout,
         );
 
         if (!elecOut) {
           try {
-            const [mempoolSpaceTxOutspend, electrsTransaction] = await Promise.all([
-              fetchMempoolSpaceTxOutspend(idxOut.txid, idxOut.vout),
-              fetchElectrsTransaction(idxOut.txid),
-            ]);
+            const [mempoolSpaceTxOutspend, electrsTransaction] =
+              await Promise.all([
+                fetchMempoolSpaceTxOutspend(idxOut.txid, idxOut.vout),
+                fetchElectrsTransaction(idxOut.txid),
+              ]);
 
             if (mempoolSpaceTxOutspend.spent) {
               console.error(
-                `Address ${address} outpoint is not in electrs: ${JSON.stringify(idxOut)}`
+                `Address ${address} outpoint is not in electrs: ${JSON.stringify(idxOut)}`,
               );
             }
           } catch (err) {
             console.error(
-              `Address ${address} outpoint is not in electrs: ${JSON.stringify(idxOut)}`
+              `Address ${address} outpoint is not in electrs: ${JSON.stringify(idxOut)}`,
             );
           }
           continue;
@@ -385,8 +413,8 @@ async function main(): Promise<void> {
         ) {
           throw new Error(
             `Address ${address} basic output mismatch at index ${i}: indexer=${JSON.stringify(
-              idxOut
-            )} vs electrs=${JSON.stringify(elecOut)}`
+              idxOut,
+            )} vs electrs=${JSON.stringify(elecOut)}`,
           );
         }
       }
@@ -399,14 +427,32 @@ async function main(): Promise<void> {
         runes: o.runes,
       }));
 
-      const normalizedIndexerForRunes = (indexerData.outputs || []).map((o) => ({
-        txid: o.txid,
-        vout: Number(o.vout),
-        runes: o.runes,
-      }));
+      const normalizedIndexerForRunes = (indexerData.outputs || []).map((o) => {
+        const mergedRunes = o.runes;
+        for (const rune of o.risky_runes) {
+          const existingRune = mergedRunes.find(
+            (r) => r.rune_id === rune.rune_id,
+          );
+          if (existingRune) {
+            existingRune.amount = (
+              BigInt(existingRune.amount) + BigInt(rune.amount)
+            ).toString();
+          } else {
+            mergedRunes.push(rune);
+          }
+        }
+
+        return {
+          txid: o.txid,
+          vout: Number(o.vout),
+          runes: mergedRunes,
+        };
+      });
 
       // Helper to normalize runes array.
-      const normalizeRunes = (runes: { rune_id: string; amount: string | number }[]) =>
+      const normalizeRunes = (
+        runes: { rune_id: string; amount: string | number }[],
+      ) =>
         (runes || [])
           .map((r) => ({ rune_id: r.rune_id, amount: r.amount.toString() }))
           .sort((a, b) => a.rune_id.localeCompare(b.rune_id));
@@ -429,7 +475,7 @@ async function main(): Promise<void> {
       for (let i = 0; i < normalizedIndexerForRunes.length; i++) {
         const idxOut = normalizedIndexerForRunes[i];
         const maestroOut = normalizedMaestroOutputs.find(
-          (o) => o.txid === idxOut.txid && o.vout === idxOut.vout
+          (o) => o.txid === idxOut.txid && o.vout === idxOut.vout,
         );
 
         // If Maestro did not return this output (Maestro may return only a subset), skip.
@@ -440,7 +486,7 @@ async function main(): Promise<void> {
 
         if (idxRunes.length !== maestroRunes.length) {
           console.error(
-            `Address ${address} output ${idxOut.txid}:${idxOut.vout} runes length mismatch: indexer has ${idxRunes.length} vs Maestro has ${maestroRunes.length}`
+            `Address ${address} output ${idxOut.txid}:${idxOut.vout} runes length mismatch: indexer has ${idxRunes.length} vs Maestro has ${maestroRunes.length}`,
           );
           console.error(`Maestro runes: ${JSON.stringify(maestroRunes)}`);
           console.error(`Indexer runes: ${JSON.stringify(idxRunes)}`);
@@ -453,18 +499,23 @@ async function main(): Promise<void> {
           if (!runeEntry) {
             throw new Error(`Rune ${idxRune.rune_id} not found`);
           }
-          const maestroRune = maestroRunes.find((r) => r.rune_id === idxRune.rune_id);
+          const maestroRune = maestroRunes.find(
+            (r) => r.rune_id === idxRune.rune_id,
+          );
           if (!maestroRune) {
             throw new Error(`Rune ${idxRune.rune_id} not found in Maestro`);
           }
           const maestroAmount = maestroRune.amount.toString();
           const indexerAmount = toDecimals(idxRune.amount, runeEntry);
 
-          if (Number(indexerAmount) !== Number(maestroAmount) || idxRune.rune_id !== maestroRune.rune_id) {
+          if (
+            Number(indexerAmount) !== Number(maestroAmount) ||
+            idxRune.rune_id !== maestroRune.rune_id
+          ) {
             throw new Error(
               `Address ${address} output ${idxOut.txid}:${idxOut.vout} runes mismatch at index ${j}: indexer=${JSON.stringify(
-                idxRune
-              )} vs Maestro=${JSON.stringify(maestroRune)}. Amounts: indexer=${indexerAmount} vs Maestro=${maestroAmount}`
+                idxRune,
+              )} vs Maestro=${JSON.stringify(maestroRune)}. Amounts: indexer=${indexerAmount} vs Maestro=${maestroAmount}`,
             );
           }
         }
