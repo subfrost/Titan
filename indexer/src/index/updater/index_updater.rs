@@ -225,7 +225,7 @@ impl Updater {
                         address_updater.batch_update_script_pubkey(&mut cache)?;
                     }
 
-                    cache.add_address_events();
+                    cache.add_address_events(self.settings.chain);
                     cache.flush()?;
                     cache.send_events(&self.sender)?;
                 }
@@ -253,7 +253,7 @@ impl Updater {
             address_updater.batch_update_script_pubkey(&mut cache)?;
         }
 
-        cache.add_address_events();
+        cache.add_address_events(self.settings.chain);
         cache.flush()?;
         cache.send_events(&self.sender)?;
 
@@ -325,7 +325,7 @@ impl Updater {
                 address_updater.batch_update_script_pubkey(&mut cache)?;
             }
 
-            cache.add_address_events();
+            cache.add_address_events(self.settings.chain);
             cache.flush()?;
             cache.send_events(&self.sender)?;
         }
@@ -449,7 +449,7 @@ impl Updater {
             address_updater.batch_update_script_pubkey(&mut cache)?;
         }
 
-        cache.add_address_events();
+        cache.add_address_events(self.settings.chain);
         cache.flush()?;
         cache.send_events(&self.sender)?;
         Ok(())

@@ -1,7 +1,7 @@
 use {
     super::store_lock::StoreWithLock,
     crate::{
-        index::{store::StoreError, Settings},
+        index::{store::StoreError, Chain, Settings},
         models::{
             BatchDelete, BatchUpdate, BlockId, Inscription, RuneEntry, TransactionStateChange,
         },
@@ -368,16 +368,19 @@ impl UpdaterCache {
         Ok(())
     }
 
-    pub fn add_address_events(&mut self) {
+    pub fn add_address_events(&mut self, chain: Chain) {
         for script_pubkey in self.update.script_pubkeys.keys() {
-            self.events.push(Event::AddressModified {
-                address: script_pubkey.to_string(),
-                location: if self.settings.mempool {
-                    Location::mempool()
-                } else {
-                    Location::block(self.get_block_height_tip())
-                },
-            });
+            let address = chain.address_from_script(script_pubkey);
+            if let Ok(address) = address {
+                self.events.push(Event::AddressModified {
+                    address: address.to_string(),
+                    location: if self.settings.mempool {
+                        Location::mempool()
+                    } else {
+                        Location::block(self.get_block_height_tip())
+                    },
+                });
+            }
         }
     }
 
