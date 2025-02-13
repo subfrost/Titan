@@ -34,7 +34,14 @@ pub async fn event_dispatcher(
                         }
 
                         if enable_file_logging {
-                            append_to_file("events.log", &format!("{:?}", event)).unwrap();
+                            if matches!(
+                                event,
+                                Event::TransactionsAdded { .. }
+                                | Event::TransactionsReplaced { .. }
+                                | Event::NewBlock { .. }
+                            ) {
+                                append_to_file("events.log", &format!("{:?}", event)).unwrap();
+                            }
                         }
 
                         // Broadcast to TCP subscribers
