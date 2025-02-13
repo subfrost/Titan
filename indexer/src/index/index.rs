@@ -147,6 +147,20 @@ impl Index {
                 break;
             }
 
+            if self.updater.is_at_tip() {
+                match self.updater.index_mempool() {
+                    Ok(_) => (),
+                    Err(UpdaterError::BitcoinRpc(_)) => {
+                        warn!("We're getting network connection issues, retrying...");
+                        continue;
+                    }
+                    Err(e) => {
+                        error!("Failed to index mempool: {}", e);
+                        break;
+                    }
+                }
+            }
+
             match self.updater.update_to_tip() {
                 Ok(()) => (),
                 Err(UpdaterError::BitcoinReorg(ReorgError::Unrecoverable)) => {
@@ -166,20 +180,6 @@ impl Index {
                 Err(e) => {
                     error!("Failed to update to tip: {}", e);
                     break;
-                }
-            }
-
-            if self.updater.is_at_tip() && !self.shutdown_flag.load(Ordering::SeqCst) {
-                match self.updater.index_mempool() {
-                    Ok(_) => (),
-                    Err(UpdaterError::BitcoinRpc(_)) => {
-                        warn!("We're getting network connection issues, retrying...");
-                        continue;
-                    }
-                    Err(e) => {
-                        error!("Failed to index mempool: {}", e);
-                        break;
-                    }
                 }
             }
 
@@ -261,7 +261,8 @@ impl Index {
 
     pub fn get_script_pubkey_outpoints(&self, script: &ScriptBuf) -> Result<AddressData> {
         let outpoints = self.db.get_script_pubkey_outpoints(script, None)?;
-        let outpoints_to_tx_out: HashMap<OutPoint, TxOutEntry> = self.db.get_tx_outs(&outpoints, None)?;
+        let outpoints_to_tx_out: HashMap<OutPoint, TxOutEntry> =
+            self.db.get_tx_outs(&outpoints, None)?;
 
         assert_eq!(
             outpoints.len(),

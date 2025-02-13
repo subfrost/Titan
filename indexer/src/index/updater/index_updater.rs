@@ -659,12 +659,9 @@ impl Updater {
 
             if let Some(sender) = &self.sender {
                 if !categorized.removed.is_empty() {
-                    let (_, not_exists) = self
-                        .db
-                        .read()
-                        .partition_transactions_by_existence(&categorized.removed)?;
-
-                    sender.blocking_send(Event::TransactionsReplaced { txids: not_exists })?;
+                    sender.blocking_send(Event::TransactionsReplaced {
+                        txids: categorized.removed.into_iter().collect(),
+                    })?;
                 }
 
                 if !categorized.added.is_empty() {
