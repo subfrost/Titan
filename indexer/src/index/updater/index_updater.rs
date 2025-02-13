@@ -192,6 +192,9 @@ impl Updater {
                         Ok(()) => (),
                         Err(ReorgError::Recoverable { height, depth }) => {
                             self.handle_reorg(height, depth)?;
+                            if let Some(sender) = &self.sender {
+                                sender.blocking_send(Event::Reorg { height, depth })?;
+                            }
                             return Err(ReorgError::Recoverable { height, depth }.into());
                         }
                         Err(e) => {
@@ -628,26 +631,35 @@ impl Updater {
     }
 
     pub fn notify_tx_updates(&self) -> Result<()> {
-        let categorized = {
-            let transaction_update = self
-                .transaction_update
-                .read()
-                .map_err(|_| UpdaterError::Mutex)?;
+        let _timer = self
+            .latency
+            .with_label_values(&["notify_tx_updates"])
+            .start_timer();
+        if self.settings.index_bitcoin_transactions {
+            let categorized = {
+                let transaction_update = self
+                    .transaction_update
+                    .read()
+                    .map_err(|_| UpdaterError::Mutex)?;
 
-            transaction_update.categorize_to_change_set()
-        };
+                transaction_update.categorize_to_change_set()
+            };
 
-        if let Some(sender) = &self.sender {
-            if !categorized.removed.is_empty() {
-                sender.blocking_send(Event::TransactionsReplaced {
-                    txids: categorized.removed.into_iter().collect(),
-                })?;
-            }
+            if let Some(sender) = &self.sender {
+                if !categorized.removed.is_empty() {
+                    let (_, not_exists) = self
+                        .db
+                        .read()
+                        .partition_transactions_by_existence(&categorized.removed)?;
 
-            if !categorized.added.is_empty() {
-                sender.blocking_send(Event::TransactionsAdded {
-                    txids: categorized.added.into_iter().collect(),
-                })?;
+                    sender.blocking_send(Event::TransactionsReplaced { txids: not_exists })?;
+                }
+
+                if !categorized.added.is_empty() {
+                    sender.blocking_send(Event::TransactionsAdded {
+                        txids: categorized.added.into_iter().collect(),
+                    })?;
+                }
             }
         }
 

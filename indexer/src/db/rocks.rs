@@ -973,6 +973,47 @@ impl RocksDB {
         Ok(transaction)
     }
 
+    pub fn partition_transactions_by_existence<'a, I>(
+        &self,
+        txids: I,
+    ) -> DBResult<(Vec<Txid>, Vec<Txid>)>
+    where
+        I: IntoIterator<Item = &'a Txid>,
+    {
+        let (mut exists, mut not_exists): (Vec<Txid>, Vec<Txid>) = {
+            let mempool = self
+                .mempool_cache
+                .read()
+                .map_err(|_| RocksDBError::LockPoisoned)?;
+
+            let (in_mempool, not_in_mempool) =
+                txids.into_iter().partition(|txid| mempool.contains(*txid));
+
+            (in_mempool, not_in_mempool)
+        };
+
+        let cf_handle = self.cf_handle(TRANSACTIONS_CF)?;
+        let keys: Vec<_> = not_exists
+            .iter()
+            .map(|txid| (&cf_handle, txid_to_bytes(txid)))
+            .collect();
+
+        let results = self.db.multi_get_cf(keys);
+
+        for (i, result) in results.iter().enumerate() {
+            match result {
+                Ok(Some(_)) => {
+                    exists.push(not_exists[i].clone());
+                    not_exists.remove(i);
+                }
+                Ok(None) => {}
+                Err(e) => return Err(e.clone().into()),
+            }
+        }
+
+        Ok((exists, not_exists))
+    }
+
     pub fn get_transaction_confirming_block(&self, txid: &Txid) -> DBResult<BlockId> {
         let cf_handle = self.cf_handle(TRANSACTION_CONFIRMING_BLOCK_CF)?;
         Ok(self

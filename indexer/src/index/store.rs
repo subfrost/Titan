@@ -107,6 +107,10 @@ pub trait Store {
         &self,
         txids: &Vec<Txid>,
     ) -> Result<HashMap<Txid, Option<BlockId>>, StoreError>;
+    fn partition_transactions_by_existence(
+        &self,
+        txids: &HashSet<Txid>,
+    ) -> Result<(Vec<Txid>, Vec<Txid>), StoreError>;
 
     // rune transactions
     fn get_last_rune_transactions(
@@ -387,6 +391,13 @@ impl Store for RocksDB {
                 },
             }
         }
+    }
+
+    fn partition_transactions_by_existence(
+        &self,
+        txids: &HashSet<Txid>,
+    ) -> Result<(Vec<Txid>, Vec<Txid>), StoreError> {
+        Ok(self.partition_transactions_by_existence(txids)?)
     }
 
     fn get_transaction_confirming_block(&self, txid: &Txid) -> Result<BlockId, StoreError> {

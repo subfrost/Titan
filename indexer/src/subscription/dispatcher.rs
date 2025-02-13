@@ -39,6 +39,7 @@ pub async fn event_dispatcher(
                                 Event::TransactionsAdded { .. }
                                 | Event::TransactionsReplaced { .. }
                                 | Event::NewBlock { .. }
+                                | Event::Reorg { .. }
                             ) {
                                 append_to_file("events.log", &format!("{:?}", event)).unwrap();
                             }

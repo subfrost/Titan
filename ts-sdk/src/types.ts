@@ -111,7 +111,7 @@ export interface RuneResponse {
 export interface Subscription {
   id: string;
   endpoint: string;
-  event_types: string[];
+  event_types: TitanEventType[];
   last_success_epoch_secs: number;
 }
 
@@ -134,6 +134,7 @@ export enum TitanEventType {
   TransactionsAdded = 'TransactionsAdded',
   TransactionsReplaced = 'TransactionsReplaced',
   NewBlock = 'NewBlock',
+  Reorg = 'Reorg',
 }
 
 export interface Location {
@@ -198,6 +199,13 @@ export type TitanEvent =
       data: {
         block_hash: string;
         block_height: number;
+      };
+    }
+  | {
+      type: TitanEventType.Reorg;
+      data: {
+        height: number;
+        depth: number;
       };
     };
 

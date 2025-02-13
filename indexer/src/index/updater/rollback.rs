@@ -27,14 +27,12 @@ type Result<T> = std::result::Result<T, RollbackError>;
 
 pub struct RollbackSettings {
     pub index_addresses: bool,
-    pub index_bitcoin_transactions: bool,
 }
 
 impl From<Settings> for RollbackSettings {
     fn from(settings: Settings) -> Self {
         Self {
             index_addresses: settings.index_addresses,
-            index_bitcoin_transactions: settings.index_bitcoin_transactions,
         }
     }
 }

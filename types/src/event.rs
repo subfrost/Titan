@@ -18,6 +18,7 @@ pub enum EventType {
     TransactionsAdded,
     TransactionsReplaced,
     NewBlock,
+    Reorg,
 }
 
 impl From<Event> for EventType {
@@ -31,6 +32,7 @@ impl From<Event> for EventType {
             Event::TransactionsAdded { .. } => EventType::TransactionsAdded,
             Event::TransactionsReplaced { .. } => EventType::TransactionsReplaced,
             Event::NewBlock { .. } => EventType::NewBlock,
+            Event::Reorg { .. } => EventType::Reorg,
         }
     }
 }
@@ -47,6 +49,7 @@ impl fmt::Display for EventType {
             EventType::TransactionsAdded => write!(f, "TransactionsAdded"),
             EventType::TransactionsReplaced => write!(f, "TransactionsReplaced"),
             EventType::NewBlock => write!(f, "NewBlock"),
+            EventType::Reorg => write!(f, "Reorg"),
         }
     }
 }
@@ -134,5 +137,9 @@ pub enum Event {
     NewBlock {
         block_hash: BlockHash,
         block_height: u64,
+    },
+    Reorg {
+        height: u64,
+        depth: u64,
     },
 }
