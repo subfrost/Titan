@@ -163,6 +163,10 @@ pub struct Options {
     /// Tcp address to listen to
     #[arg(long, default_value = "127.0.0.1:8080")]
     pub(super) tcp_address: String,
+
+    /// Enable file logging
+    #[arg(long, default_value = "false")]
+    pub(super) enable_file_logging: bool,
 }
 
 impl Options {
@@ -228,6 +232,7 @@ impl From<Options> for SubscriptionConfig {
             enable_webhook_subscriptions: options.enable_webhook_subscriptions,
             enable_tcp_subscriptions: options.enable_tcp_subscriptions,
             tcp_address: options.tcp_address,
+            enable_file_logging: options.enable_file_logging,
         }
     }
 }

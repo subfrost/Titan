@@ -35,3 +35,4 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 async_zmq = { workspace = true }
 threadpool = "1.8.1"
+chrono = "0.4.39"

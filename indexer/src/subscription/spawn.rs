@@ -41,6 +41,7 @@ pub struct SubscriptionConfig {
     pub enable_webhook_subscriptions: bool,
     pub enable_tcp_subscriptions: bool,
     pub tcp_address: String,
+    pub enable_file_logging: bool,
 }
 
 /// Spawns the subscription-related background tasks (dispatcher + cleanup).
@@ -127,6 +128,7 @@ pub fn spawn_subscription_tasks(
             webhook_manager_for_dispatcher,
             tcp_manager_for_dispatcher,
             dispatcher_rx,
+            config.enable_file_logging,
         )
         .await;
     });
