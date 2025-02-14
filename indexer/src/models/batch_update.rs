@@ -6,14 +6,14 @@ use {
         collections::{HashMap, HashSet},
         fmt::Display,
     },
-    titan_types::{Block, InscriptionId, TxOutEntry},
+    titan_types::{Block, InscriptionId, SpenderReference, TxOutEntry},
 };
 
 #[derive(Debug, Clone)]
 pub struct BatchUpdate {
     pub script_pubkeys: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)>,
     pub script_pubkeys_outpoints: HashMap<OutPoint, ScriptBuf>,
-    pub spent_outpoints_in_mempool: HashSet<OutPoint>,
+    pub spent_outpoints_in_mempool: HashMap<OutPoint, SpenderReference>,
     pub blocks: HashMap<BlockHash, Block>,
     pub block_hashes: HashMap<u64, BlockHash>,
     pub txouts: HashMap<OutPoint, TxOutEntry>,
@@ -36,7 +36,7 @@ impl BatchUpdate {
         Self {
             script_pubkeys: HashMap::new(),
             script_pubkeys_outpoints: HashMap::new(),
-            spent_outpoints_in_mempool: HashSet::new(),
+            spent_outpoints_in_mempool: HashMap::new(),
             blocks: HashMap::new(),
             block_hashes: HashMap::new(),
             txouts: HashMap::new(),

@@ -15,7 +15,7 @@ use {
         sync::Arc,
         time::Instant,
     },
-    titan_types::{Block, Event, InscriptionId, Location, TxOutEntry},
+    titan_types::{Block, Event, InscriptionId, Location, SpenderReference, TxOutEntry},
     tokio::sync::mpsc,
     tracing::{info, trace},
 };
@@ -321,7 +321,10 @@ impl UpdaterCache {
         self.update.script_pubkeys_outpoints = items;
     }
 
-    pub fn batch_set_spent_outpoints_in_mempool(&mut self, outpoints: Vec<OutPoint>) {
+    pub fn batch_set_spent_outpoints_in_mempool(
+        &mut self,
+        outpoints: HashMap<OutPoint, SpenderReference>,
+    ) {
         self.update.spent_outpoints_in_mempool.extend(outpoints);
     }
 

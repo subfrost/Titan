@@ -166,9 +166,15 @@ impl<'a> TransactionUpdater<'a> {
         if let Some(addr_updater) = self.address_updater.as_mut() {
             // skip coinbase inputs
             if !transaction.is_coinbase() {
-                for input in &transaction.input {
+                for (vin, input) in transaction.input.iter().enumerate() {
                     // Add the spent outpoint to the address_updater
-                    addr_updater.add_spent_outpoint(input.previous_output);
+                    addr_updater.add_spent_outpoint(
+                        input.previous_output,
+                        SpenderReference {
+                            txid,
+                            vin: vin as u32,
+                        },
+                    );
                 }
             }
 

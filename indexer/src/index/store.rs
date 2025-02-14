@@ -11,8 +11,7 @@ use {
     std::collections::{HashMap, HashSet},
     thiserror::Error,
     titan_types::{
-        Block, InscriptionId, Pagination, PaginationResponse, Transaction, TransactionStatus,
-        TxOutEntry,
+        Block, InscriptionId, Pagination, PaginationResponse, SpenderReference, SpentStatus, Transaction, TransactionStatus, TxOut, TxOutEntry
     },
 };
 
@@ -74,6 +73,11 @@ pub trait Store {
         mempool: Option<bool>,
     ) -> Result<TxOutEntry, StoreError>;
     fn get_tx_outs(
+        &self,
+        outpoints: &Vec<OutPoint>,
+        mempool: Option<bool>,
+    ) -> Result<HashMap<OutPoint, TxOutEntry>, StoreError>;
+    fn get_tx_outs_with_mempool_spent_update(
         &self,
         outpoints: &Vec<OutPoint>,
         mempool: Option<bool>,
@@ -269,24 +273,30 @@ impl Store for RocksDB {
         outpoints: &Vec<OutPoint>,
         mempool: Option<bool>,
     ) -> Result<HashMap<OutPoint, TxOutEntry>, StoreError> {
-        if let Some(mempool) = mempool {
-            Ok(self.get_tx_outs(outpoints, mempool)?)
-        } else {
-            let mut ledger_outpoints = self.get_tx_outs(outpoints, false)?;
+        Ok(self.get_tx_outs(outpoints, mempool)?)
+    }
 
-            let remaining: Vec<OutPoint> = outpoints
-                .iter()
-                .filter_map(|outpoint| {
-                    (!ledger_outpoints.contains_key(outpoint)).then_some(outpoint.clone())
-                })
-                .collect();
+    fn get_tx_outs_with_mempool_spent_update(
+        &self,
+        outpoints: &Vec<OutPoint>,
+        mempool: Option<bool>,
+    ) -> Result<HashMap<OutPoint, TxOutEntry>, StoreError> {
+        let mut tx_outs = self.get_tx_outs(outpoints, mempool)?;
+        let spent_outpoints: HashMap<OutPoint, Option<SpenderReference>> =
+            self.get_spent_outpoints_in_mempool(outpoints)?;
 
-            let mempool_outpoints = self.get_tx_outs(&remaining, true)?;
+        for (outpoint, output) in tx_outs.iter_mut() {
+            let spent_in_mempool = spent_outpoints.get(outpoint);
 
-            ledger_outpoints.extend(mempool_outpoints);
-
-            Ok(ledger_outpoints)
+            match spent_in_mempool {
+                Some(Some(spent)) => {
+                    output.spent = SpentStatus::Spent(spent.clone());
+                }
+                _ => {}
+            }
         }
+
+        Ok(tx_outs)
     }
 
     fn get_tx_state_changes(
@@ -350,26 +360,26 @@ impl Store for RocksDB {
             });
         }
 
-        let tx_outs = self.get_tx_outs(
-            &tx.output
-                .iter()
-                .enumerate()
-                .map(|(vout, _)| OutPoint {
-                    txid: txid.clone(),
-                    vout: vout as u32,
-                })
-                .collect(),
-            mempool,
-        )?;
+        let outpoints = tx
+            .output
+            .iter()
+            .enumerate()
+            .map(|(vout, _)| OutPoint {
+                txid: txid.clone(),
+                vout: vout as u32,
+            })
+            .collect();
+
+        let tx_outs = self.get_tx_outs_with_mempool_spent_update(&outpoints, Some(mempool))?;
 
         for (vout, output) in tx.output.iter_mut().enumerate() {
-            output.runes = tx_outs
-                .get(&OutPoint {
-                    txid: txid.clone(),
-                    vout: vout as u32,
-                })
-                .map(|tx_out| tx_out.runes.clone())
-                .unwrap_or_default();
+            let tx_out_entry = tx_outs.get(&outpoints[vout]);
+
+            if let Some(tx_out_entry) = tx_out_entry {
+                output.runes = tx_out_entry.runes.clone();
+                output.risky_runes = tx_out_entry.risky_runes.clone();
+                output.spent = tx_out_entry.spent.clone();
+            }
         }
 
         Ok(tx)
@@ -484,8 +494,15 @@ impl Store for RocksDB {
             ledger_entry.extend(mempool_entry);
 
             // Get spent outpoints in mempool.
-            let spent_outpoints = self.filter_spent_outpoints_in_mempool(&ledger_entry)?;
-            ledger_entry.retain(|outpoint| !spent_outpoints.contains(outpoint));
+            let spent_outpoints = self.get_spent_outpoints_in_mempool(&ledger_entry)?;
+            ledger_entry.retain(|outpoint| {
+                let spent = spent_outpoints.get(outpoint);
+                match spent {
+                    Some(Some(_)) => false,
+                    Some(None) => true,
+                    None => true,
+                }
+            });
 
             Ok(ledger_entry)
         }

@@ -2,6 +2,7 @@ use {
     crate::index::{updater::cache::UpdaterCache, StoreError},
     bitcoin::{OutPoint, ScriptBuf},
     std::collections::{HashMap, HashSet},
+    titan_types::SpenderReference,
 };
 
 #[derive(Default)]
@@ -10,14 +11,14 @@ pub struct AddressUpdater {
     new_outpoints: HashMap<OutPoint, ScriptBuf>,
 
     /// All outpoints spent in this block (except coinbase).
-    spent_outpoints: Vec<OutPoint>,
+    spent_outpoints: HashMap<OutPoint, SpenderReference>,
 }
 
 impl AddressUpdater {
     pub fn new() -> Self {
         Self {
             new_outpoints: HashMap::new(),
-            spent_outpoints: Vec::new(),
+            spent_outpoints: HashMap::new(),
         }
     }
 
@@ -29,11 +30,14 @@ impl AddressUpdater {
     }
 
     /// Remember a spent outpoint
-    pub fn add_spent_outpoint(&mut self, outpoint: OutPoint) {
-        self.spent_outpoints.push(outpoint);
+    pub fn add_spent_outpoint(&mut self, outpoint: OutPoint, spender_reference: SpenderReference) {
+        self.spent_outpoints.insert(outpoint, spender_reference);
     }
 
-    pub fn batch_update_script_pubkey(&mut self, cache: &mut UpdaterCache) -> Result<(), StoreError> {
+    pub fn batch_update_script_pubkey(
+        &mut self,
+        cache: &mut UpdaterCache,
+    ) -> Result<(), StoreError> {
         if cache.settings.mempool {
             self.batch_update_script_pubkeys_for_mempool(cache)?;
         } else {
@@ -59,7 +63,7 @@ impl AddressUpdater {
         // we need to fetch from DB or ephemeral memory in UpdaterCache.
         let (old_spent_outpoints, new_spent_outpoints): (Vec<_>, Vec<_>) = self
             .spent_outpoints
-            .iter()
+            .keys()
             .partition(|outpoint| !self.new_outpoints.contains_key(outpoint));
 
         // ------------------------------------------------------

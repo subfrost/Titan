@@ -13,7 +13,8 @@ use {
     std::sync::Arc,
     titan_types::{
         query, AddressData, Block, BlockTip, InscriptionId, Pagination, PaginationResponse,
-        RuneResponse, Status, Subscription, Transaction, TransactionStatus, TxOutEntry,
+        RuneResponse, SpentStatus, Status, Subscription, Transaction, TransactionStatus,
+        TxOutEntry,
     },
     tracing::error,
     uuid::Uuid,
@@ -151,39 +152,36 @@ pub fn bitcoin_transaction_hex(index: Arc<Index>, client: Client, txid: &Txid) -
 }
 
 pub fn transaction(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Transaction> {
-    let mut transaction = Transaction::from(if index.is_indexing_bitcoin_transactions() {
+    let transaction = if index.is_indexing_bitcoin_transactions() {
         index.get_transaction(txid)?
     } else {
         let mut transaction = Transaction::from(client.get_raw_transaction(txid, None)?);
         transaction.status = Some(index.get_transaction_status(txid)?);
-        transaction
-    });
 
-    let outpoints = transaction
-        .output
-        .iter()
-        .enumerate()
-        .map(|(vout, _)| OutPoint {
-            txid: txid.clone(),
-            vout: vout as u32,
-        })
-        .collect();
+        let outpoints = transaction
+            .output
+            .iter()
+            .enumerate()
+            .map(|(vout, _)| OutPoint {
+                txid: txid.clone(),
+                vout: vout as u32,
+            })
+            .collect();
 
-    let tx_outs = index.get_tx_outs(&outpoints)?;
+        let tx_outs = index.get_tx_outs(&outpoints)?;
 
-    for (vout, tx_out) in transaction.output.iter_mut().enumerate() {
-        let outpoint = outpoints[vout];
-        match tx_outs.get(&outpoint) {
-            Some(tx_out_entry) => {
-                tx_out.runes = tx_out_entry.runes.clone();
-                tx_out.risky_runes = tx_out_entry.risky_runes.clone();
-                tx_out.spent = tx_out_entry.spent.clone();
-            }
-            None => {
-                // Ignore.
+        for (vout, output) in transaction.output.iter_mut().enumerate() {
+            let tx_out_entry = tx_outs.get(&outpoints[vout]);
+
+            if let Some(tx_out_entry) = tx_out_entry {
+                output.runes = tx_out_entry.runes.clone();
+                output.risky_runes = tx_out_entry.risky_runes.clone();
+                output.spent = tx_out_entry.spent.clone();
             }
         }
-    }
+
+        transaction
+    };
 
     Ok(transaction)
 }

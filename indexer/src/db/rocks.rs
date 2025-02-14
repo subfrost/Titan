@@ -23,7 +23,10 @@ use {
         collections::{HashMap, HashSet},
         sync::{Arc, RwLock},
     },
-    titan_types::{Block, InscriptionId, Pagination, PaginationResponse, Subscription, TxOutEntry},
+    titan_types::{
+        Block, InscriptionId, Pagination, PaginationResponse, SpenderReference, Subscription,
+        TxOutEntry,
+    },
     util::{
         inscription_id_to_bytes, outpoint_to_bytes, rune_id_to_bytes, txid_from_bytes,
         txid_to_bytes,
@@ -414,6 +417,31 @@ impl RocksDB {
     }
 
     pub fn get_tx_outs(
+        &self,
+        outpoints: &Vec<OutPoint>,
+        mempool: Option<bool>,
+    ) -> DBResult<HashMap<OutPoint, TxOutEntry>> {
+        if let Some(mempool) = mempool {
+            Ok(self.get_tx_outs_with_mempool(outpoints, mempool)?)
+        } else {
+            let mut ledger_outpoints = self.get_tx_outs_with_mempool(outpoints, false)?;
+
+            let remaining: Vec<OutPoint> = outpoints
+                .iter()
+                .filter_map(|outpoint| {
+                    (!ledger_outpoints.contains_key(outpoint)).then_some(outpoint.clone())
+                })
+                .collect();
+
+            let mempool_outpoints = self.get_tx_outs_with_mempool(&remaining, true)?;
+
+            ledger_outpoints.extend(mempool_outpoints);
+
+            Ok(ledger_outpoints)
+        }
+    }
+
+    fn get_tx_outs_with_mempool(
         &self,
         outpoints: &Vec<OutPoint>,
         mempool: bool,
@@ -914,12 +942,12 @@ impl RocksDB {
         Ok(script_pubkeys)
     }
 
-    pub fn filter_spent_outpoints_in_mempool(
+    pub fn get_spent_outpoints_in_mempool(
         &self,
         outpoints: &Vec<OutPoint>,
-    ) -> DBResult<Vec<OutPoint>> {
+    ) -> DBResult<HashMap<OutPoint, Option<SpenderReference>>> {
         let cf_handle = self.cf_handle(SPENT_OUTPOINTS_MEMPOOL_CF)?;
-        let mut spent_outpoints = Vec::new();
+        let mut spent_outpoints = HashMap::new();
 
         let keys: Vec<_> = outpoints
             .iter()
@@ -930,10 +958,14 @@ impl RocksDB {
 
         for (i, result) in results.iter().enumerate() {
             match result {
-                Ok(Some(_)) => {
-                    spent_outpoints.push(outpoints[i].clone());
+                Ok(Some(bytes)) => {
+                    spent_outpoints
+                        .insert(outpoints[i].clone(), Some(SpenderReference::load(bytes.clone())));
                 }
-                _ => {}
+                Ok(None) => {
+                    spent_outpoints.insert(outpoints[i].clone(), None);
+                }
+                Err(e) => return Err(e.clone().into()),
             }
         }
 
@@ -1245,8 +1277,12 @@ impl RocksDB {
         {
             let cf_handle: Arc<BoundColumnFamily<'_>> =
                 self.cf_handle(SPENT_OUTPOINTS_MEMPOOL_CF)?;
-            for outpoint in update.spent_outpoints_in_mempool.iter() {
-                batch.put_cf(&cf_handle, outpoint_to_bytes(&outpoint), vec![1]);
+            for (outpoint, spender_reference) in update.spent_outpoints_in_mempool.iter() {
+                batch.put_cf(
+                    &cf_handle,
+                    outpoint_to_bytes(&outpoint),
+                    spender_reference.clone().store(),
+                );
             }
         }
 

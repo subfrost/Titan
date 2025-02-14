@@ -24,7 +24,7 @@ use {
     },
     titan_types::{
         AddressData, AddressTxOut, Block, Event, InscriptionId, Pagination, PaginationResponse,
-        RuneAmount, Transaction, TransactionStatus, TxOutEntry,
+        RuneAmount, SpenderReference, Transaction, TransactionStatus, TxOutEntry,
     },
     tokio::{runtime::Runtime, sync::mpsc::Sender},
     tracing::{error, info, warn},
@@ -222,7 +222,7 @@ impl Index {
     }
 
     pub fn get_tx_outs(&self, outpoints: &Vec<OutPoint>) -> Result<HashMap<OutPoint, TxOutEntry>> {
-        Ok(self.db.get_tx_outs(outpoints, None)?)
+        Ok(self.db.get_tx_outs_with_mempool_spent_update(outpoints, None)?)
     }
 
     pub fn get_rune(&self, rune_id: &RuneId) -> Result<RuneEntry> {
@@ -262,7 +262,7 @@ impl Index {
     pub fn get_script_pubkey_outpoints(&self, script: &ScriptBuf) -> Result<AddressData> {
         let outpoints = self.db.get_script_pubkey_outpoints(script, None)?;
         let outpoints_to_tx_out: HashMap<OutPoint, TxOutEntry> =
-            self.db.get_tx_outs(&outpoints, None)?;
+            self.db.get_tx_outs_with_mempool_spent_update(&outpoints, None)?;
 
         assert_eq!(
             outpoints.len(),
