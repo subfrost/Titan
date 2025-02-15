@@ -9,6 +9,13 @@ export interface Status {
   mempool_tx_count: number;
 }
 
+export interface Block {
+  height: number;
+  header: string;
+  tx_ids: string[];
+  etched_runes: string[];
+}
+
 export interface RuneAmount {
   rune_id: string;
   amount: string;

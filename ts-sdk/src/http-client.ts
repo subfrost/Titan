@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 import {
   AddressData,
   BlockTip,
@@ -10,6 +10,7 @@ import {
   Transaction,
   TxOutEntry,
   TransactionStatus,
+  Block,
 } from './types';
 
 /**
@@ -29,76 +30,83 @@ export class TitanHttpClient {
   }
 
   async getStatus(): Promise<Status> {
-    const response = await this.http.get<Status>('/status');
-    return response.data;
+    return await this.getOrFail<Status>('/status');
   }
 
   async getTip(): Promise<BlockTip> {
-    const response = await this.http.get<BlockTip>('/tip');
-    return response.data;
+    return await this.getOrFail<BlockTip>('/tip');
   }
 
   /**
    * Fetches a block by its query (could be a block height or hash).
    */
-  async getBlock(query: string): Promise<any> {
-    const response = await this.http.get<any>(`/block/${query}`);
-    return response.data;
+  async getBlock(query: string): Promise<Block | undefined> {
+    return await this.get<Block>(`/block/${query}`);
   }
 
-  async getBlockHashByHeight(height: number): Promise<string> {
-    const response = await this.http.get<string>(`/block/${height}/hash`);
-    return response.data;
+  async getBlockHashByHeight(height: number): Promise<string | undefined> {
+    return await this.get<string>(`/block/${height}/hash`);
   }
 
-  async getBlockTxids(query: string): Promise<string[]> {
-    const response = await this.http.get<string[]>(`/block/${query}/txids`);
-    return response.data;
+  async getBlockTxids(query: string): Promise<string[] | undefined> {
+    return await this.get<string[]>(`/block/${query}/txids`);
   }
 
   async getAddress(address: string): Promise<AddressData> {
-    const response = await this.http.get<AddressData>(`/address/${address}`);
-    return response.data;
+    return await this.getOrFail<AddressData>(`/address/${address}`);
   }
 
-  async getTransaction(txid: string): Promise<Transaction> {
-    const response = await this.http.get<Transaction>(`/tx/${txid}`);
-    return response.data;
+  async getTransaction(txid: string): Promise<Transaction | undefined> {
+    return await this.get<Transaction>(`/tx/${txid}`);
   }
 
-  async getTransactionRaw(txid: string): Promise<Uint8Array> {
+  async getTransactionRaw(txid: string): Promise<Uint8Array | undefined> {
     // Request raw binary data using the arraybuffer responseType.
-    const response = await this.http.get<ArrayBuffer>(`/tx/${txid}/raw`, {
+    const response = await this.get<ArrayBuffer>(`/tx/${txid}/raw`, {
       responseType: 'arraybuffer',
     });
-    return new Uint8Array(response.data);
+
+    if (!response) {
+      return undefined;
+    }
+
+    return new Uint8Array(response);
   }
 
-  async getTransactionHex(txid: string): Promise<string> {
-    const response = await this.http.get<string>(`/tx/${txid}/hex`);
-    return response.data;
+  async getTransactionHex(txid: string): Promise<string | undefined> {
+    return await this.get<string>(`/tx/${txid}/hex`);
   }
 
-  async getTransactionStatus(txid: string): Promise<TransactionStatus> {
-    const response = await this.http.get<TransactionStatus>(
-      `/tx/${txid}/status`,
-    );
-    return response.data;
+  async getTransactionStatus(
+    txid: string,
+  ): Promise<TransactionStatus | undefined> {
+    return await this.get<TransactionStatus>(`/tx/${txid}/status`);
   }
 
   async sendTransaction(txHex: string): Promise<string> {
-    const response = await this.http.post<string>('/tx/broadcast', txHex, {
-      headers: {
-        'Content-Type': 'text/plain',
-      },
-    });
-    // Assume the response body is the transaction id.
-    return response.data;
+    try {
+      const response = await this.http.post<string>('/tx/broadcast', txHex, {
+        headers: {
+          'Content-Type': 'text/plain',
+        },
+      });
+
+      return response.data;
+    } catch (err) {
+      if (err instanceof AxiosError) {
+        const axiosError = err as AxiosError;
+        if (axiosError.response?.data) {
+          const error = axiosError.response.data as any;
+          throw error;
+        }
+      }
+
+      throw err;
+    }
   }
 
-  async getOutput(txid: string, vout: number): Promise<TxOutEntry> {
-    const response = await this.http.get<TxOutEntry>(`/output/${txid}:${vout}`);
-    return response.data;
+  async getOutput(txid: string, vout: number): Promise<TxOutEntry | undefined> {
+    return await this.get<TxOutEntry>(`/output/${txid}:${vout}`);
   }
 
   async getInscription(
@@ -110,6 +118,7 @@ export class TitanHttpClient {
         responseType: 'arraybuffer',
       },
     );
+
     return {
       headers: response.headers,
       data: new Uint8Array(response.data),
@@ -120,43 +129,36 @@ export class TitanHttpClient {
     pagination?: Pagination,
   ): Promise<PaginationResponse<RuneResponse>> {
     const params = pagination || {};
-    const response = await this.http.get<PaginationResponse<RuneResponse>>(
-      '/runes',
-      { params },
-    );
-    return response.data;
+    return await this.getOrFail<PaginationResponse<RuneResponse>>('/runes', {
+      params,
+    });
   }
 
-  async getRune(rune: string): Promise<RuneResponse> {
-    const response = await this.http.get<RuneResponse>(`/rune/${rune}`);
-    return response.data;
+  async getRune(rune: string): Promise<RuneResponse | undefined> {
+    return await this.get<RuneResponse>(`/rune/${rune}`);
   }
 
   async getRuneTransactions(
     rune: string,
     pagination?: Pagination,
-  ): Promise<PaginationResponse<string>> {
+  ): Promise<PaginationResponse<string> | undefined> {
     const params = pagination || {};
-    const response = await this.http.get<PaginationResponse<string>>(
+    return await this.getOrFail<PaginationResponse<string>>(
       `/rune/${rune}/transactions`,
       { params },
     );
-    return response.data;
   }
 
   async getMempoolTxids(): Promise<string[]> {
-    const response = await this.http.get<string[]>('/mempool/txids');
-    return response.data;
+    return await this.getOrFail<string[]>(`/mempool/txids`);
   }
 
-  async getSubscription(id: string): Promise<Subscription> {
-    const response = await this.http.get<Subscription>(`/subscription/${id}`);
-    return response.data;
+  async getSubscription(id: string): Promise<Subscription | undefined> {
+    return await this.get<Subscription>(`/subscription/${id}`);
   }
 
   async listSubscriptions(): Promise<Subscription[]> {
-    const response = await this.http.get<Subscription[]>('/subscriptions');
-    return response.data;
+    return await this.getOrFail<Subscription[]>('/subscriptions');
   }
 
   async addSubscription(subscription: Subscription): Promise<Subscription> {
@@ -171,6 +173,30 @@ export class TitanHttpClient {
     const response = await this.http.delete(`/subscription/${id}`);
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`Delete subscription failed: HTTP ${response.status}`);
+    }
+  }
+
+  private async getOrFail<T>(path: string, params?: any): Promise<T> {
+    const response = await this.http.get<T>(path, { params });
+    return response.data;
+  }
+
+  private async get<T>(
+    path: string,
+    config?: AxiosRequestConfig,
+  ): Promise<T | undefined> {
+    try {
+      const response = await this.http.get<T>(path, config);
+      return response.data;
+    } catch (err) {
+      if (err instanceof AxiosError) {
+        const axiosError = err as AxiosError;
+        if (axiosError.response?.status === 404) {
+          return undefined;
+        }
+      }
+
+      throw err;
     }
   }
 }
