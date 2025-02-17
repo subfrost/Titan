@@ -287,6 +287,11 @@ impl Updater {
 
         let client = self.settings.get_new_rpc_client()?;
 
+        let _mempool_indexing = self
+            .mempool_indexing
+            .lock()
+            .map_err(|_| UpdaterError::Mutex)?;
+
         // Get current mempool transactions
         let current_mempool = client.get_raw_mempool_verbose()?;
 
@@ -319,11 +324,6 @@ impl Updater {
                 self.shutdown_flag.clone(),
             );
             let tx_order = mempool::sort_transaction_order(&current_mempool, &tx_map)?;
-            let _mempool_indexing = self
-                .mempool_indexing
-                .lock()
-                .map_err(|_| UpdaterError::Mutex)?;
-
             let mut cache = UpdaterCache::new(
                 self.db.clone(),
                 UpdaterCacheSettings::new(&self.settings, true),
