@@ -959,8 +959,10 @@ impl RocksDB {
         for (i, result) in results.iter().enumerate() {
             match result {
                 Ok(Some(bytes)) => {
-                    spent_outpoints
-                        .insert(outpoints[i].clone(), Some(SpenderReference::load(bytes.clone())));
+                    spent_outpoints.insert(
+                        outpoints[i].clone(),
+                        Some(SpenderReference::load(bytes.clone())),
+                    );
                 }
                 Ok(None) => {
                     spent_outpoints.insert(outpoints[i].clone(), None);
@@ -1469,11 +1471,7 @@ impl RocksDB {
 
         // 7. Update prev_outpoints_to_delete
         {
-            let cf_handle: Arc<BoundColumnFamily<'_>> = if mempool {
-                self.cf_handle(OUTPOINTS_MEMPOOL_CF)?
-            } else {
-                self.cf_handle(OUTPOINTS_CF)?
-            };
+            let cf_handle = self.cf_handle(SPENT_OUTPOINTS_MEMPOOL_CF)?;
 
             for outpoint in rollback.prev_outpoints_to_delete.iter() {
                 batch.delete_cf(&cf_handle, outpoint_to_bytes(outpoint));
