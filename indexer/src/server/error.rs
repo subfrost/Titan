@@ -36,6 +36,10 @@ impl IntoResponse for ServerError {
             Self::ApiError(ApiError::IndexError(IndexError::StoreError(StoreError::NotFound(
                 message,
             )))) => (StatusCode::NOT_FOUND, message).into_response(),
+            Self::ApiError(ApiError::RpcError(error)) => {
+                error!("rpc error: {error}");
+                (StatusCode::BAD_REQUEST, error.to_string()).into_response()
+            }
             Self::ApiError(error) => {
                 error!("error serving request: {error}");
                 (
