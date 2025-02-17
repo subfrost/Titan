@@ -11,7 +11,7 @@ use {
         index::updater::{ReorgError, UpdaterError},
         models::{block_id_to_transaction_status, Inscription, RuneEntry},
     },
-    bitcoin::{BlockHash, OutPoint, ScriptBuf, Transaction as BitcoinTransaction, Txid},
+    bitcoin::{Address, BlockHash, OutPoint, ScriptBuf, Transaction as BitcoinTransaction, Txid},
     ordinals::{Rune, RuneId},
     std::{
         collections::HashMap,
@@ -222,7 +222,9 @@ impl Index {
     }
 
     pub fn get_tx_outs(&self, outpoints: &Vec<OutPoint>) -> Result<HashMap<OutPoint, TxOutEntry>> {
-        Ok(self.db.get_tx_outs_with_mempool_spent_update(outpoints, None)?)
+        Ok(self
+            .db
+            .get_tx_outs_with_mempool_spent_update(outpoints, None)?)
     }
 
     pub fn get_rune(&self, rune_id: &RuneId) -> Result<RuneEntry> {
@@ -259,16 +261,21 @@ impl Index {
             .get_last_rune_transactions(rune_id, pagination, mempool)?)
     }
 
-    pub fn get_script_pubkey_outpoints(&self, script: &ScriptBuf) -> Result<AddressData> {
-        let outpoints = self.db.get_script_pubkey_outpoints(script, None)?;
-        let outpoints_to_tx_out: HashMap<OutPoint, TxOutEntry> =
-            self.db.get_tx_outs_with_mempool_spent_update(&outpoints, None)?;
+    pub fn get_script_pubkey_outpoints(&self, address: &Address) -> Result<AddressData> {
+        let script_pubkey = address.script_pubkey();
+        let outpoints = self.db.get_script_pubkey_outpoints(&script_pubkey, None)?;
+        let outpoints_to_tx_out: HashMap<OutPoint, TxOutEntry> = self
+            .db
+            .get_tx_outs_with_mempool_spent_update(&outpoints, None)?;
 
-        assert_eq!(
-            outpoints.len(),
-            outpoints_to_tx_out.len(),
-            "outpoints and outpoints_to_tx_out should have the same length"
-        );
+        if outpoints.len() != outpoints_to_tx_out.len() {
+            panic!(
+                "Address {} has {} outpoints but {} txouts",
+                address,
+                outpoints.len(),
+                outpoints_to_tx_out.len()
+            );
+        }
 
         let outpoint_txns: Vec<Txid> = outpoints.iter().map(|outpoint| outpoint.txid).collect();
         let txns_confirming_block = self.db.get_transaction_confirming_blocks(&outpoint_txns)?;

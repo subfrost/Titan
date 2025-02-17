@@ -195,8 +195,7 @@ pub fn mempool_txids(index: Arc<Index>) -> Result<Vec<Txid>> {
 }
 
 pub fn address(index: Arc<Index>, address: &Address) -> Result<AddressData> {
-    let script_pubkey = address.script_pubkey();
-    let outpoints = index.get_script_pubkey_outpoints(&script_pubkey)?;
+    let outpoints = index.get_script_pubkey_outpoints(&address)?;
     Ok(outpoints)
 }
 
