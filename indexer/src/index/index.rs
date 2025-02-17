@@ -269,7 +269,7 @@ impl Index {
             .get_tx_outs_with_mempool_spent_update(&outpoints, None)?;
 
         if outpoints.len() != outpoints_to_tx_out.len() {
-            panic!(
+            error!(
                 "Address {} has {} outpoints but {} txouts",
                 address,
                 outpoints.len(),
