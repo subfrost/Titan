@@ -2,7 +2,7 @@
 
 import axios from 'axios';
 import * as bitcoin from 'bitcoinjs-lib';
-import { AddressData, BlockTip } from '../src/types';
+import { AddressData, BlockTip } from '@titanbtcio/sdk';
 
 // --- INTERFACES & TYPES ---
 
