@@ -318,6 +318,14 @@ async function main(): Promise<void> {
         continue;
       }
 
+      for (const output of indexerData.outputs) {
+        if (output.spent.spent) {
+          console.error(
+            `Address ${address} output ${output.txid}:${output.vout} is spent`,
+          );
+        }
+      }
+
       // Normalize indexer outputs (basic fields).
       const normalizedIndexerBasic = (indexerData.outputs || []).map((o) => ({
         txid: o.txid,
