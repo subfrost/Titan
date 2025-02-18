@@ -575,7 +575,8 @@ impl Updater {
             let db = self.db.write();
 
             // rollback block count indexed.
-            db.set_block_count(height - depth)?;
+            // +1 because this is the block count and not the block height, therefore block count is always height + 1.
+            db.set_block_count(height - depth + 1)?;
         }
 
         // Find rolled back blocks and revert those txs.
