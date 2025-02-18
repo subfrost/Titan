@@ -86,12 +86,8 @@ pub enum UpdaterError {
     Mutex,
     #[error("event sender error {0}")]
     EventSender(#[from] SendError<Event>),
-}
-
-impl UpdaterError {
-    pub fn is_halted(&self) -> bool {
-        matches!(self, UpdaterError::BitcoinReorg(ReorgError::Unrecoverable))
-    }
+    #[error("invalid main chain tip")]
+    InvalidMainChainTip,
 }
 
 type Result<T> = std::result::Result<T, UpdaterError>;
@@ -236,16 +232,11 @@ impl Updater {
                 first_block = false;
                 progress_bar.inc(1);
 
-                if self
-                    .transaction_update
-                    .read()
-                    .unwrap()
-                    .enough_events_to_send()
-                    // it hasn't been a reorg.
-                    && bitcoin_block_count - cache.get_block_height_tip() > 50
+                if bitcoin_block_count - cache.get_block_height_tip()
+                    > self.settings.max_recoverable_reorg_depth()
                 {
                     // clear notifications.
-                    self.notify_tx_updates()?;
+                    self.notify_tx_updates(true)?;
                 }
             }
 
@@ -642,7 +633,7 @@ impl Updater {
         Ok(())
     }
 
-    pub fn notify_tx_updates(&self) -> Result<()> {
+    pub fn notify_tx_updates(&self, flush: bool) -> Result<()> {
         let _timer = self
             .latency
             .with_label_values(&["notify_tx_updates"])
@@ -658,10 +649,34 @@ impl Updater {
             };
 
             if let Some(sender) = &self.sender {
+                if !flush && (!categorized.removed.is_empty() || !categorized.added.is_empty()) {
+                    let client = self.settings.get_new_rpc_client()?;
+
+                    let chain_info = client.get_blockchain_info()?;
+
+                    let block = {
+                        let db = self.db.read();
+                        db.get_block_by_hash(&chain_info.best_block_hash)
+                    };
+
+                    let Ok(block) = block else {
+                        return Err(UpdaterError::InvalidMainChainTip);
+                    };
+
+                    if block.height != chain_info.blocks {
+                        return Err(UpdaterError::InvalidMainChainTip);
+                    }
+                }
+
                 if !categorized.removed.is_empty() {
-                    sender.blocking_send(Event::TransactionsReplaced {
-                        txids: categorized.removed.into_iter().collect(),
-                    })?;
+                    let (_, not_exists) = {
+                        let db = self.db.read();
+                        db.partition_transactions_by_existence(
+                            &categorized.removed.into_iter().collect(),
+                        )?
+                    };
+
+                    sender.blocking_send(Event::TransactionsReplaced { txids: not_exists })?;
                 }
 
                 if !categorized.added.is_empty() {

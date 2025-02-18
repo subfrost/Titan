@@ -86,8 +86,8 @@ impl TransactionUpdate {
     }
 
     pub fn update_mempool(&mut self, mempool: TransactionChangeSet) {
-        self.mempool_added = mempool.added;
-        self.mempool_removed = mempool.removed;
+        self.mempool_added.extend(mempool.added);
+        self.mempool_removed.extend(mempool.removed);
     }
 
     pub fn reset(&mut self) {

@@ -147,20 +147,6 @@ impl Index {
                 break;
             }
 
-            if self.updater.is_at_tip() {
-                match self.updater.index_mempool() {
-                    Ok(_) => (),
-                    Err(UpdaterError::BitcoinRpc(_)) => {
-                        warn!("We're getting network connection issues, retrying...");
-                        continue;
-                    }
-                    Err(e) => {
-                        error!("Failed to index mempool: {}", e);
-                        break;
-                    }
-                }
-            }
-
             match self.updater.update_to_tip() {
                 Ok(()) => (),
                 Err(UpdaterError::BitcoinReorg(ReorgError::Unrecoverable)) => {
@@ -183,8 +169,27 @@ impl Index {
                 }
             }
 
-            if let Err(e) = self.updater.notify_tx_updates() {
-                error!("Failed to notify tx updates: {}", e);
+            match self.updater.index_mempool() {
+                Ok(_) => (),
+                Err(UpdaterError::BitcoinRpc(_)) => {
+                    warn!("We're getting network connection issues, retrying...");
+                    continue;
+                }
+                Err(e) => {
+                    error!("Failed to index mempool: {}", e);
+                    break;
+                }
+            }
+
+            match self.updater.notify_tx_updates(false) {
+                Ok(_) => (),
+                Err(UpdaterError::InvalidMainChainTip) => {
+                    warn!("Invalid main chain tip, when sending tx updates...");
+                    continue;
+                }
+                Err(e) => {
+                    error!("Failed to notify tx updates: {}", e);
+                }
             }
 
             thread::sleep(Duration::from_millis(self.settings.main_loop_interval));
