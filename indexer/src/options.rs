@@ -84,15 +84,6 @@ pub struct Options {
     )]
     pub(super) no_index_inscriptions: bool,
 
-    /// Index spent outputs. [default: false]
-    #[arg(
-        long,
-        short,
-        help = "Index spent outputs. [default: false]",
-        default_value = "false"
-    )]
-    pub(super) index_spent_outputs: bool,
-
     /// Index bitcoin transactions
     #[arg(
         long,
@@ -199,7 +190,6 @@ impl From<Options> for Settings {
             bitcoin_rpc_auth,
             chain: options.chain,
             no_index_inscriptions: options.no_index_inscriptions,
-            index_spent_outputs: options.index_spent_outputs,
             index_bitcoin_transactions: options.index_bitcoin_transactions,
             index_addresses: options.index_addresses,
             commit_interval: options.commit_interval,

@@ -24,7 +24,6 @@ type Result<T> = std::result::Result<T, StoreError>;
 
 pub(super) struct UpdaterCacheSettings {
     pub max_recoverable_reorg_depth: u64,
-    pub index_spent_outputs: bool,
     pub mempool: bool,
 }
 
@@ -32,7 +31,6 @@ impl UpdaterCacheSettings {
     pub fn new(settings: &Settings, mempool: bool) -> Self {
         Self {
             max_recoverable_reorg_depth: settings.max_recoverable_reorg_depth(),
-            index_spent_outputs: settings.index_spent_outputs,
             mempool,
         }
     }
@@ -340,10 +338,7 @@ impl UpdaterCache {
         let db = self.db.write();
 
         if !self.settings.mempool {
-            self.prepare_to_delete(
-                self.settings.max_recoverable_reorg_depth,
-                self.settings.index_spent_outputs,
-            )?;
+            self.prepare_to_delete(self.settings.max_recoverable_reorg_depth)?;
         }
 
         if !self.update.is_empty() {
@@ -402,11 +397,7 @@ impl UpdaterCache {
         Ok(())
     }
 
-    fn prepare_to_delete(
-        &mut self,
-        max_recoverable_reorg_depth: u64,
-        index_spent_outputs: bool,
-    ) -> Result<()> {
+    fn prepare_to_delete(&mut self, max_recoverable_reorg_depth: u64) -> Result<()> {
         if let Some(last_block_height) = self.last_block_height {
             let mut from_block_height_to_purge = self
                 .first_block_height
@@ -428,7 +419,7 @@ impl UpdaterCache {
                 );
 
                 for i in from_block_height_to_purge..to_block_height_to_purge {
-                    self.purge_block(i, index_spent_outputs)?;
+                    self.purge_block(i)?;
                 }
             }
         }
@@ -462,7 +453,7 @@ impl UpdaterCache {
         Ok(total_tx_state_changes)
     }
 
-    fn purge_block(&mut self, height: u64, index_spent_outputs: bool) -> Result<()> {
+    fn purge_block(&mut self, height: u64) -> Result<()> {
         let block = self.get_block_by_height(height)?;
 
         let txids = block
@@ -477,10 +468,6 @@ impl UpdaterCache {
             let tx_state_changes = tx_state_changes.get(&txid).unwrap();
 
             for txin in tx_state_changes.inputs.iter() {
-                if !index_spent_outputs {
-                    self.delete.tx_outs.insert(txin.clone());
-                }
-
                 self.delete.script_pubkeys_outpoints.insert(txin.clone());
             }
 

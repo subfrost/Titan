@@ -80,22 +80,6 @@ impl Index {
     }
 
     pub fn validate_index(&self) -> Result<()> {
-        let db_index_spent_outputs = self.db.is_index_spent_outputs()?;
-        match (self.settings.index_spent_outputs, db_index_spent_outputs) {
-            (true, Some(false)) => {
-                return Err(IndexError::InvalidIndex(
-                    "index_spent_outputs is not set. Disable index_spent_outputs in settings or clean up the database".to_string(),
-                ));
-            }
-            (true, None) => {
-                self.db.set_index_spent_outputs(true)?;
-            }
-            (false, Some(true)) | (false, None) => {
-                self.db.set_index_spent_outputs(false)?;
-            }
-            _ => {}
-        }
-
         let db_index_addresses = self.db.is_index_addresses()?;
         match (self.settings.index_addresses, db_index_addresses) {
             (true, Some(false)) => {

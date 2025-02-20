@@ -44,8 +44,6 @@ impl From<RocksDBError> for StoreError {
 
 pub trait Store {
     // settings
-    fn is_index_spent_outputs(&self) -> Result<Option<bool>, StoreError>;
-    fn set_index_spent_outputs(&self, value: bool) -> Result<(), StoreError>;
     fn is_index_addresses(&self) -> Result<Option<bool>, StoreError>;
     fn set_index_addresses(&self, value: bool) -> Result<(), StoreError>;
     fn is_index_bitcoin_transactions(&self) -> Result<Option<bool>, StoreError>;
@@ -160,14 +158,6 @@ pub trait Store {
 }
 
 impl Store for RocksDB {
-    fn is_index_spent_outputs(&self) -> Result<Option<bool>, StoreError> {
-        Ok(self.is_index_spent_outputs()?)
-    }
-
-    fn set_index_spent_outputs(&self, value: bool) -> Result<(), StoreError> {
-        Ok(self.set_index_spent_outputs(value)?)
-    }
-
     fn is_index_addresses(&self) -> Result<Option<bool>, StoreError> {
         Ok(self.is_index_addresses()?)
     }

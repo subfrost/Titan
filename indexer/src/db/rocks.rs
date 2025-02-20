@@ -226,25 +226,6 @@ impl RocksDB {
         }
     }
 
-    pub fn is_index_spent_outputs(&self) -> DBResult<Option<bool>> {
-        let cf_handle = self.cf_handle(SETTINGS_CF)?;
-        let val: Option<u64> = self
-            .get_option_vec_data(&cf_handle, INDEX_SPENT_OUTPUTS_KEY)
-            .mapped()?;
-
-        Ok(val.map(|v| v == 1))
-    }
-
-    pub fn set_index_spent_outputs(&self, value: bool) -> DBResult<()> {
-        let cf_handle = self.cf_handle(SETTINGS_CF)?;
-        self.db.put_cf(
-            &cf_handle,
-            INDEX_SPENT_OUTPUTS_KEY,
-            (value as u64).to_le_bytes().to_vec(),
-        )?;
-        Ok(())
-    }
-
     pub fn is_index_addresses(&self) -> DBResult<Option<bool>> {
         let cf_handle = self.cf_handle(SETTINGS_CF)?;
         let val: Option<u64> = self

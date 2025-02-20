@@ -14,7 +14,6 @@ pub struct Settings {
     pub(crate) bitcoin_rpc_auth: Auth,
     pub(crate) chain: Chain,
     pub(crate) no_index_inscriptions: bool,
-    pub(crate) index_spent_outputs: bool,
     pub(crate) index_bitcoin_transactions: bool,
     pub(crate) index_addresses: bool,
     pub(crate) commit_interval: u64,
