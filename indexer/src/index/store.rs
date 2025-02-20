@@ -11,7 +11,8 @@ use {
     std::collections::{HashMap, HashSet},
     thiserror::Error,
     titan_types::{
-        Block, InscriptionId, Pagination, PaginationResponse, SpenderReference, SpentStatus, Transaction, TransactionStatus, TxOut, TxOutEntry
+        Block, InscriptionId, Pagination, PaginationResponse, SpenderReference, SpentStatus,
+        Transaction, TransactionStatus, TxOutEntry,
     },
 };
 
@@ -66,6 +67,11 @@ pub trait Store {
 
     // outpoint
     fn get_tx_out(
+        &self,
+        outpoint: &OutPoint,
+        mempool: Option<bool>,
+    ) -> Result<TxOutEntry, StoreError>;
+    fn get_tx_out_with_mempool_spent_update(
         &self,
         outpoint: &OutPoint,
         mempool: Option<bool>,
@@ -256,6 +262,38 @@ impl Store for RocksDB {
                 },
             }
         }
+    }
+
+    fn get_tx_out_with_mempool_spent_update(
+        &self,
+        outpoint: &OutPoint,
+        mempool: Option<bool>,
+    ) -> Result<TxOutEntry, StoreError> {
+        let mut tx_out = if let Some(mempool) = mempool {
+            self.get_tx_out(outpoint, mempool)?
+        } else {
+            match self.get_tx_out(outpoint, false) {
+                Ok(tx_out) => tx_out,
+                Err(err) => match err {
+                    RocksDBError::NotFound(_) => self.get_tx_out(outpoint, true)?,
+                    other => return Err(StoreError::DB(other)),
+                },
+            }
+        };
+
+        let spent_outpoints: HashMap<OutPoint, Option<SpenderReference>> =
+            self.get_spent_outpoints_in_mempool(&vec![*outpoint])?;
+
+        let spent_in_mempool = spent_outpoints.get(outpoint);
+
+        match spent_in_mempool {
+            Some(Some(spent)) => {
+                tx_out.spent = SpentStatus::Spent(spent.clone());
+            }
+            _ => {}
+        }
+
+        Ok(tx_out)
     }
 
     fn get_tx_outs(

@@ -11,7 +11,7 @@ use {
         index::updater::{ReorgError, UpdaterError},
         models::{block_id_to_transaction_status, Inscription, RuneEntry},
     },
-    bitcoin::{Address, BlockHash, OutPoint, ScriptBuf, Transaction as BitcoinTransaction, Txid},
+    bitcoin::{Address, BlockHash, OutPoint, Transaction as BitcoinTransaction, Txid},
     ordinals::{Rune, RuneId},
     std::{
         collections::HashMap,
@@ -24,7 +24,7 @@ use {
     },
     titan_types::{
         AddressData, AddressTxOut, Block, Event, InscriptionId, Pagination, PaginationResponse,
-        RuneAmount, SpenderReference, Transaction, TransactionStatus, TxOutEntry,
+        RuneAmount, Transaction, TransactionStatus, TxOutEntry,
     },
     tokio::{runtime::Runtime, sync::mpsc::Sender},
     tracing::{error, info, warn},
@@ -207,7 +207,7 @@ impl Index {
     }
 
     pub fn get_tx_out(&self, outpoint: &OutPoint) -> Result<TxOutEntry> {
-        Ok(self.db.get_tx_out(outpoint, None)?)
+        Ok(self.db.get_tx_out_with_mempool_spent_update(outpoint, None)?)
     }
 
     pub fn get_tx_outs(&self, outpoints: &Vec<OutPoint>) -> Result<HashMap<OutPoint, TxOutEntry>> {
