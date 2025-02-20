@@ -1,4 +1,5 @@
-use bitcoin::Txid;
+use bitcoin::{OutPoint, Txid};
+use bitcoincore_rpc::json::GetMempoolEntryResult;
 use reqwest::{header::HeaderMap, Client as AsyncReqwestClient};
 use std::str::FromStr;
 use titan_types::*;
@@ -96,20 +97,20 @@ impl TitanApiAsync for AsyncClient {
         serde_json::from_str(&text).map_err(Error::from)
     }
 
-    async fn get_transaction(&self, txid: &str) -> Result<Transaction, Error> {
+    async fn get_transaction(&self, txid: &Txid) -> Result<Transaction, Error> {
         let text = self.call_text(&format!("/tx/{}", txid)).await?;
         serde_json::from_str(&text).map_err(Error::from)
     }
 
-    async fn get_transaction_raw(&self, txid: &str) -> Result<Vec<u8>, Error> {
+    async fn get_transaction_raw(&self, txid: &Txid) -> Result<Vec<u8>, Error> {
         self.call_bytes(&format!("/tx/{}/raw", txid)).await
     }
 
-    async fn get_transaction_hex(&self, txid: &str) -> Result<String, Error> {
+    async fn get_transaction_hex(&self, txid: &Txid) -> Result<String, Error> {
         self.call_text(&format!("/tx/{}/hex", txid)).await
     }
 
-    async fn get_transaction_status(&self, txid: &str) -> Result<TransactionStatus, Error> {
+    async fn get_transaction_status(&self, txid: &Txid) -> Result<TransactionStatus, Error> {
         let text = self.call_text(&format!("/tx/{}/status", txid)).await?;
         serde_json::from_str(&text).map_err(Error::from)
     }
@@ -119,12 +120,15 @@ impl TitanApiAsync for AsyncClient {
         Txid::from_str(&text).map_err(Error::from)
     }
 
-    async fn get_output(&self, outpoint: &str) -> Result<TxOutEntry, Error> {
+    async fn get_output(&self, outpoint: &OutPoint) -> Result<TxOutEntry, Error> {
         let text = self.call_text(&format!("/output/{}", outpoint)).await?;
         serde_json::from_str(&text).map_err(Error::from)
     }
 
-    async fn get_inscription(&self, inscription_id: &str) -> Result<(HeaderMap, Vec<u8>), Error> {
+    async fn get_inscription(
+        &self,
+        inscription_id: &InscriptionId,
+    ) -> Result<(HeaderMap, Vec<u8>), Error> {
         let url = format!("{}/inscription/{}", self.base_url, inscription_id);
         let resp = self.http_client.get(&url).send().await?;
         let status = resp.status();
@@ -149,14 +153,14 @@ impl TitanApiAsync for AsyncClient {
         serde_json::from_str(&text).map_err(Error::from)
     }
 
-    async fn get_rune(&self, rune: &str) -> Result<RuneResponse, Error> {
+    async fn get_rune(&self, rune: &query::Rune) -> Result<RuneResponse, Error> {
         let text = self.call_text(&format!("/rune/{}", rune)).await?;
         serde_json::from_str(&text).map_err(Error::from)
     }
 
     async fn get_rune_transactions(
         &self,
-        rune: &str,
+        rune: &query::Rune,
         pagination: Option<Pagination>,
     ) -> Result<PaginationResponse<Txid>, Error> {
         let mut path = format!("/rune/{}/transactions", rune);
@@ -172,6 +176,11 @@ impl TitanApiAsync for AsyncClient {
         serde_json::from_str(&text).map_err(Error::from)
     }
 
+    async fn get_mempool_entry(&self, txid: &Txid) -> Result<GetMempoolEntryResult, Error> {
+        let text = self.call_text(&format!("/mempool/entry/{}", txid)).await?;
+        serde_json::from_str(&text).map_err(Error::from)
+    }
+
     async fn get_subscription(&self, id: &str) -> Result<Subscription, Error> {
         let text = self.call_text(&format!("/subscription/{}", id)).await?;
         serde_json::from_str(&text).map_err(Error::from)
@@ -183,7 +192,9 @@ impl TitanApiAsync for AsyncClient {
     }
 
     async fn add_subscription(&self, subscription: &Subscription) -> Result<Subscription, Error> {
-        let text = self.post_text("/subscription", serde_json::to_string(subscription)?).await?;
+        let text = self
+            .post_text("/subscription", serde_json::to_string(subscription)?)
+            .await?;
         serde_json::from_str(&text).map_err(Error::from)
     }
 

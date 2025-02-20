@@ -224,3 +224,25 @@ export type TitanEvent =
 export interface TcpSubscriptionRequest {
   subscribe: TitanEventType[];
 }
+
+export interface MempoolEntry {
+  ancestorcount: number;
+  ancestorsize: number;
+  bip125_replaceable: boolean;
+  depends: string[];
+  descendantcount: number;
+  descendantsize: number;
+  fees: {
+    ancestor: number;
+    base: number;
+    descendant: number;
+    modified: number;
+  };
+  height: number;
+  spentby: string[];
+  time: number;
+  unbroadcast: boolean;
+  vsize: number;
+  weight: number;
+  wtxid: string;
+}

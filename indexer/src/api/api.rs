@@ -8,13 +8,12 @@ use {
         subscription::{self, WebhookSubscriptionManager},
     },
     bitcoin::{consensus, Address, OutPoint, Txid},
-    bitcoincore_rpc::{Client, RpcApi},
+    bitcoincore_rpc::{json::GetMempoolEntryResult, Client, RpcApi},
     http::HeaderMap,
     std::sync::Arc,
     titan_types::{
         query, AddressData, Block, BlockTip, InscriptionId, Pagination, PaginationResponse,
-        RuneResponse, SpentStatus, Status, Subscription, Transaction, TransactionStatus,
-        TxOutEntry,
+        RuneResponse, Status, Subscription, Transaction, TransactionStatus, TxOutEntry,
     },
     tracing::error,
     uuid::Uuid,
@@ -192,6 +191,10 @@ pub fn transaction_status(index: Arc<Index>, txid: &Txid) -> Result<TransactionS
 
 pub fn mempool_txids(index: Arc<Index>) -> Result<Vec<Txid>> {
     Ok(index.get_mempool_txids()?)
+}
+
+pub fn mempool_tx(client: Client, txid: &Txid) -> Result<GetMempoolEntryResult> {
+    Ok(client.get_mempool_entry(txid)?)
 }
 
 pub fn address(index: Arc<Index>, address: &Address) -> Result<AddressData> {

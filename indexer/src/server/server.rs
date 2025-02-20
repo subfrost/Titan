@@ -77,6 +77,8 @@ impl Server {
             .route("/rune/{rune}/transactions", get(Self::rune_transactions))
             // Mempool
             .route("/mempool/txids", get(Self::mempool_txids))
+            // Mempool entries
+            .route("/mempool/entry/{txid}", get(Self::mempool_tx))
             // Subscriptions
             .route(
                 "/subscription/{id}",
@@ -276,6 +278,15 @@ impl Server {
         task::block_in_place(|| Ok(Json(api::mempool_txids(index)?).into_response()))
     }
 
+    async fn mempool_tx(
+        Extension(config): Extension<Arc<ServerConfig>>,
+        Path(txid): Path<Txid>,
+    ) -> ServerResult {
+        task::block_in_place(|| {
+            Ok(Json(api::mempool_tx(config.get_new_rpc_client()?, &txid)?).into_response())
+        })
+    }
+    
     async fn address(
         Extension(index): Extension<Arc<Index>>,
         Extension(config): Extension<Arc<ServerConfig>>,
@@ -283,7 +294,8 @@ impl Server {
     ) -> ServerResult {
         if !config.index_addresses {
             return Err(ServerError::BadRequest(
-                "addresses are not indexed. Enable --index-addresses to index addresses".to_string(),
+                "addresses are not indexed. Enable --index-addresses to index addresses"
+                    .to_string(),
             ));
         }
 

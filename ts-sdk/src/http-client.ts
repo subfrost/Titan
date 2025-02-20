@@ -11,6 +11,7 @@ import {
   TxOutEntry,
   TransactionStatus,
   Block,
+  MempoolEntry,
 } from './types';
 
 /**
@@ -151,6 +152,19 @@ export class TitanHttpClient {
 
   async getMempoolTxids(): Promise<string[]> {
     return await this.getOrFail<string[]>(`/mempool/txids`);
+  }
+
+  async getMempoolEntry(txid: string): Promise<MempoolEntry | undefined> {
+    return await this.get<MempoolEntry>(`/mempool/entry/${txid}`);
+  }
+
+  async getMempoolEntries(txids: string[]): Promise<MempoolEntry[]> {
+    const response = await this.http.post<MempoolEntry[]>(
+      '/mempool/entries',
+      txids,
+    );
+
+    return response.data;
   }
 
   async getSubscription(id: string): Promise<Subscription | undefined> {

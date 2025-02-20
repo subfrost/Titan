@@ -1,10 +1,10 @@
 use crate::Error;
 use async_trait::async_trait;
-use bitcoin::Txid;
+use bitcoin::{OutPoint, Txid};
+use bitcoincore_rpc::json::GetMempoolEntryResult;
 use reqwest::header::HeaderMap;
 use titan_types::{
-    query, AddressData, Block, BlockTip, Pagination, PaginationResponse, RuneResponse, Status,
-    Subscription, Transaction, TransactionStatus, TxOutEntry,
+    query, AddressData, Block, BlockTip, InscriptionId, Pagination, PaginationResponse, RuneResponse, Status, Subscription, Transaction, TransactionStatus, TxOutEntry
 };
 
 /// Trait for all **async** methods.
@@ -29,25 +29,25 @@ pub trait TitanApiAsync {
     async fn get_address(&self, address: &str) -> Result<AddressData, Error>;
 
     /// Returns a higher-level transaction object (including Runes info) by `txid`.
-    async fn get_transaction(&self, txid: &str) -> Result<Transaction, Error>;
+    async fn get_transaction(&self, txid: &Txid) -> Result<Transaction, Error>;
 
     /// Returns raw transaction bytes (binary).
-    async fn get_transaction_raw(&self, txid: &str) -> Result<Vec<u8>, Error>;
+    async fn get_transaction_raw(&self, txid: &Txid) -> Result<Vec<u8>, Error>;
 
     /// Returns raw transaction hex.
-    async fn get_transaction_hex(&self, txid: &str) -> Result<String, Error>;
+    async fn get_transaction_hex(&self, txid: &Txid) -> Result<String, Error>;
 
     /// Returns the status of a transaction by `txid`.
-    async fn get_transaction_status(&self, txid: &str) -> Result<TransactionStatus, Error>;
+    async fn get_transaction_status(&self, txid: &Txid) -> Result<TransactionStatus, Error>;
 
     /// Broadcasts a transaction (raw hex) to the network and returns the resulting `Txid`.
     async fn send_transaction(&self, tx_hex: String) -> Result<Txid, Error>;
 
     /// Fetches a specific output by outpoint (`<txid>:<vout>`).
-    async fn get_output(&self, outpoint: &str) -> Result<TxOutEntry, Error>;
+    async fn get_output(&self, outpoint: &OutPoint) -> Result<TxOutEntry, Error>;
 
     /// Returns `(HTTP Headers, Bytes)` for an inscription by its `inscription_id`.
-    async fn get_inscription(&self, inscription_id: &str) -> Result<(HeaderMap, Vec<u8>), Error>;
+    async fn get_inscription(&self, inscription_id: &InscriptionId) -> Result<(HeaderMap, Vec<u8>), Error>;
 
     /// Lists existing runes, supporting pagination.
     async fn get_runes(
@@ -56,17 +56,20 @@ pub trait TitanApiAsync {
     ) -> Result<PaginationResponse<RuneResponse>, Error>;
 
     /// Fetches data about a specific rune.
-    async fn get_rune(&self, rune: &str) -> Result<RuneResponse, Error>;
+    async fn get_rune(&self, rune: &query::Rune) -> Result<RuneResponse, Error>;
 
     /// Returns a paginated list of `Txid` for all transactions involving a given `rune`.
     async fn get_rune_transactions(
         &self,
-        rune: &str,
+        rune: &query::Rune,
         pagination: Option<Pagination>,
     ) -> Result<PaginationResponse<Txid>, Error>;
 
     /// Returns a list of all txids currently in the mempool.
     async fn get_mempool_txids(&self) -> Result<Vec<Txid>, Error>;
+
+    /// Returns a single mempool entry by `txid`.
+    async fn get_mempool_entry(&self, txid: &Txid) -> Result<GetMempoolEntryResult, Error>;
 
     /// Fetches a single subscription by `id`.
     async fn get_subscription(&self, id: &str) -> Result<Subscription, Error>;
@@ -102,25 +105,25 @@ pub trait TitanApiSync {
     fn get_address(&self, address: &str) -> Result<AddressData, Error>;
 
     /// Returns a transaction (with runic info) by `txid` in a **blocking** manner.
-    fn get_transaction(&self, txid: &str) -> Result<Transaction, Error>;
+    fn get_transaction(&self, txid: &Txid) -> Result<Transaction, Error>;
 
     /// Returns raw tx bytes in a **blocking** manner.
-    fn get_transaction_raw(&self, txid: &str) -> Result<Vec<u8>, Error>;
+    fn get_transaction_raw(&self, txid: &Txid) -> Result<Vec<u8>, Error>;
 
     /// Returns raw tx hex in a **blocking** manner.
-    fn get_transaction_hex(&self, txid: &str) -> Result<String, Error>;
+    fn get_transaction_hex(&self, txid: &Txid) -> Result<String, Error>;
 
     /// Returns the status of a transaction by `txid` in a **blocking** manner.
-    fn get_transaction_status(&self, txid: &str) -> Result<TransactionStatus, Error>;
+    fn get_transaction_status(&self, txid: &Txid) -> Result<TransactionStatus, Error>;
 
     /// Broadcasts a raw-hex transaction in a **blocking** manner.
     fn send_transaction(&self, tx_hex: String) -> Result<Txid, Error>;
 
     /// Fetches a specific output (outpoint) in a **blocking** manner.
-    fn get_output(&self, outpoint: &str) -> Result<TxOutEntry, Error>;
+    fn get_output(&self, outpoint: &OutPoint) -> Result<TxOutEntry, Error>;
 
     /// Fetches an inscription (headers + bytes) by `inscription_id`, blocking.
-    fn get_inscription(&self, inscription_id: &str) -> Result<(HeaderMap, Vec<u8>), Error>;
+    fn get_inscription(&self, inscription_id: &InscriptionId) -> Result<(HeaderMap, Vec<u8>), Error>;
 
     /// Returns paginated runes in a **blocking** manner.
     fn get_runes(
@@ -129,17 +132,20 @@ pub trait TitanApiSync {
     ) -> Result<PaginationResponse<RuneResponse>, Error>;
 
     /// Fetches data for a specific rune in a **blocking** manner.
-    fn get_rune(&self, rune: &str) -> Result<RuneResponse, Error>;
+    fn get_rune(&self, rune: &query::Rune) -> Result<RuneResponse, Error>;
 
     /// Returns transactions for a given rune in a **blocking** manner.
     fn get_rune_transactions(
         &self,
-        rune: &str,
+        rune: &query::Rune,
         pagination: Option<Pagination>,
     ) -> Result<PaginationResponse<Txid>, Error>;
 
     /// Returns mempool txids in a **blocking** manner.
     fn get_mempool_txids(&self) -> Result<Vec<Txid>, Error>;
+
+    /// Returns a single mempool entry by `txid`.
+    fn get_mempool_entry(&self, txid: &Txid) -> Result<GetMempoolEntryResult, Error>;
 
     /// Fetches a single subscription by `id`, blocking.
     fn get_subscription(&self, id: &str) -> Result<Subscription, Error>;

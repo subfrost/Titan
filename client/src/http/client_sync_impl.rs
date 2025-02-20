@@ -1,5 +1,6 @@
-use bitcoin::Txid;
-use reqwest::{blocking::Client as BlockingReqwestClient, header::HeaderMap, StatusCode};
+use bitcoin::{OutPoint, Txid};
+use bitcoincore_rpc::json::GetMempoolEntryResult;
+use reqwest::{blocking::Client as BlockingReqwestClient, header::HeaderMap};
 use std::str::FromStr;
 use titan_types::*;
 
@@ -97,20 +98,20 @@ impl TitanApiSync for SyncClient {
         serde_json::from_str(&text).map_err(Error::from)
     }
 
-    fn get_transaction(&self, txid: &str) -> Result<Transaction, Error> {
+    fn get_transaction(&self, txid: &Txid) -> Result<Transaction, Error> {
         let text = self.call_text(&format!("/tx/{}", txid))?;
         serde_json::from_str(&text).map_err(Error::from)
     }
 
-    fn get_transaction_raw(&self, txid: &str) -> Result<Vec<u8>, Error> {
+    fn get_transaction_raw(&self, txid: &Txid) -> Result<Vec<u8>, Error> {
         self.call_bytes(&format!("/tx/{}/raw", txid))
     }
 
-    fn get_transaction_hex(&self, txid: &str) -> Result<String, Error> {
+    fn get_transaction_hex(&self, txid: &Txid) -> Result<String, Error> {
         self.call_text(&format!("/tx/{}/hex", txid))
     }
 
-    fn get_transaction_status(&self, txid: &str) -> Result<TransactionStatus, Error> {
+    fn get_transaction_status(&self, txid: &Txid) -> Result<TransactionStatus, Error> {
         let text = self.call_text(&format!("/tx/{}/status", txid))?;
         serde_json::from_str(&text).map_err(Error::from)
     }
@@ -120,12 +121,15 @@ impl TitanApiSync for SyncClient {
         Txid::from_str(&text).map_err(Error::from)
     }
 
-    fn get_output(&self, outpoint: &str) -> Result<TxOutEntry, Error> {
+    fn get_output(&self, outpoint: &OutPoint) -> Result<TxOutEntry, Error> {
         let text = self.call_text(&format!("/output/{}", outpoint))?;
         serde_json::from_str(&text).map_err(Error::from)
     }
 
-    fn get_inscription(&self, inscription_id: &str) -> Result<(HeaderMap, Vec<u8>), Error> {
+    fn get_inscription(
+        &self,
+        inscription_id: &InscriptionId,
+    ) -> Result<(HeaderMap, Vec<u8>), Error> {
         let url = format!("{}/inscription/{}", self.base_url, inscription_id);
         let resp = self.http_client.get(&url).send()?;
         let status = resp.status();
@@ -151,7 +155,7 @@ impl TitanApiSync for SyncClient {
         Ok(resp.json()?)
     }
 
-    fn get_rune(&self, rune: &str) -> Result<RuneResponse, Error> {
+    fn get_rune(&self, rune: &query::Rune) -> Result<RuneResponse, Error> {
         let url = format!("{}/rune/{}", self.base_url, rune);
         let resp = self.http_client.get(&url).send()?;
         Ok(resp.json()?)
@@ -159,7 +163,7 @@ impl TitanApiSync for SyncClient {
 
     fn get_rune_transactions(
         &self,
-        rune: &str,
+        rune: &query::Rune,
         pagination: Option<Pagination>,
     ) -> Result<PaginationResponse<Txid>, Error> {
         let url = format!("{}/rune/{}/transactions", self.base_url, rune);
@@ -173,6 +177,11 @@ impl TitanApiSync for SyncClient {
 
     fn get_mempool_txids(&self) -> Result<Vec<Txid>, Error> {
         let text = self.call_text("/mempool/txids")?;
+        serde_json::from_str(&text).map_err(Error::from)
+    }
+
+    fn get_mempool_entry(&self, txid: &Txid) -> Result<GetMempoolEntryResult, Error> {
+        let text = self.call_text(&format!("/mempool/entry/{}", txid))?;
         serde_json::from_str(&text).map_err(Error::from)
     }
 

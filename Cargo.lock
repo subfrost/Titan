@@ -2627,6 +2627,7 @@ version = "0.1.16"
 dependencies = [
  "async-trait",
  "bitcoin",
+ "bitcoincore-rpc",
  "reqwest",
  "serde",
  "serde_json",

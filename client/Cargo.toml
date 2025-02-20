@@ -15,6 +15,7 @@ keywords = ["bitcoin", "indexer", "runes", "rust"]
 titan-types = { workspace = true }
 
 bitcoin = { workspace = true }
+bitcoincore-rpc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
