@@ -215,7 +215,6 @@ impl Updater {
                 cache.set_new_block(block);
 
                 if cache.should_flush(commit_interval) {
-                    // 5) If index_addresses is enabled, do one big pass
                     if self.settings.index_addresses {
                         let _timer = self
                             .latency
@@ -431,7 +430,7 @@ impl Updater {
         Ok(block)
     }
 
-    pub fn index_new_tx(&self, txid: &Txid, tx: &Transaction) -> Result<()> {
+    pub fn index_new_tx(&self, txid: &Txid, tx: &Transaction, broadcast: bool) -> Result<()> {
         let _mempool_indexing = self
             .mempool_indexing
             .lock()
@@ -446,18 +445,23 @@ impl Updater {
         if self.index_tx(txid, tx, &mut cache, Some(&mut address_updater))? {
             self.mempool_debouncer.write().unwrap().mark_as_added(*txid);
 
-            cache.add_event(Event::TransactionsAdded {
-                txids: vec![*txid].into_iter().collect(),
-            });
+            if broadcast {
+                cache.add_event(Event::TransactionSubmitted { txid: *txid });
+            } else {
+                cache.add_event(Event::TransactionsAdded {
+                    txids: vec![*txid].into_iter().collect(),
+                });
+            }
+
+            if self.settings.index_addresses {
+                address_updater.batch_update_script_pubkey(&mut cache)?;
+            }
+
+            cache.add_address_events(self.settings.chain);
+            cache.flush()?;
+            cache.send_events(&self.sender)?;
         }
 
-        if self.settings.index_addresses {
-            address_updater.batch_update_script_pubkey(&mut cache)?;
-        }
-
-        cache.add_address_events(self.settings.chain);
-        cache.flush()?;
-        cache.send_events(&self.sender)?;
         Ok(())
     }
 

@@ -127,7 +127,7 @@ fn handle_raw_tx(
 
         // Spawn a new thread to do the update work.
         thread::spawn(
-            move || match updater_clone.index_new_tx(&txid_clone, &tx_clone) {
+            move || match updater_clone.index_new_tx(&txid_clone, &tx_clone, false) {
                 Ok(()) => debug!("Indexed tx {}", txid_clone),
                 Err(e) => error!("Failed to index tx {}: {:?}", txid_clone, e),
             },

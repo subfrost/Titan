@@ -15,6 +15,7 @@ pub enum EventType {
     RuneMinted,
     RuneTransferred,
     AddressModified,
+    TransactionSubmitted,
     TransactionsAdded,
     TransactionsReplaced,
     NewBlock,
@@ -29,6 +30,7 @@ impl From<Event> for EventType {
             Event::RuneMinted { .. } => EventType::RuneMinted,
             Event::RuneTransferred { .. } => EventType::RuneTransferred,
             Event::AddressModified { .. } => EventType::AddressModified,
+            Event::TransactionSubmitted { .. } => EventType::TransactionSubmitted,
             Event::TransactionsAdded { .. } => EventType::TransactionsAdded,
             Event::TransactionsReplaced { .. } => EventType::TransactionsReplaced,
             Event::NewBlock { .. } => EventType::NewBlock,
@@ -46,6 +48,7 @@ impl fmt::Display for EventType {
             EventType::RuneMinted => write!(f, "RuneMinted"),
             EventType::RuneTransferred => write!(f, "RuneTransferred"),
             EventType::AddressModified => write!(f, "AddressModified"),
+            EventType::TransactionSubmitted => write!(f, "TransactionSubmitted"),
             EventType::TransactionsAdded => write!(f, "TransactionsAdded"),
             EventType::TransactionsReplaced => write!(f, "TransactionsReplaced"),
             EventType::NewBlock => write!(f, "NewBlock"),
@@ -127,6 +130,9 @@ pub enum Event {
     AddressModified {
         address: String,
         location: Location,
+    },
+    TransactionSubmitted {
+        txid: Txid,
     },
     TransactionsAdded {
         txids: Vec<Txid>,

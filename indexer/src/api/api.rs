@@ -131,7 +131,7 @@ pub fn last_rune_transactions(
 pub fn broadcast_transaction(index: Arc<Index>, client: Client, hex: &str) -> Result<Txid> {
     let txid = client.send_raw_transaction(hex)?;
     let transaction = consensus::deserialize(&hex::decode(hex)?)?;
-    index.index_new_transaction(&txid, &transaction);
+    index.index_new_submitted_transaction(&txid, &transaction);
     Ok(txid)
 }
 

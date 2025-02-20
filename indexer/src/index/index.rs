@@ -339,8 +339,8 @@ impl Index {
         }
     }
 
-    pub fn index_new_transaction(&self, txid: &Txid, tx: &BitcoinTransaction) {
-        match self.updater.index_new_tx(txid, tx) {
+    pub fn index_new_submitted_transaction(&self, txid: &Txid, tx: &BitcoinTransaction) {
+        match self.updater.index_new_tx(txid, tx, true) {
             Ok(_) => (),
             Err(e) => {
                 error!("Failed to index new transaction after broadcast: {}", e);
