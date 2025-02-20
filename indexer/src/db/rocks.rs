@@ -1034,15 +1034,20 @@ impl RocksDB {
 
         let results = self.db.multi_get_cf(keys);
 
+        let mut to_remove = Vec::new();
         for (i, result) in results.iter().enumerate() {
             match result {
                 Ok(Some(_)) => {
                     exists.push(not_exists[i].clone());
-                    not_exists.remove(i);
+                    to_remove.push(i);
                 }
                 Ok(None) => {}
                 Err(e) => return Err(e.clone().into()),
             }
+        }
+
+        for i in to_remove.iter().rev() {
+            not_exists.remove(*i);
         }
 
         Ok((exists, not_exists))
