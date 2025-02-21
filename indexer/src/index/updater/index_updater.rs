@@ -19,18 +19,18 @@ use {
     cache::{UpdaterCache, UpdaterCacheSettings},
     indicatif::{ProgressBar, ProgressStyle},
     mempool::MempoolError,
-    mempool_removal_grace::MempoolRemovalGrace,
     ordinals::{Rune, RuneId, SpacedRune, Terms},
     prometheus::HistogramVec,
     rollback::{Rollback, RollbackError},
     std::{
+        collections::HashMap,
         fmt::{self, Display, Formatter},
         str::FromStr,
         sync::{
             atomic::{AtomicBool, Ordering},
             Arc, Mutex, RwLock,
         },
-        time::{Duration, SystemTime, UNIX_EPOCH},
+        time::{SystemTime, UNIX_EPOCH},
     },
     store_lock::StoreWithLock,
     thiserror::Error,
@@ -99,8 +99,8 @@ pub struct Updater {
 
     shutdown_flag: Arc<AtomicBool>,
 
-    mempool_indexing: Mutex<bool>,
-    mempool_debouncer: RwLock<MempoolRemovalGrace>,
+    broadcast_lock: Mutex<()>,
+    zmq_received_txs: RwLock<HashMap<Txid, Transaction>>,
 
     transaction_update: RwLock<TransactionUpdate>,
 
@@ -118,14 +118,13 @@ impl Updater {
         shutdown_flag: Arc<AtomicBool>,
         sender: Option<Sender<Event>>,
     ) -> Self {
-        let debounce_duration = Duration::from_millis(settings.main_loop_interval);
         Self {
             db: Arc::new(StoreWithLock::new(db)),
             settings,
             is_at_tip: AtomicBool::new(false),
-            mempool_indexing: Mutex::new(false),
+            broadcast_lock: Mutex::new(()),
+            zmq_received_txs: RwLock::new(HashMap::new()),
             shutdown_flag,
-            mempool_debouncer: RwLock::new(MempoolRemovalGrace::new(debounce_duration)),
             transaction_update: RwLock::new(TransactionUpdate::default()),
             sender,
             latency: metrics.histogram_vec(
@@ -277,12 +276,8 @@ impl Updater {
 
         let client = self.settings.get_new_rpc_client()?;
 
-        let _mempool_indexing = self
-            .mempool_indexing
-            .lock()
-            .map_err(|_| UpdaterError::Mutex)?;
-
         // Get current mempool transactions
+        let lock = self.broadcast_lock.lock().unwrap();
         let current_mempool = client.get_raw_mempool_verbose()?;
 
         // Get our previously indexed mempool transactions
@@ -290,7 +285,8 @@ impl Updater {
             let db = self.db.read();
             db.get_mempool_txids()?
         };
-
+        drop(lock);
+        
         // Find new transactions to index
         let new_txs: Vec<Txid> = current_mempool
             .iter()
@@ -308,22 +304,44 @@ impl Updater {
         // Index new transactions
         let new_txs_len = new_txs.len();
         if new_txs_len > 0 {
-            let tx_map = mempool::fetch_transactions(
-                Arc::new(self.settings.clone()),
-                &new_txs,
-                self.shutdown_flag.clone(),
-            );
+            let tx_map = {
+                let mut zmq_txns = self
+                    .zmq_received_txs
+                    .read()
+                    .map_err(|_| UpdaterError::Mutex)?
+                    .clone();
+
+                let (to_index, to_fetch): (Vec<Txid>, Vec<Txid>) = new_txs
+                    .iter()
+                    .partition(|txid| zmq_txns.contains_key(*txid));
+
+                if to_index.len() != zmq_txns.len() {
+                    zmq_txns.retain(|txid, _| to_index.contains(txid));
+                }
+
+                if !to_fetch.is_empty() {
+                    let fetched = mempool::fetch_transactions(
+                        Arc::new(self.settings.clone()),
+                        &to_fetch,
+                        self.shutdown_flag.clone(),
+                    );
+
+                    zmq_txns.extend(fetched);
+                }
+
+                zmq_txns
+            };
+
             let tx_order = mempool::sort_transaction_order(&current_mempool, &tx_map)?;
             let mut cache = UpdaterCache::new(
                 self.db.clone(),
                 UpdaterCacheSettings::new(&self.settings, true),
             )?;
+
             let mut address_updater = AddressUpdater::new();
             for txid in tx_order {
                 let tx = tx_map.get(&txid).unwrap();
-                if self.index_tx(&txid, &tx, &mut cache, Some(&mut address_updater))? {
-                    self.mempool_debouncer.write().unwrap().mark_as_added(txid);
-                }
+                self.index_tx(&txid, &tx, &mut cache, Some(&mut address_updater))?;
             }
 
             if self.settings.index_addresses {
@@ -335,15 +353,9 @@ impl Updater {
             cache.send_events(&self.sender)?;
         }
 
-        let removed_txns = {
-            let mut debouncer = self.mempool_debouncer.write().unwrap();
-            debouncer.expire_old_entries();
-            debouncer.filter_removable_txs(&removed_txs)
-        };
-
-        let removed_len = removed_txns.len();
-        if removed_txns.len() > 0 {
-            self.remove_txs(&removed_txns, true)?;
+        let removed_len = removed_txs.len();
+        if removed_txs.len() > 0 {
+            self.remove_txs(&removed_txs, true)?;
         }
 
         if new_txs_len > 0 || removed_len > 0 {
@@ -360,6 +372,11 @@ impl Updater {
                 added: new_txs.into_iter().collect(),
                 removed: removed_txs.into_iter().collect(),
             });
+
+        self.zmq_received_txs
+            .write()
+            .map_err(|_| UpdaterError::Mutex)?
+            .clear();
 
         Ok(())
     }
@@ -430,28 +447,16 @@ impl Updater {
         Ok(block)
     }
 
-    pub fn index_new_tx(&self, txid: &Txid, tx: &Transaction, broadcast: bool) -> Result<()> {
-        let _mempool_indexing = self
-            .mempool_indexing
-            .lock()
-            .map_err(|_| UpdaterError::Mutex)?;
-
+    pub fn index_new_broadcasted_tx(&self, txid: &Txid, tx: &Transaction) -> Result<()> {
         let mut cache = UpdaterCache::new(
             self.db.clone(),
             UpdaterCacheSettings::new(&self.settings, true),
         )?;
 
+        let _lock = self.broadcast_lock.lock().unwrap();
         let mut address_updater = AddressUpdater::new();
         if self.index_tx(txid, tx, &mut cache, Some(&mut address_updater))? {
-            self.mempool_debouncer.write().unwrap().mark_as_added(*txid);
-
-            if broadcast {
-                cache.add_event(Event::TransactionSubmitted { txid: *txid });
-            } else {
-                cache.add_event(Event::TransactionsAdded {
-                    txids: vec![*txid].into_iter().collect(),
-                });
-            }
+            cache.add_event(Event::TransactionSubmitted { txid: *txid });
 
             if self.settings.index_addresses {
                 address_updater.batch_update_script_pubkey(&mut cache)?;
@@ -462,6 +467,14 @@ impl Updater {
             cache.send_events(&self.sender)?;
         }
 
+        Ok(())
+    }
+
+    pub fn index_zmq_tx(&self, txid: Txid, tx: Transaction) -> Result<()> {
+        self.zmq_received_txs
+            .write()
+            .map_err(|_| UpdaterError::Mutex)?
+            .insert(txid, tx);
         Ok(())
     }
 

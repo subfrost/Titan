@@ -207,7 +207,9 @@ impl Index {
     }
 
     pub fn get_tx_out(&self, outpoint: &OutPoint) -> Result<TxOutEntry> {
-        Ok(self.db.get_tx_out_with_mempool_spent_update(outpoint, None)?)
+        Ok(self
+            .db
+            .get_tx_out_with_mempool_spent_update(outpoint, None)?)
     }
 
     pub fn get_tx_outs(&self, outpoints: &Vec<OutPoint>) -> Result<HashMap<OutPoint, TxOutEntry>> {
@@ -340,7 +342,7 @@ impl Index {
     }
 
     pub fn index_new_submitted_transaction(&self, txid: &Txid, tx: &BitcoinTransaction) {
-        match self.updater.index_new_tx(txid, tx, true) {
+        match self.updater.index_new_broadcasted_tx(txid, tx) {
             Ok(_) => (),
             Err(e) => {
                 error!("Failed to index new transaction after broadcast: {}", e);

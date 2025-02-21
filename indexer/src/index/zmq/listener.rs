@@ -121,17 +121,11 @@ fn handle_raw_tx(
     if updater.is_at_tip() {
         // Clone the Arc so the thread can use it.
         let updater_clone = Arc::clone(updater);
-        // Clone the transaction if needed.
-        let tx_clone = tx.clone();
-        let txid_clone = txid; // Txid is Copy
 
-        // Spawn a new thread to do the update work.
-        thread::spawn(
-            move || match updater_clone.index_new_tx(&txid_clone, &tx_clone, false) {
-                Ok(()) => debug!("Indexed tx {}", txid_clone),
-                Err(e) => error!("Failed to index tx {}: {:?}", txid_clone, e),
-            },
-        );
+        match updater_clone.index_zmq_tx(txid, tx) {
+            Ok(()) => debug!("Indexed tx {}", txid),
+            Err(e) => error!("Failed to index tx {}: {:?}", txid, e),
+        }
     }
 
     Ok(())
