@@ -23,7 +23,7 @@ use {
     prometheus::HistogramVec,
     rollback::{Rollback, RollbackError},
     std::{
-        collections::HashMap,
+        collections::{HashMap, HashSet},
         fmt::{self, Display, Formatter},
         str::FromStr,
         sync::{
@@ -100,6 +100,8 @@ pub struct Updater {
     shutdown_flag: Arc<AtomicBool>,
 
     broadcast_lock: Mutex<()>,
+    pre_index_submitted_txs: RwLock<HashSet<Txid>>,
+
     zmq_received_txs: RwLock<HashMap<Txid, Transaction>>,
 
     transaction_update: RwLock<TransactionUpdate>,
@@ -123,6 +125,7 @@ impl Updater {
             settings,
             is_at_tip: AtomicBool::new(false),
             broadcast_lock: Mutex::new(()),
+            pre_index_submitted_txs: RwLock::new(HashSet::new()),
             zmq_received_txs: RwLock::new(HashMap::new()),
             shutdown_flag,
             transaction_update: RwLock::new(TransactionUpdate::default()),
@@ -286,7 +289,7 @@ impl Updater {
             db.get_mempool_txids()?
         };
         drop(lock);
-        
+
         // Find new transactions to index
         let new_txs: Vec<Txid> = current_mempool
             .iter()
@@ -304,33 +307,7 @@ impl Updater {
         // Index new transactions
         let new_txs_len = new_txs.len();
         if new_txs_len > 0 {
-            let tx_map = {
-                let mut zmq_txns = self
-                    .zmq_received_txs
-                    .read()
-                    .map_err(|_| UpdaterError::Mutex)?
-                    .clone();
-
-                let (to_index, to_fetch): (Vec<Txid>, Vec<Txid>) = new_txs
-                    .iter()
-                    .partition(|txid| zmq_txns.contains_key(*txid));
-
-                if to_index.len() != zmq_txns.len() {
-                    zmq_txns.retain(|txid, _| to_index.contains(txid));
-                }
-
-                if !to_fetch.is_empty() {
-                    let fetched = mempool::fetch_transactions(
-                        Arc::new(self.settings.clone()),
-                        &to_fetch,
-                        self.shutdown_flag.clone(),
-                    );
-
-                    zmq_txns.extend(fetched);
-                }
-
-                zmq_txns
-            };
+            let tx_map = self.choose_mempool_transactions_to_index(&new_txs)?;
 
             let tx_order = mempool::sort_transaction_order(&current_mempool, &tx_map)?;
             let mut cache = UpdaterCache::new(
@@ -379,6 +356,61 @@ impl Updater {
             .clear();
 
         Ok(())
+    }
+
+    fn choose_mempool_transactions_to_index(
+        &self,
+        new_txs: &Vec<Txid>,
+    ) -> Result<HashMap<Txid, Transaction>> {
+        // Filter out pre-indexed transactions
+        let new_txs = {
+            let pre_indexed_txs = self
+                .pre_index_submitted_txs
+                .read()
+                .map_err(|_| UpdaterError::Mutex)?
+                .clone();
+
+            new_txs
+                .iter()
+                .filter(|txid| !pre_indexed_txs.contains(*txid))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+
+        // Get all zmq transactions that we have received.
+        let mut zmq_txns = {
+            let zmq_txns = self
+                .zmq_received_txs
+                .read()
+                .map_err(|_| UpdaterError::Mutex)?
+                .clone();
+
+            zmq_txns
+        };
+
+        // Partition the new transactions into those that we already have and those that we need to fetch.
+        let (to_index, to_fetch): (Vec<Txid>, Vec<Txid>) = new_txs
+            .iter()
+            .partition(|txid| zmq_txns.contains_key(*txid));
+
+        // If we don't have all the transactions that we received, remove the ones that we don't have.
+        if to_index.len() != zmq_txns.len() {
+            zmq_txns.retain(|txid, _| to_index.contains(txid));
+        }
+
+        // Fetch the transactions that we need to index.
+        if !to_fetch.is_empty() {
+            let fetched = mempool::fetch_transactions(
+                Arc::new(self.settings.clone()),
+                &to_fetch,
+                self.shutdown_flag.clone(),
+            );
+
+            zmq_txns.extend(fetched);
+        }
+
+        // Return the transactions that we need to index.
+        Ok(zmq_txns)
     }
 
     fn index_block(
@@ -447,14 +479,33 @@ impl Updater {
         Ok(block)
     }
 
-    pub fn index_new_broadcasted_tx(&self, txid: &Txid, tx: &Transaction) -> Result<()> {
+    pub fn pre_index_new_submitted_transaction(&self, txid: &Txid) -> Result<()> {
+        let mut pre_index_submitted_txs = self
+            .pre_index_submitted_txs
+            .write()
+            .map_err(|_| UpdaterError::Mutex)?;
+        pre_index_submitted_txs.insert(*txid);
+        Ok(())
+    }
+
+    pub fn remove_pre_index_new_submitted_transaction(&self, txid: &Txid) -> Result<()> {
+        let mut pre_index_submitted_txs = self
+            .pre_index_submitted_txs
+            .write()
+            .map_err(|_| UpdaterError::Mutex)?;
+        pre_index_submitted_txs.remove(txid);
+        Ok(())
+    }
+
+    pub fn index_new_submitted_tx(&self, txid: &Txid, tx: &Transaction) -> Result<()> {
         let mut cache = UpdaterCache::new(
             self.db.clone(),
             UpdaterCacheSettings::new(&self.settings, true),
         )?;
 
-        let _lock = self.broadcast_lock.lock().unwrap();
         let mut address_updater = AddressUpdater::new();
+        
+        let _lock = self.broadcast_lock.lock().unwrap();
         if self.index_tx(txid, tx, &mut cache, Some(&mut address_updater))? {
             cache.add_event(Event::TransactionSubmitted { txid: *txid });
 
@@ -467,6 +518,7 @@ impl Updater {
             cache.send_events(&self.sender)?;
         }
 
+        self.remove_pre_index_new_submitted_transaction(&txid)?;
         Ok(())
     }
 

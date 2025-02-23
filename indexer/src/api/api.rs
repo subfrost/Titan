@@ -129,10 +129,23 @@ pub fn last_rune_transactions(
 }
 
 pub fn broadcast_transaction(index: Arc<Index>, client: Client, hex: &str) -> Result<Txid> {
-    let txid = client.send_raw_transaction(hex)?;
-    let transaction = consensus::deserialize(&hex::decode(hex)?)?;
-    index.index_new_submitted_transaction(&txid, &transaction);
-    Ok(txid)
+    let transaction: bitcoin::Transaction = consensus::deserialize(&hex::decode(hex)?)?;
+    let txid = transaction.compute_txid();
+
+    index.pre_index_new_submitted_transaction(&txid)?;
+
+    let new_txid = match client.send_raw_transaction(hex) {
+        Ok(txid) => txid,
+        Err(e) => {
+            index.remove_pre_index_new_submitted_transaction(&txid)?;
+            return Err(ApiError::RpcError(e));
+        }
+    };
+
+    assert_eq!(new_txid, txid, "txid mismatch");
+
+    index.index_new_submitted_transaction(&new_txid, &transaction);
+    Ok(new_txid)
 }
 
 pub fn bitcoin_transaction_raw(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Vec<u8>> {

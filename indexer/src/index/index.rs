@@ -40,6 +40,8 @@ pub enum IndexError {
     RpcClientError(#[from] RpcClientError),
     #[error("rpc api error: {0}")]
     RpcApiError(#[from] bitcoincore_rpc::Error),
+    #[error("updater error: {0}")]
+    UpdaterError(#[from] UpdaterError),
 }
 
 type Result<T> = std::result::Result<T, IndexError>;
@@ -341,8 +343,18 @@ impl Index {
         }
     }
 
+    pub fn pre_index_new_submitted_transaction(&self, txid: &Txid) -> Result<()> {
+        Ok(self.updater.pre_index_new_submitted_transaction(txid)?)
+    }
+
+    pub fn remove_pre_index_new_submitted_transaction(&self, txid: &Txid) -> Result<()> {
+        Ok(self
+            .updater
+            .remove_pre_index_new_submitted_transaction(txid)?)
+    }
+
     pub fn index_new_submitted_transaction(&self, txid: &Txid, tx: &BitcoinTransaction) {
-        match self.updater.index_new_broadcasted_tx(txid, tx) {
+        match self.updater.index_new_submitted_tx(txid, tx) {
             Ok(_) => (),
             Err(e) => {
                 error!("Failed to index new transaction after broadcast: {}", e);
