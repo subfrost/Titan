@@ -190,8 +190,11 @@ export class TitanHttpClient {
     }
   }
 
-  private async getOrFail<T>(path: string, params?: any): Promise<T> {
-    const response = await this.http.get<T>(path, { params });
+  private async getOrFail<T>(
+    path: string,
+    config?: AxiosRequestConfig,
+  ): Promise<T> {
+    const response = await this.http.get<T>(path, config);
     return response.data;
   }
 

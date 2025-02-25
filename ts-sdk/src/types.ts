@@ -107,7 +107,7 @@ export interface RuneResponse {
   max_supply: string;
   spaced_rune: string;
   symbol?: string;
-  mint?: MintResponse;
+  mint: MintResponse | null;
   pending_burns: string;
   pending_mints: string;
   inscription_id?: string;

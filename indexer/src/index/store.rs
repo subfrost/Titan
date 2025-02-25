@@ -232,9 +232,10 @@ impl Store for RocksDB {
             runes.push((rune_id, rune_entry));
         }
 
+        let offset = skip + runes.len() as u64;
         Ok(PaginationResponse {
             items: runes,
-            offset: start,
+            offset,
         })
     }
 

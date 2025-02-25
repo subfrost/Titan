@@ -1,10 +1,10 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Pagination {
     #[serde(default = "default_skip")]
     pub skip: u64,
-    #[serde(default = "default_limit")]
+    #[serde(default = "default_limit", deserialize_with = "clamp_limit")]
     pub limit: u64,
 }
 
@@ -12,7 +12,7 @@ impl Default for Pagination {
     fn default() -> Self {
         Pagination {
             skip: 0,
-            limit: u64::MAX,
+            limit: default_limit(),
         }
     }
 }
@@ -22,7 +22,17 @@ fn default_skip() -> u64 {
 }
 
 fn default_limit() -> u64 {
-    u64::MAX
+    50
+}
+
+fn clamp_limit<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let limit = u64::deserialize(deserializer)?;
+
+    // Clamp the limit to a maximum of 50 entries.
+    Ok(limit.min(default_limit()))
 }
 
 impl Into<Pagination> for (u64, u64) {
