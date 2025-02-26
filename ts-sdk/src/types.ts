@@ -225,24 +225,20 @@ export interface TcpSubscriptionRequest {
   subscribe: TitanEventType[];
 }
 
+export interface MempoolEntryFee {
+  base: number;
+  modified: number;
+  ancestor: number;
+}
+
 export interface MempoolEntry {
-  ancestorcount: number;
-  ancestorsize: number;
-  bip125_replaceable: boolean;
-  depends: string[];
-  descendantcount: number;
-  descendantsize: number;
-  fees: {
-    ancestor: number;
-    base: number;
-    descendant: number;
-    modified: number;
-  };
-  height: number;
-  spentby: string[];
-  time: number;
-  unbroadcast: boolean;
   vsize: number;
-  weight: number;
-  wtxid: string;
+  weight: number | null;
+  descendant_count: number;
+  descendant_size: number;
+  ancestor_count: number;
+  ancestor_size: number;
+  fees: MempoolEntryFee;
+  depends: string[];
+  spentby: string[];
 }

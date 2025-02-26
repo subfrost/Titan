@@ -7,7 +7,7 @@ use {
     bitcoin::{OutPoint, Transaction, Txid},
     ordinals::{Artifact, Etching, Rune, RuneId, Runestone, SpacedRune},
     thiserror::Error,
-    titan_types::{Event, SpenderReference, SpentStatus, TxOutEntry},
+    titan_types::{Event, MempoolEntry, SpenderReference, SpentStatus, TxOutEntry},
     tokio::sync::mpsc::error::SendError,
 };
 
@@ -62,6 +62,7 @@ impl<'a> TransactionUpdater<'a> {
         txid: Txid,
         transaction: &Transaction,
         transaction_state_change: &TransactionStateChange,
+        mempool_entry: Option<MempoolEntry>,
     ) -> Result<()> {
         // Update burned rune
         for (rune_id, amount) in transaction_state_change.burned.iter() {
@@ -155,8 +156,8 @@ impl<'a> TransactionUpdater<'a> {
             self.update_script_pubkeys(txid, transaction);
         }
 
-        if cache.settings.mempool {
-            cache.set_mempool_tx(txid.clone());
+        if let Some(mempool_entry) = mempool_entry {
+            cache.set_mempool_tx(txid, mempool_entry);
         }
 
         Ok(())

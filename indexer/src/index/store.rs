@@ -11,8 +11,8 @@ use {
     std::collections::{HashMap, HashSet},
     thiserror::Error,
     titan_types::{
-        Block, InscriptionId, Pagination, PaginationResponse, SpenderReference, SpentStatus,
-        Transaction, TransactionStatus, TxOutEntry,
+        Block, InscriptionId, MempoolEntry, Pagination, PaginationResponse, SpenderReference,
+        SpentStatus, Transaction, TransactionStatus, TxOutEntry,
     },
 };
 
@@ -63,7 +63,12 @@ pub trait Store {
 
     // mempool
     fn is_tx_in_mempool(&self, txid: &Txid) -> Result<bool, StoreError>;
-    fn get_mempool_txids(&self) -> Result<HashSet<Txid>, StoreError>;
+    fn get_mempool_txids(&self) -> Result<HashMap<Txid, MempoolEntry>, StoreError>;
+    fn get_mempool_entry(&self, txid: &Txid) -> Result<MempoolEntry, StoreError>;
+    fn get_mempool_entries(
+        &self,
+        txids: &Vec<Txid>,
+    ) -> Result<HashMap<Txid, Option<MempoolEntry>>, StoreError>;
 
     // outpoint
     fn get_tx_out(
@@ -239,12 +244,23 @@ impl Store for RocksDB {
         })
     }
 
-    fn get_mempool_txids(&self) -> Result<HashSet<Txid>, StoreError> {
+    fn get_mempool_txids(&self) -> Result<HashMap<Txid, MempoolEntry>, StoreError> {
         Ok(self.get_mempool_txids()?)
     }
 
     fn is_tx_in_mempool(&self, txid: &Txid) -> Result<bool, StoreError> {
         Ok(self.is_tx_in_mempool(txid)?)
+    }
+
+    fn get_mempool_entry(&self, txid: &Txid) -> Result<MempoolEntry, StoreError> {
+        Ok(self.get_mempool_entry(txid)?)
+    }
+
+    fn get_mempool_entries(
+        &self,
+        txids: &Vec<Txid>,
+    ) -> Result<HashMap<Txid, Option<MempoolEntry>>, StoreError> {
+        Ok(self.get_mempool_entries(txids)?)
     }
 
     fn get_tx_out(

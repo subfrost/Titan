@@ -8,12 +8,13 @@ use {
         subscription::{self, WebhookSubscriptionManager},
     },
     bitcoin::{consensus, Address, OutPoint, Txid},
-    bitcoincore_rpc::{json::GetMempoolEntryResult, Client, RpcApi},
+    bitcoincore_rpc::{Client, RpcApi},
     http::HeaderMap,
-    std::sync::Arc,
+    std::{collections::HashMap, sync::Arc},
     titan_types::{
-        query, AddressData, Block, BlockTip, InscriptionId, Pagination, PaginationResponse,
-        RuneResponse, Status, Subscription, Transaction, TransactionStatus, TxOutEntry,
+        query, AddressData, Block, BlockTip, InscriptionId, MempoolEntry, Pagination,
+        PaginationResponse, RuneResponse, Status, Subscription, Transaction, TransactionStatus,
+        TxOutEntry,
     },
     tracing::error,
     uuid::Uuid,
@@ -144,7 +145,13 @@ pub fn broadcast_transaction(index: Arc<Index>, client: Client, hex: &str) -> Re
 
     assert_eq!(new_txid, txid, "txid mismatch");
 
-    index.index_new_submitted_transaction(&new_txid, &transaction);
+    let mempool_entry = client.get_mempool_entry(&new_txid)?;
+
+    index.index_new_submitted_transaction(
+        &new_txid,
+        &transaction,
+        MempoolEntry::from(&mempool_entry),
+    );
     Ok(new_txid)
 }
 
@@ -206,8 +213,15 @@ pub fn mempool_txids(index: Arc<Index>) -> Result<Vec<Txid>> {
     Ok(index.get_mempool_txids()?)
 }
 
-pub fn mempool_tx(client: Client, txid: &Txid) -> Result<GetMempoolEntryResult> {
-    Ok(client.get_mempool_entry(txid)?)
+pub fn mempool_tx(index: Arc<Index>, txid: &Txid) -> Result<MempoolEntry> {
+    Ok(index.get_mempool_entry(txid)?)
+}
+
+pub fn mempool_entries(
+    index: Arc<Index>,
+    txids: &Vec<Txid>,
+) -> Result<HashMap<Txid, Option<MempoolEntry>>> {
+    Ok(index.get_mempool_entries(txids)?)
 }
 
 pub fn address(index: Arc<Index>, address: &Address) -> Result<AddressData> {

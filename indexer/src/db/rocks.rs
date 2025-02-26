@@ -20,12 +20,12 @@ use {
         IteratorMode, MultiThreaded, Options, WriteBatch,
     },
     std::{
-        collections::{HashMap, HashSet},
+        collections::HashMap,
         sync::{Arc, RwLock},
     },
     titan_types::{
-        Block, InscriptionId, Pagination, PaginationResponse, SpenderReference, Subscription,
-        TxOutEntry,
+        Block, InscriptionId, MempoolEntry, Pagination, PaginationResponse, SpenderReference,
+        Subscription, TxOutEntry,
     },
     util::{
         inscription_id_to_bytes, outpoint_to_bytes, rune_id_to_bytes, txid_from_bytes,
@@ -37,7 +37,7 @@ use {
 
 pub struct RocksDB {
     db: DBWithThreadMode<MultiThreaded>,
-    mempool_cache: RwLock<HashSet<Txid>>,
+    mempool_cache: RwLock<HashMap<Txid, MempoolEntry>>,
 }
 
 pub type DBResult<T> = Result<T, RocksDBError>;
@@ -76,13 +76,13 @@ const TRANSACTIONS_MEMPOOL_CF: &str = "transactions_mempool";
 const TRANSACTION_CONFIRMING_BLOCK_CF: &str = "transaction_confirming_block";
 
 const MEMPOOL_CF: &str = "mempool";
+
 const STATS_CF: &str = "stats";
 
 const SETTINGS_CF: &str = "settings";
 
 const SUBSCRIPTIONS_CF: &str = "subscriptions";
 
-const INDEX_SPENT_OUTPUTS_KEY: &str = "index_spent_outputs";
 const INDEX_ADDRESSES_KEY: &str = "index_addresses";
 const INDEX_BITCOIN_TRANSACTIONS_KEY: &str = "index_bitcoin_transactions";
 
@@ -615,7 +615,7 @@ impl RocksDB {
             let idx = u64::from_le_bytes(idx_bytes.try_into().unwrap());
 
             if idx < start_index {
-                // We’ve gone past the range
+                // We've gone past the range
                 break;
             }
             if idx > end_index {
@@ -799,8 +799,7 @@ impl RocksDB {
         Ok(())
     }
 
-    pub fn get_mempool_txids(&self) -> DBResult<HashSet<Txid>> {
-        // O(1) read from cache
+    pub fn get_mempool_txids(&self) -> DBResult<HashMap<Txid, MempoolEntry>> {
         Ok(self
             .mempool_cache
             .read()
@@ -813,13 +812,53 @@ impl RocksDB {
             .mempool_cache
             .read()
             .map_err(|_| RocksDBError::LockPoisoned)?
-            .contains(txid);
+            .contains_key(txid);
 
         Ok(exists)
     }
 
+    pub fn get_mempool_entry(&self, txid: &Txid) -> DBResult<MempoolEntry> {
+        let cf_handle = self.cf_handle(MEMPOOL_CF)?;
+        Ok(self
+            .get_option_vec_data(&cf_handle, txid_to_bytes(txid))
+            .mapped()?
+            .ok_or(RocksDBError::NotFound(format!(
+                "mempool entry not found: {}",
+                txid
+            )))?)
+    }
+
+    pub fn get_mempool_entries(
+        &self,
+        txids: &Vec<Txid>,
+    ) -> DBResult<HashMap<Txid, Option<MempoolEntry>>> {
+        let cf_handle = self.cf_handle(MEMPOOL_CF)?;
+        let keys: Vec<_> = txids
+            .iter()
+            .map(|txid| (&cf_handle, txid_to_bytes(txid)))
+            .collect();
+
+        let results = self.db.multi_get_cf(keys);
+
+        let mut mempool_entries = HashMap::with_capacity(txids.len());
+        for (i, result) in results.iter().enumerate() {
+            match result {
+                Ok(Some(bytes)) => {
+                    mempool_entries
+                        .insert(txids[i].clone(), Some(MempoolEntry::load(bytes.clone())));
+                }
+                Ok(None) => {
+                    mempool_entries.insert(txids[i].clone(), None);
+                }
+                Err(e) => return Err(e.clone().into()),
+            }
+        }
+
+        Ok(mempool_entries)
+    }
+
     pub fn _validate_mempool_cache(&self) -> DBResult<()> {
-        let db_txids: HashSet<Txid> = Self::read_all_mempool_txids(&self.db)?;
+        let db_txids: HashMap<Txid, MempoolEntry> = Self::read_all_mempool_txids(&self.db)?;
 
         *self
             .mempool_cache
@@ -828,8 +867,10 @@ impl RocksDB {
         Ok(())
     }
 
-    fn read_all_mempool_txids(db: &DBWithThreadMode<MultiThreaded>) -> DBResult<HashSet<Txid>> {
-        let mut db_txids: HashSet<Txid> = HashSet::with_capacity(5000);
+    fn read_all_mempool_txids(
+        db: &DBWithThreadMode<MultiThreaded>,
+    ) -> DBResult<HashMap<Txid, MempoolEntry>> {
+        let mut db_txids: HashMap<Txid, MempoolEntry> = HashMap::with_capacity(5000);
 
         let cf_handle: Arc<BoundColumnFamily<'_>> = db
             .cf_handle(MEMPOOL_CF)
@@ -837,9 +878,9 @@ impl RocksDB {
 
         let iter = db.iterator_cf(&cf_handle, IteratorMode::Start);
         for item in iter {
-            let (key, _) = item?;
+            let (key, value) = item?;
             if let Ok(txid) = consensus::deserialize(&key) {
-                db_txids.insert(txid);
+                db_txids.insert(txid, MempoolEntry::load(value.to_vec()));
             }
         }
 
@@ -1001,8 +1042,9 @@ impl RocksDB {
                 .read()
                 .map_err(|_| RocksDBError::LockPoisoned)?;
 
-            let (in_mempool, not_in_mempool) =
-                txids.into_iter().partition(|txid| mempool.contains(*txid));
+            let (in_mempool, not_in_mempool) = txids
+                .into_iter()
+                .partition(|txid| mempool.contains_key(*txid));
 
             (in_mempool, not_in_mempool)
         };
@@ -1178,13 +1220,18 @@ impl RocksDB {
         // 9. Update mempool_txs
         {
             let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(MEMPOOL_CF)?;
-            for txid in update.mempool_txs.iter() {
-                batch.put_cf(&cf_handle, txid_to_bytes(&txid), vec![1]);
+            let mut mempool_cache = self
+                .mempool_cache
+                .write()
+                .map_err(|_| RocksDBError::LockPoisoned)?;
+            for (txid, mempool_entry) in update.mempool_txs.iter() {
+                batch.put_cf(
+                    &cf_handle,
+                    txid_to_bytes(&txid),
+                    mempool_entry.clone().store(),
+                );
 
-                self.mempool_cache
-                    .write()
-                    .map_err(|_| RocksDBError::LockPoisoned)?
-                    .insert(txid.clone());
+                mempool_cache.insert(txid.clone(), mempool_entry.clone());
             }
         }
 
@@ -1551,14 +1598,16 @@ impl RocksDB {
         // 17. Remove mempool txs
         if mempool {
             let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(MEMPOOL_CF)?;
+            let mut mempool_cache = self
+                .mempool_cache
+                .write()
+                .map_err(|_| RocksDBError::LockPoisoned)?;
+
             for txid in rollback.txs_to_delete.iter() {
                 batch.delete_cf(&cf_handle, txid_to_bytes(txid));
 
                 // Update cache
-                self.mempool_cache
-                    .write()
-                    .map_err(|_| RocksDBError::LockPoisoned)?
-                    .remove(txid);
+                mempool_cache.remove(txid);
             }
         }
 

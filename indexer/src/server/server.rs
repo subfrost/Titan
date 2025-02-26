@@ -79,6 +79,7 @@ impl Server {
             .route("/mempool/txids", get(Self::mempool_txids))
             // Mempool entries
             .route("/mempool/entry/{txid}", get(Self::mempool_tx))
+            .route("/mempool/entries", post(Self::mempool_entries))
             // Subscriptions
             .route(
                 "/subscription/{id}",
@@ -279,14 +280,19 @@ impl Server {
     }
 
     async fn mempool_tx(
-        Extension(config): Extension<Arc<ServerConfig>>,
+        Extension(index): Extension<Arc<Index>>,
         Path(txid): Path<Txid>,
     ) -> ServerResult {
-        task::block_in_place(|| {
-            Ok(Json(api::mempool_tx(config.get_new_rpc_client()?, &txid)?).into_response())
-        })
+        task::block_in_place(|| Ok(Json(api::mempool_tx(index, &txid)?).into_response()))
     }
-    
+
+    async fn mempool_entries(
+        Extension(index): Extension<Arc<Index>>,
+        Json(txids): Json<Vec<Txid>>,
+    ) -> ServerResult {
+        task::block_in_place(|| Ok(Json(api::mempool_entries(index, &txids)?).into_response()))
+    }
+
     async fn address(
         Extension(index): Extension<Arc<Index>>,
         Extension(config): Extension<Arc<ServerConfig>>,

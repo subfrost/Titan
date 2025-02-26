@@ -1,7 +1,6 @@
 use bitcoin::{OutPoint, Txid};
-use bitcoincore_rpc::json::GetMempoolEntryResult;
 use reqwest::{blocking::Client as BlockingReqwestClient, header::HeaderMap};
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 use titan_types::*;
 
 use crate::Error;
@@ -180,9 +179,21 @@ impl TitanApiSync for SyncClient {
         serde_json::from_str(&text).map_err(Error::from)
     }
 
-    fn get_mempool_entry(&self, txid: &Txid) -> Result<GetMempoolEntryResult, Error> {
+    fn get_mempool_entry(&self, txid: &Txid) -> Result<MempoolEntry, Error> {
         let text = self.call_text(&format!("/mempool/entry/{}", txid))?;
         serde_json::from_str(&text).map_err(Error::from)
+    }
+
+    fn get_mempool_entries(
+        &self,
+        txids: &[Txid],
+    ) -> Result<HashMap<Txid, Option<MempoolEntry>>, Error> {
+        let url = format!("{}/mempool/entries", self.base_url);
+        let body = serde_json::to_string(txids)?;
+
+        let response = self.post_text(&url, body)?;
+
+        Ok(serde_json::from_str(&response).map_err(Error::from)?)
     }
 
     fn get_subscription(&self, id: &str) -> Result<Subscription, Error> {

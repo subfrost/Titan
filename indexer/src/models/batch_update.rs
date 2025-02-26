@@ -6,7 +6,7 @@ use {
         collections::{HashMap, HashSet},
         fmt::Display,
     },
-    titan_types::{Block, InscriptionId, SpenderReference, TxOutEntry},
+    titan_types::{Block, InscriptionId, SpenderReference, TxOutEntry, MempoolEntry},
 };
 
 #[derive(Debug, Clone)]
@@ -25,7 +25,7 @@ pub struct BatchUpdate {
     pub inscriptions: HashMap<InscriptionId, Inscription>,
     pub transactions: HashMap<Txid, Transaction>,
     pub transaction_confirming_block: HashMap<Txid, BlockId>,
-    pub mempool_txs: HashSet<Txid>,
+    pub mempool_txs: HashMap<Txid, MempoolEntry>,
     pub rune_count: u64,
     pub block_count: u64,
     pub purged_blocks_count: u64,
@@ -48,7 +48,7 @@ impl BatchUpdate {
             inscriptions: HashMap::new(),
             transactions: HashMap::new(),
             transaction_confirming_block: HashMap::new(),
-            mempool_txs: HashSet::new(),
+            mempool_txs: HashMap::new(),
             rune_count,
             block_count,
             purged_blocks_count,
@@ -83,6 +83,7 @@ impl Display for BatchUpdate {
              added: [blocks: {}, txouts: {}, tx_changes: {}, \
              addresses: {} , address_outpoints: {}, \
              spent_outpoints_in_mempool: {}, \
+             mempool_txs: {}, \
              runes: txs {}/ runes {}/ ids {}, \
              inscriptions: {}, \
              transactions: {}, \
@@ -96,6 +97,7 @@ impl Display for BatchUpdate {
             self.script_pubkeys.len(),
             self.script_pubkeys_outpoints.len(),
             self.spent_outpoints_in_mempool.len(),
+            self.mempool_txs.len(),
             self.rune_transactions.len(),
             self.runes.len(),
             self.rune_ids.len(),

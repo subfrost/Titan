@@ -213,4 +213,11 @@ impl TransactionUpdate {
             added: newly_added,
         }
     }
+
+    pub fn categorize_to_mempool(&self) -> TransactionChangeSet {
+        TransactionChangeSet {
+            added: self.mempool_added.clone(),
+            removed: self.mempool_removed.clone(),
+        }
+    }
 }

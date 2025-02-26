@@ -9,7 +9,6 @@ mod block_fetcher;
 mod cache;
 mod index_updater;
 mod mempool;
-mod mempool_removal_grace;
 mod rollback;
 mod rollback_cache;
 mod store_lock;

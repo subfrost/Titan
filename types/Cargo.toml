@@ -1,6 +1,6 @@
 [package]
 name = "titan-types"
-version = "0.1.15"
+version = "0.1.16"
 edition = "2021"
 
 authors = ["Marcos <mcolladomcm@email.com>"]
@@ -13,6 +13,7 @@ keywords = ["bitcoin", "indexer", "runes", "rust"]
 
 [dependencies]
 bitcoin = { workspace = true }
+bitcoincore-rpc = { workspace = true }
 borsh = { workspace = true }
 brotli = { workspace = true }
 http = { workspace = true }

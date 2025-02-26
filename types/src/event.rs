@@ -1,4 +1,5 @@
 use {
+    crate::MempoolEntry,
     bitcoin::{BlockHash, OutPoint, Txid},
     borsh::{BorshDeserialize, BorshSerialize},
     ordinals::RuneId,
@@ -18,6 +19,9 @@ pub enum EventType {
     TransactionSubmitted,
     TransactionsAdded,
     TransactionsReplaced,
+    MempoolTransactionsAdded,
+    MempoolTransactionsReplaced,
+    MempoolEntriesUpdated,
     NewBlock,
     Reorg,
 }
@@ -33,6 +37,9 @@ impl From<Event> for EventType {
             Event::TransactionSubmitted { .. } => EventType::TransactionSubmitted,
             Event::TransactionsAdded { .. } => EventType::TransactionsAdded,
             Event::TransactionsReplaced { .. } => EventType::TransactionsReplaced,
+            Event::MempoolTransactionsAdded { .. } => EventType::MempoolTransactionsAdded,
+            Event::MempoolTransactionsReplaced { .. } => EventType::MempoolTransactionsReplaced,
+            Event::MempoolEntriesUpdated { .. } => EventType::MempoolEntriesUpdated,
             Event::NewBlock { .. } => EventType::NewBlock,
             Event::Reorg { .. } => EventType::Reorg,
         }
@@ -51,6 +58,9 @@ impl fmt::Display for EventType {
             EventType::TransactionSubmitted => write!(f, "TransactionSubmitted"),
             EventType::TransactionsAdded => write!(f, "TransactionsAdded"),
             EventType::TransactionsReplaced => write!(f, "TransactionsReplaced"),
+            EventType::MempoolTransactionsAdded => write!(f, "MempoolTransactionsAdded"),
+            EventType::MempoolTransactionsReplaced => write!(f, "MempoolTransactionsReplaced"),
+            EventType::MempoolEntriesUpdated => write!(f, "MempoolEntriesUpdated"),
             EventType::NewBlock => write!(f, "NewBlock"),
             EventType::Reorg => write!(f, "Reorg"),
         }
@@ -139,6 +149,15 @@ pub enum Event {
     },
     TransactionsReplaced {
         txids: Vec<Txid>,
+    },
+    MempoolTransactionsAdded {
+        txids: Vec<Txid>,
+    },
+    MempoolTransactionsReplaced {
+        txids: Vec<Txid>,
+    },
+    MempoolEntriesUpdated {
+        txids: Vec<(Txid, MempoolEntry)>,
     },
     NewBlock {
         block_hash: BlockHash,

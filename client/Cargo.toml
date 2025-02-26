@@ -1,6 +1,6 @@
 [package]
 name = "titan-client"
-version = "0.1.18"
+version = "0.1.19"
 edition = "2021"
 
 authors = ["Marcos <mcolladomcm@email.com>"]
@@ -15,7 +15,6 @@ keywords = ["bitcoin", "indexer", "runes", "rust"]
 titan-types = { workspace = true }
 
 bitcoin = { workspace = true }
-bitcoincore-rpc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }

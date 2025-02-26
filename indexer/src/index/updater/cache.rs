@@ -15,7 +15,9 @@ use {
         sync::Arc,
         time::Instant,
     },
-    titan_types::{Block, Event, InscriptionId, Location, SpenderReference, TxOutEntry},
+    titan_types::{
+        Block, Event, InscriptionId, Location, MempoolEntry, SpenderReference, TxOutEntry,
+    },
     tokio::sync::mpsc,
     tracing::{info, trace},
 };
@@ -292,8 +294,8 @@ impl UpdaterCache {
         self.update.inscriptions.insert(inscription_id, inscription);
     }
 
-    pub fn set_mempool_tx(&mut self, txid: Txid) -> () {
-        self.update.mempool_txs.insert(txid);
+    pub fn set_mempool_tx(&mut self, txid: Txid, mempool_entry: MempoolEntry) -> () {
+        self.update.mempool_txs.insert(txid, mempool_entry);
     }
 
     pub fn set_script_pubkey_entries(

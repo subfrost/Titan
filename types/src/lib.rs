@@ -3,6 +3,7 @@ pub use {
     block::Block,
     event::{Event, EventType, Location},
     inscription_id::InscriptionId,
+    mempool_entry::MempoolEntry,
     pagination::{Pagination, PaginationResponse},
     rune::{MintResponse, RuneAmount, RuneResponse},
     stats::{BlockTip, Status},
@@ -15,6 +16,7 @@ mod address;
 mod block;
 mod event;
 mod inscription_id;
+mod mempool_entry;
 mod pagination;
 pub mod query;
 mod rune;

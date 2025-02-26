@@ -1,10 +1,13 @@
+use std::collections::HashMap;
+
 use crate::Error;
 use async_trait::async_trait;
 use bitcoin::{OutPoint, Txid};
-use bitcoincore_rpc::json::GetMempoolEntryResult;
 use reqwest::header::HeaderMap;
 use titan_types::{
-    query, AddressData, Block, BlockTip, InscriptionId, Pagination, PaginationResponse, RuneResponse, Status, Subscription, Transaction, TransactionStatus, TxOutEntry
+    query, AddressData, Block, BlockTip, InscriptionId, MempoolEntry, Pagination,
+    PaginationResponse, RuneResponse, Status, Subscription, Transaction, TransactionStatus,
+    TxOutEntry,
 };
 
 /// Trait for all **async** methods.
@@ -47,7 +50,10 @@ pub trait TitanApiAsync {
     async fn get_output(&self, outpoint: &OutPoint) -> Result<TxOutEntry, Error>;
 
     /// Returns `(HTTP Headers, Bytes)` for an inscription by its `inscription_id`.
-    async fn get_inscription(&self, inscription_id: &InscriptionId) -> Result<(HeaderMap, Vec<u8>), Error>;
+    async fn get_inscription(
+        &self,
+        inscription_id: &InscriptionId,
+    ) -> Result<(HeaderMap, Vec<u8>), Error>;
 
     /// Lists existing runes, supporting pagination.
     async fn get_runes(
@@ -69,7 +75,13 @@ pub trait TitanApiAsync {
     async fn get_mempool_txids(&self) -> Result<Vec<Txid>, Error>;
 
     /// Returns a single mempool entry by `txid`.
-    async fn get_mempool_entry(&self, txid: &Txid) -> Result<GetMempoolEntryResult, Error>;
+    async fn get_mempool_entry(&self, txid: &Txid) -> Result<MempoolEntry, Error>;
+
+    /// Returns multiple mempool entries by their `txid`s.
+    async fn get_mempool_entries(
+        &self,
+        txids: &[Txid],
+    ) -> Result<HashMap<Txid, Option<MempoolEntry>>, Error>;
 
     /// Fetches a single subscription by `id`.
     async fn get_subscription(&self, id: &str) -> Result<Subscription, Error>;
@@ -123,7 +135,10 @@ pub trait TitanApiSync {
     fn get_output(&self, outpoint: &OutPoint) -> Result<TxOutEntry, Error>;
 
     /// Fetches an inscription (headers + bytes) by `inscription_id`, blocking.
-    fn get_inscription(&self, inscription_id: &InscriptionId) -> Result<(HeaderMap, Vec<u8>), Error>;
+    fn get_inscription(
+        &self,
+        inscription_id: &InscriptionId,
+    ) -> Result<(HeaderMap, Vec<u8>), Error>;
 
     /// Returns paginated runes in a **blocking** manner.
     fn get_runes(
@@ -145,7 +160,13 @@ pub trait TitanApiSync {
     fn get_mempool_txids(&self) -> Result<Vec<Txid>, Error>;
 
     /// Returns a single mempool entry by `txid`.
-    fn get_mempool_entry(&self, txid: &Txid) -> Result<GetMempoolEntryResult, Error>;
+    fn get_mempool_entry(&self, txid: &Txid) -> Result<MempoolEntry, Error>;
+
+    /// Returns multiple mempool entries by their `txid`s 
+    fn get_mempool_entries(
+        &self,
+        txids: &[Txid],
+    ) -> Result<HashMap<Txid, Option<MempoolEntry>>, Error>;
 
     /// Fetches a single subscription by `id`, blocking.
     fn get_subscription(&self, id: &str) -> Result<Subscription, Error>;

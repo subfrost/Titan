@@ -23,8 +23,8 @@ use {
         time::Duration,
     },
     titan_types::{
-        AddressData, AddressTxOut, Block, Event, InscriptionId, Pagination, PaginationResponse,
-        RuneAmount, Transaction, TransactionStatus, TxOutEntry,
+        AddressData, AddressTxOut, Block, Event, InscriptionId, MempoolEntry, Pagination,
+        PaginationResponse, RuneAmount, Transaction, TransactionStatus, TxOutEntry,
     },
     tokio::{runtime::Runtime, sync::mpsc::Sender},
     tracing::{error, info, warn},
@@ -205,7 +205,18 @@ impl Index {
     }
 
     pub fn get_mempool_txids(&self) -> Result<Vec<Txid>> {
-        Ok(self.db.get_mempool_txids()?.into_iter().collect())
+        Ok(self.db.get_mempool_txids()?.keys().cloned().collect())
+    }
+
+    pub fn get_mempool_entry(&self, txid: &Txid) -> Result<MempoolEntry> {
+        Ok(self.db.get_mempool_entry(txid)?)
+    }
+
+    pub fn get_mempool_entries(
+        &self,
+        txids: &Vec<Txid>,
+    ) -> Result<HashMap<Txid, Option<MempoolEntry>>> {
+        Ok(self.db.get_mempool_entries(txids)?)
     }
 
     pub fn get_tx_out(&self, outpoint: &OutPoint) -> Result<TxOutEntry> {
@@ -353,8 +364,13 @@ impl Index {
             .remove_pre_index_new_submitted_transaction(txid)?)
     }
 
-    pub fn index_new_submitted_transaction(&self, txid: &Txid, tx: &BitcoinTransaction) {
-        match self.updater.index_new_submitted_tx(txid, tx) {
+    pub fn index_new_submitted_transaction(
+        &self,
+        txid: &Txid,
+        tx: &BitcoinTransaction,
+        mempool_entry: MempoolEntry,
+    ) {
+        match self.updater.index_new_submitted_tx(txid, tx, mempool_entry) {
             Ok(_) => (),
             Err(e) => {
                 error!("Failed to index new transaction after broadcast: {}", e);
