@@ -20,10 +20,10 @@ impl BlockId {
     }
 }
 
-pub fn block_id_to_transaction_status(block_id: Option<&BlockId>) -> Option<TransactionStatus> {
+pub fn block_id_to_transaction_status(block_id: Option<&BlockId>) -> TransactionStatus {
     match block_id {
-        Some(block_id) => Some(block_id.clone().into_transaction_status()),
-        None => Some(TransactionStatus::unconfirmed()),
+        Some(block_id) => block_id.clone().into_transaction_status(),
+        None => TransactionStatus::unconfirmed(),
     }
 }
 

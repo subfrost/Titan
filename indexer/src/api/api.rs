@@ -174,8 +174,8 @@ pub fn transaction(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Tra
     let transaction = if index.is_indexing_bitcoin_transactions() {
         index.get_transaction(txid)?
     } else {
-        let mut transaction = Transaction::from(client.get_raw_transaction(txid, None)?);
-        transaction.status = Some(index.get_transaction_status(txid)?);
+        let status = index.get_transaction_status(txid)?;
+        let mut transaction = Transaction::from((client.get_raw_transaction(txid, None)?, status));
 
         let outpoints = transaction
             .output

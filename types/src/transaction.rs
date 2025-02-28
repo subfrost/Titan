@@ -41,12 +41,11 @@ pub struct Transaction {
     pub lock_time: u32,
     pub input: Vec<TxIn>,
     pub output: Vec<TxOut>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<TransactionStatus>,
+    pub status: TransactionStatus,
 }
 
-impl From<bitcoin::Transaction> for Transaction {
-    fn from(transaction: bitcoin::Transaction) -> Self {
+impl From<(bitcoin::Transaction, TransactionStatus)> for Transaction {
+    fn from((transaction, status): (bitcoin::Transaction, TransactionStatus)) -> Self {
         Transaction {
             txid: transaction.compute_txid(),
             version: transaction.version.0,
@@ -63,7 +62,7 @@ impl From<bitcoin::Transaction> for Transaction {
                     spent: SpentStatus::Unspent,
                 })
                 .collect(),
-            status: None,
+            status,
         }
     }
 }

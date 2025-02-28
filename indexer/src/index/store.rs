@@ -376,34 +376,47 @@ impl Store for RocksDB {
         mempool: Option<bool>,
     ) -> Result<Transaction, StoreError> {
         let (mut tx, mempool) = if let Some(mempool) = mempool {
+            let status = if !mempool {
+                self.get_transaction_confirming_block(txid)?
+                    .into_transaction_status()
+            } else {
+                TransactionStatus {
+                    confirmed: false,
+                    block_height: None,
+                    block_hash: None,
+                }
+            };
+
             (
-                Transaction::from(self.get_transaction(txid, mempool)?),
+                Transaction::from((self.get_transaction(txid, mempool)?, status)),
                 mempool,
             )
         } else {
             match self.get_transaction(txid, false) {
-                Ok(transaction) => (Transaction::from(transaction), false),
+                Ok(transaction) => {
+                    let status = self
+                        .get_transaction_confirming_block(txid)?
+                        .into_transaction_status();
+
+                    (Transaction::from((transaction, status)), false)
+                }
                 Err(err) => match err {
                     RocksDBError::NotFound(_) => {
-                        (Transaction::from(self.get_transaction(txid, true)?), true)
+                        let status = TransactionStatus {
+                            confirmed: false,
+                            block_height: None,
+                            block_hash: None,
+                        };
+
+                        (
+                            Transaction::from((self.get_transaction(txid, true)?, status)),
+                            true,
+                        )
                     }
                     other => return Err(StoreError::DB(other)),
                 },
             }
         };
-
-        if !mempool {
-            tx.status = Some(
-                self.get_transaction_confirming_block(txid)?
-                    .into_transaction_status(),
-            );
-        } else {
-            tx.status = Some(TransactionStatus {
-                confirmed: false,
-                block_height: None,
-                block_hash: None,
-            });
-        }
 
         let outpoints = tx
             .output

@@ -19,12 +19,11 @@ pub struct AddressTxOut {
     pub runes: Vec<RuneAmount>,
     pub risky_runes: Vec<RuneAmount>,
     pub spent: SpentStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<TransactionStatus>,
+    pub status: TransactionStatus,
 }
 
-impl From<(OutPoint, TxOutEntry, Option<TransactionStatus>)> for AddressTxOut {
-    fn from((outpoint, tx_out, status): (OutPoint, TxOutEntry, Option<TransactionStatus>)) -> Self {
+impl From<(OutPoint, TxOutEntry, TransactionStatus)> for AddressTxOut {
+    fn from((outpoint, tx_out, status): (OutPoint, TxOutEntry, TransactionStatus)) -> Self {
         Self {
             txid: outpoint.txid,
             vout: outpoint.vout,

@@ -46,7 +46,7 @@ export interface AddressTxOut extends OutPoint {
   value: number;
   runes: RuneAmount[];
   risky_runes: RuneAmount[];
-  status?: TransactionStatus;
+  status: TransactionStatus;
   spent: SpentStatus;
 }
 
@@ -83,7 +83,7 @@ export interface Transaction {
   lock_time: number;
   input: TxIn[];
   output: TxOut[];
-  status?: TransactionStatus;
+  status: TransactionStatus;
 }
 
 export interface MintResponse {

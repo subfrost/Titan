@@ -2613,7 +2613,7 @@ dependencies = [
  "serde_with",
  "thiserror 2.0.9",
  "threadpool",
- "titan-types 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)",
+ "titan-types",
  "tokio",
  "tower-http",
  "tracing",
@@ -2623,7 +2623,7 @@ dependencies = [
 
 [[package]]
 name = "titan-client"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "async-trait",
  "bitcoin",
@@ -2631,7 +2631,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.9",
- "titan-types 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)",
+ "titan-types",
  "tokio",
  "tracing",
  "uuid",
@@ -2639,24 +2639,7 @@ dependencies = [
 
 [[package]]
 name = "titan-types"
-version = "0.1.16"
-dependencies = [
- "bitcoin",
- "bitcoincore-rpc",
- "borsh",
- "brotli",
- "http",
- "ordinals",
- "serde",
- "thiserror 2.0.9",
- "uuid",
-]
-
-[[package]]
-name = "titan-types"
-version = "0.1.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4110c1405804ae6d0def43e507289dc457cf62611bad52a3f4e08c0e977264c3"
+version = "0.1.17"
 dependencies = [
  "bitcoin",
  "bitcoincore-rpc",
