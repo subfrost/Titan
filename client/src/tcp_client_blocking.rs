@@ -77,8 +77,9 @@ fn subscribe(
 ) -> Result<mpsc::Receiver<Event>, TcpClientError> {
     // Connect to the TCP server.
     let mut stream = TcpStream::connect(addr)?;
-    // Set the stream to non-blocking mode.
-    stream.set_nonblocking(true)?;
+    
+    // Set a read timeout instead of non-blocking mode
+    stream.set_read_timeout(Some(Duration::from_millis(500)))?;
 
     // Clone the stream for reading.
     let reader_stream = stream.try_clone()?;
@@ -96,6 +97,8 @@ fn subscribe(
     // Spawn a thread to read events from the TCP connection.
     thread::spawn(move || {
         let mut line = String::new();
+        let mut read_in_progress = false;
+        
         loop {
             // Check if shutdown has been signaled.
             if shutdown_flag.load(Ordering::SeqCst) {
@@ -103,18 +106,27 @@ fn subscribe(
                 break;
             }
 
-            line.clear();
+            // Only clear the line if we're not in the middle of a partial read
+            if !read_in_progress {
+                line.clear();
+            }
+            
             match reader.read_line(&mut line) {
                 Ok(0) => {
                     // Connection closed.
                     warn!("TCP connection closed by server.");
                     break;
                 }
-                Ok(_) => {
+                Ok(n) => {
+                    // Successfully read a complete line
+                    read_in_progress = false;
                     let trimmed = line.trim();
                     if trimmed.is_empty() {
                         continue;
                     }
+                    
+                    info!("Received complete line with {} bytes", n);
+                    
                     // Deserialize the JSON line into an Event.
                     match serde_json::from_str::<Event>(trimmed) {
                         Ok(event) => {
@@ -128,14 +140,21 @@ fn subscribe(
                         }
                     }
                 }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    // No data available right now.
-                    thread::sleep(Duration::from_millis(100));
-                    continue;
-                }
                 Err(e) => {
-                    error!("Error reading from TCP socket: {}", e);
-                    break;
+                    // Handle timeout errors differently than other errors
+                    if e.kind() == std::io::ErrorKind::TimedOut || e.kind() == std::io::ErrorKind::WouldBlock {
+                        // This means we're in the middle of reading a line
+                        if !line.is_empty() {
+                            read_in_progress = true;
+                            info!("Partial read in progress ({} bytes so far), continuing...", line.len());
+                        }
+                        continue;
+                    } else {
+                        error!("Error reading from TCP socket: {}", e);
+                        read_in_progress = false;
+                        // For unexpected errors, add a small delay
+                        thread::sleep(Duration::from_millis(100));
+                    }
                 }
             }
         }

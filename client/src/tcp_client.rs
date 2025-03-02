@@ -62,8 +62,14 @@ impl AsyncTcpClient {
             // Keep writer in scope (if needed later).
             let _writer_guard = writer;
             let mut line = String::new();
+            let mut read_in_progress = false;
+            
             loop {
-                line.clear();
+                // Only clear line if we're not in the middle of a partial read
+                if !read_in_progress {
+                    line.clear();
+                }
+                
                 tokio::select! {
                     // Read a line from the TCP connection.
                     result = reader.read_line(&mut line) => {
@@ -73,11 +79,16 @@ impl AsyncTcpClient {
                                 warn!("TCP connection closed by server.");
                                 break;
                             }
-                            Ok(_) => {
+                            Ok(n) => {
+                                // Successfully read a complete line
+                                read_in_progress = false;
                                 let trimmed = line.trim();
                                 if trimmed.is_empty() {
                                     continue;
                                 }
+                                
+                                info!("Received complete line with {} bytes", n);
+                                
                                 match serde_json::from_str::<Event>(trimmed) {
                                     Ok(event) => {
                                         if let Err(e) = tx.send(event).await {
@@ -92,7 +103,16 @@ impl AsyncTcpClient {
                             }
                             Err(e) => {
                                 error!("Error reading from TCP socket: {}", e);
-                                break;
+                                // If this is a would-block or similar temporary error and we have partial data,
+                                // mark as in progress to preserve the buffer
+                                if !line.is_empty() {
+                                    read_in_progress = true;
+                                    info!("Partial read in progress ({} bytes so far), will continue", line.len());
+                                } else {
+                                    read_in_progress = false;
+                                }
+                                // Add a small delay before retrying on error
+                                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                             }
                         }
                     }
