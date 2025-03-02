@@ -3,7 +3,7 @@ pub use {
     block::Block,
     event::{Event, EventType, Location},
     inscription_id::InscriptionId,
-    mempool_entry::MempoolEntry,
+    mempool_entry::{MempoolEntry, MempoolEntryFee},
     pagination::{Pagination, PaginationResponse},
     rune::{MintResponse, RuneAmount, RuneResponse},
     stats::{BlockTip, Status},
