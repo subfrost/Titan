@@ -91,15 +91,20 @@ impl UpdaterCache {
         self.update.block_count += 1;
     }
 
-    pub fn get_block_by_height(&self, height: u64) -> Result<Block> {
+    pub fn get_block_hash(&self, height: u64) -> Result<BlockHash> {
         let hash = self.update.block_hashes.get(&height);
 
         if let Some(hash) = hash {
-            return self.get_block(hash);
+            return Ok(hash.clone());
         } else {
             let hash = self.db.read().get_block_hash(height)?;
-            return self.get_block(&hash);
+            return Ok(hash);
         }
+    }
+
+    pub fn get_block_by_height(&self, height: u64) -> Result<Block> {
+        let hash = self.get_block_hash(height)?;
+        self.get_block(&hash)
     }
 
     pub fn get_block(&self, hash: &BlockHash) -> Result<Block> {

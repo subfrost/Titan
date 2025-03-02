@@ -14,7 +14,10 @@ use {
         constants::SUBSIDY_HALVING_INTERVAL, hashes::Hash, hex::HexToArrayError,
         Block as BitcoinBlock, Transaction, Txid,
     },
-    bitcoincore_rpc::{json::GetMempoolEntryResult, Client, RpcApi},
+    bitcoincore_rpc::{
+        json::{GetBlockchainInfoResult, GetMempoolEntryResult},
+        Client, RpcApi,
+    },
     block_fetcher::fetch_blocks_from,
     cache::{UpdaterCache, UpdaterCacheSettings},
     indicatif::{ProgressBar, ProgressStyle},
@@ -141,6 +144,27 @@ impl Updater {
         self.is_at_tip.load(Ordering::Relaxed)
     }
 
+    fn is_chain_synced(
+        &self,
+        cache: &UpdaterCache,
+        chain_info: &GetBlockchainInfoResult,
+    ) -> Result<bool> {
+        if cache.get_block_height_tip() != chain_info.blocks {
+            return Ok(false);
+        }
+
+        match cache.get_block_hash(chain_info.blocks) {
+            Ok(block_hash) => {
+                // Compare hashes to detect reorgs
+                Ok(block_hash == chain_info.best_block_hash)
+            }
+            Err(_) => {
+                // If we can't get the hash, we're not synced
+                Ok(false)
+            }
+        }
+    }
+
     pub fn update_to_tip(&self) -> Result<()> {
         debug!("Updating to tip");
 
@@ -154,22 +178,22 @@ impl Updater {
 
         // Get RPC client and get block height
         let bitcoin_block_client = self.settings.get_new_rpc_client()?;
-        let mut bitcoin_block_count = bitcoin_block_client.get_block_count()?;
+        let mut chain_info = bitcoin_block_client.get_blockchain_info()?;
 
         let mut first_block = true;
 
         // Fetch new blocks if needed.
-        while bitcoin_block_count > cache.get_block_height_tip() {
+        while !self.is_chain_synced(&cache, &chain_info)? {
             let was_at_tip = self.is_at_tip.load(Ordering::Relaxed);
             self.is_at_tip.store(false, Ordering::Release);
 
             let progress_bar =
-                self.open_progress_bar(cache.get_block_height_tip(), bitcoin_block_count);
+                self.open_progress_bar(cache.get_block_height_tip(), chain_info.blocks);
 
             let rx = fetch_blocks_from(
                 Arc::new(self.settings.clone()),
                 cache.get_block_count(),
-                bitcoin_block_count + 1,
+                chain_info.blocks + 1,
             )?;
 
             let rpc_client = self.settings.get_new_rpc_client()?;
@@ -233,7 +257,7 @@ impl Updater {
                 first_block = false;
                 progress_bar.inc(1);
 
-                if bitcoin_block_count - cache.get_block_height_tip()
+                if chain_info.blocks - cache.get_block_height_tip()
                     > self.settings.max_recoverable_reorg_depth()
                 {
                     // clear notifications.
@@ -246,8 +270,8 @@ impl Updater {
                 break;
             }
 
-            info!("Synced to tip {}", bitcoin_block_count);
-            bitcoin_block_count = bitcoin_block_client.get_block_count()?;
+            info!("Synced to tip {}", chain_info.blocks);
+            chain_info = bitcoin_block_client.get_blockchain_info()?;
             progress_bar.finish_and_clear();
         }
 
