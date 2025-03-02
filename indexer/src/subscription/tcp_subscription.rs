@@ -51,13 +51,25 @@ impl TcpSubscriptionManager {
         let event_type: EventType = EventType::from(event.clone()); // adjust as needed
 
         let subs = self.subscriptions.read().await;
+        let mut failed_ids = Vec::new();
+        
         for (id, sub) in subs.iter() {
             if sub.event_types.contains(&event_type) {
                 // Try sending the event; if it fails (e.g. channel closed) log the error.
                 if let Err(e) = sub.sender.send(event.clone()).await {
                     error!("Failed to send event to subscription {}: {:?}", id, e);
+                    failed_ids.push(*id);
                 }
             }
+        }
+        
+        // Drop the read lock before removing subscriptions
+        drop(subs);
+        
+        // Remove any subscriptions that failed to receive events
+        for id in failed_ids {
+            self.unregister(id).await;
+            info!("Unregistered failed subscription with id {}", id);
         }
     }
 }
