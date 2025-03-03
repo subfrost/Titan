@@ -125,8 +125,6 @@ fn subscribe(
                         continue;
                     }
                     
-                    info!("Received complete line with {} bytes", n);
-                    
                     // Deserialize the JSON line into an Event.
                     match serde_json::from_str::<Event>(trimmed) {
                         Ok(event) => {

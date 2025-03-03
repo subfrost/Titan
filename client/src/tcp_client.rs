@@ -87,8 +87,6 @@ impl AsyncTcpClient {
                                     continue;
                                 }
                                 
-                                info!("Received complete line with {} bytes", n);
-                                
                                 match serde_json::from_str::<Event>(trimmed) {
                                     Ok(event) => {
                                         if let Err(e) = tx.send(event).await {
