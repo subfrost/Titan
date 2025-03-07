@@ -96,7 +96,7 @@ pub struct Options {
     /// Index addresses. [default: false]
     #[arg(
         long,
-        short,
+        short = 'a',
         help = "Index addresses. [default: false]",
         default_value = "false"
     )]
