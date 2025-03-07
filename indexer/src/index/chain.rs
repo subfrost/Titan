@@ -101,7 +101,7 @@ mod tests {
         assert_eq!("testnet4".parse::<Chain>().unwrap(), Chain::Testnet4);
         assert_eq!(
             "foo".parse::<Chain>().unwrap_err().to_string(),
-            "Invalid chain `foo`"
+            "invalid chain `foo`"
         );
     }
 }
