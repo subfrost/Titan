@@ -36,7 +36,7 @@ pub enum SpentStatus {
 }
 
 // Intermediate structure for JSON serialization
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct SpentStatusJson {
     spent: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

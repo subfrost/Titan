@@ -7,7 +7,7 @@ use {
     std::io::{Read, Result, Write},
 };
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MintResponse {
     pub start: Option<u64>,
     pub end: Option<u64>,
@@ -17,7 +17,7 @@ pub struct MintResponse {
     pub mints: u128,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuneResponse {
     pub id: RuneId,
     pub block: u64,

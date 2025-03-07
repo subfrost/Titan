@@ -4,14 +4,14 @@ use {
     serde::{Deserialize, Serialize},
 };
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddressData {
     pub value: u64,
     pub runes: Vec<RuneAmount>,
     pub outputs: Vec<AddressTxOut>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddressTxOut {
     pub txid: Txid,
     pub vout: u32,

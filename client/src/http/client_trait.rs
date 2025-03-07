@@ -12,7 +12,7 @@ use titan_types::{
 
 /// Trait for all **async** methods.
 #[async_trait]
-pub trait TitanApiAsync {
+pub trait TitanApiAsync: Send + Sync + Clone {
     /// Returns the node's status (e.g., network info, block height).
     async fn get_status(&self) -> Result<Status, Error>;
 
@@ -97,7 +97,7 @@ pub trait TitanApiAsync {
 }
 
 /// Trait for all **blocking** (synchronous) methods.
-pub trait TitanApiSync {
+pub trait TitanApiSync: Send + Sync + Clone {
     /// Returns the node's status in a **blocking** manner.
     fn get_status(&self) -> Result<Status, Error>;
 
@@ -162,7 +162,7 @@ pub trait TitanApiSync {
     /// Returns a single mempool entry by `txid`.
     fn get_mempool_entry(&self, txid: &Txid) -> Result<MempoolEntry, Error>;
 
-    /// Returns multiple mempool entries by their `txid`s 
+    /// Returns multiple mempool entries by their `txid`s
     fn get_mempool_entries(
         &self,
         txids: &[Txid],

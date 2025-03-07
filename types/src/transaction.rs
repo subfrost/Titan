@@ -7,7 +7,7 @@ use {
     std::io::{Read, Result, Write},
 };
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionStatus {
     pub confirmed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -34,7 +34,7 @@ impl TransactionStatus {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {
     pub txid: Txid,
     pub version: i32,
