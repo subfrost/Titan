@@ -12,7 +12,7 @@ use titan_types::{
 
 /// Trait for all **async** methods.
 #[async_trait]
-pub trait TitanApiAsync: Send + Sync + Clone {
+pub trait TitanApiAsync: Send + Sync + Clone + 'static {
     /// Returns the node's status (e.g., network info, block height).
     async fn get_status(&self) -> Result<Status, Error>;
 
@@ -97,7 +97,7 @@ pub trait TitanApiAsync: Send + Sync + Clone {
 }
 
 /// Trait for all **blocking** (synchronous) methods.
-pub trait TitanApiSync: Send + Sync + Clone {
+pub trait TitanApiSync: Send + Sync + Clone + 'static {
     /// Returns the node's status in a **blocking** manner.
     fn get_status(&self) -> Result<Status, Error>;
 
