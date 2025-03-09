@@ -1,23 +1,22 @@
 mod error;
 mod http;
-mod tcp_client;
-mod tcp_client_blocking;
+mod tcp;
 
 pub use error::*;
 
+pub use tcp::{ConnectionStatus, ConnectionStatusTracker};
 pub use http::{
     AsyncClient as TitanClient, SyncClient as TitanBlockingClient, TitanApiAsync as TitanApi,
     TitanApiSync as TitanApiBlocking,
 };
+pub use tcp::{ReconnectionConfig, ReconnectionManager};
 pub use titan_types::*;
 
 #[cfg(feature = "tcp_client")]
-pub use tcp_client::{AsyncTcpClient as AsyncTcpClient, TcpClientError as TitanTcpClientError};
+pub use tcp::{AsyncTcpClient, TitanTcpClientError};
 
 #[cfg(feature = "tcp_client_blocking")]
-pub use tcp_client_blocking::{
-    TcpClient as TcpClientBlocking, TcpClientError as TitanTcpClientBlockingError,
-};
+pub use tcp::{TcpClientBlocking, TcpClientBlockingConfig, TitanTcpClientBlockingError};
 
 #[cfg(test)]
 mod tests {
@@ -32,7 +31,7 @@ mod tests {
     // Import the HTTP and TCP client functions.
     use crate::http::{AsyncClient as HttpClient, TitanApiAsync as TitanApi};
     #[cfg(feature = "tcp_client")]
-    use crate::tcp_client::AsyncTcpClient;
+    use crate::tcp::AsyncTcpClient;
 
     /// End-to-end test for the TCP subscription client.
     ///
