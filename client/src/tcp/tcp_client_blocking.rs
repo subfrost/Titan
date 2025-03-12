@@ -16,8 +16,10 @@ use tracing::{error, info, warn};
 
 use crate::tcp::reconnection::ReconnectionManager;
 
-use super::{connection_status::{ConnectionStatus, ConnectionStatusTracker}, reconnection};
-
+use super::{
+    connection_status::{ConnectionStatus, ConnectionStatusTracker},
+    reconnection,
+};
 
 #[derive(Debug, Error)]
 pub enum TcpClientError {
@@ -107,6 +109,16 @@ impl TcpClient {
     /// Get the current connection status
     pub fn get_status(&self) -> ConnectionStatus {
         self.status_tracker.get_status()
+    }
+
+    /// Get whether the client was disconnected at any point in time
+    pub fn was_disconnected(&self) -> bool {
+        self.status_tracker.was_disconnected()
+    }
+
+    /// Reset the disconnected flag
+    pub fn reset_disconnected(&self) {
+        self.status_tracker.reset_disconnected();
     }
 
     /// Checks if there is an active worker thread.
@@ -458,10 +470,10 @@ mod tests {
             // Bind to a random available port
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let addr = listener.local_addr().unwrap();
-            
+
             // Notify the test that we're ready and send the address
             ready_tx.send(addr).unwrap();
-            
+
             // Accept one connection
             if let Ok((mut stream, _)) = listener.accept() {
                 // Read the subscription request
@@ -470,19 +482,19 @@ mod tests {
                     Ok(n) => {
                         let request = String::from_utf8_lossy(&buffer[..n]);
                         println!("Server received request: {}", request);
-                        
+
                         // Add a small delay to ensure the client is ready to receive
                         thread::sleep(Duration::from_millis(50));
-                        
+
                         // Send a sample event - using correct format for Event
                         let event = r#"{"type":"TransactionsAdded","data": {"txids":["1111111111111111111111111111111111111111111111111111111111111111"]}}"#;
                         stream.write_all(event.as_bytes()).unwrap();
                         stream.write_all(b"\n").unwrap();
                         stream.flush().unwrap();
-                        
+
                         // Keep the connection open for a while to ensure the client can read the response
                         thread::sleep(Duration::from_millis(500));
-                    },
+                    }
                     Err(e) => println!("Test server read error: {}", e),
                 }
             }
@@ -541,13 +553,13 @@ mod tests {
     fn test_receive_events() {
         // Create a channel to sync with the test server
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-        
+
         // Start a test server
         let server_handle = start_test_server(ready_tx);
-        
+
         // Wait for the server to be ready and get its address
         let server_addr = ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        
+
         // Create a client with short timeout
         let config = TcpClientConfig {
             connection_timeout: Duration::from_secs(1),
@@ -556,32 +568,37 @@ mod tests {
             ..TcpClientConfig::default()
         };
         let client = TcpClient::new(config);
-        
+
         // Subscribe to receive events
         let subscription_request = TcpSubscriptionRequest {
             subscribe: vec![EventType::TransactionsAdded],
         };
-        
-        let rx = client.subscribe(format!("{}", server_addr), subscription_request).unwrap();
-        
+
+        let rx = client
+            .subscribe(format!("{}", server_addr), subscription_request)
+            .unwrap();
+
         // Give it time to establish connection
         thread::sleep(Duration::from_millis(200));
-        
+
         // Try to receive an event with timeout
         let event = rx.recv_timeout(Duration::from_secs(2));
         assert!(event.is_ok(), "Should have received an event");
-        
+
         match event.unwrap() {
             Event::TransactionsAdded { txids } => {
                 assert_eq!(txids.len(), 1);
-                assert_eq!(txids[0].to_string(), "1111111111111111111111111111111111111111111111111111111111111111");
-            },
+                assert_eq!(
+                    txids[0].to_string(),
+                    "1111111111111111111111111111111111111111111111111111111111111111"
+                );
+            }
             other => panic!("Received unexpected event type: {:?}", other),
         }
-        
+
         // Shutdown the client
         client.shutdown_and_join();
-        
+
         // Wait for the server to finish
         server_handle.join().unwrap();
     }

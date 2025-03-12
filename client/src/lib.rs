@@ -4,19 +4,19 @@ mod tcp;
 
 pub use error::*;
 
-pub use tcp::{ConnectionStatus, ConnectionStatusTracker};
 pub use http::{
     AsyncClient as TitanClient, SyncClient as TitanBlockingClient, TitanApiAsync as TitanApi,
     TitanApiSync as TitanApiBlocking,
 };
+pub use tcp::{ConnectionStatus, ConnectionStatusTracker};
 pub use tcp::{ReconnectionConfig, ReconnectionManager};
 pub use titan_types::*;
 
 #[cfg(feature = "tcp_client")]
-pub use tcp::{AsyncTcpClient, TitanTcpClientError};
+pub use tcp::{TitanTcpClient, TitanTcpClientConfig, TitanTcpClientError};
 
 #[cfg(feature = "tcp_client_blocking")]
-pub use tcp::{TcpClientBlocking, TcpClientBlockingConfig, TitanTcpClientBlockingError};
+pub use tcp::{TitanTcpClientBlocking, TitanTcpClientBlockingConfig, TitanTcpClientBlockingError};
 
 #[cfg(test)]
 mod tests {
@@ -31,7 +31,7 @@ mod tests {
     // Import the HTTP and TCP client functions.
     use crate::http::{AsyncClient as HttpClient, TitanApiAsync as TitanApi};
     #[cfg(feature = "tcp_client")]
-    use crate::tcp::AsyncTcpClient;
+    use crate::tcp::TitanTcpClient;
 
     /// End-to-end test for the TCP subscription client.
     ///
@@ -55,7 +55,7 @@ mod tests {
         };
 
         // Connect to the TCP server and subscribe.
-        let client = AsyncTcpClient::new();
+        let client = TitanTcpClient::new();
         let mut rx = client.subscribe(tcp_addr, subscription_request).await?;
 
         println!("Connected to TCP subscription server at {}.", tcp_addr);

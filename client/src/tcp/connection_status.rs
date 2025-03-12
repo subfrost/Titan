@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::sync::{atomic::{AtomicBool, Ordering}, Arc, RwLock};
 use tracing::error;
 
 /// Represents the current state of the TCP connection
@@ -15,9 +15,10 @@ pub enum ConnectionStatus {
 }
 
 /// Thread-safe wrapper for tracking and updating connection status
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConnectionStatusTracker {
     status: Arc<RwLock<ConnectionStatus>>,
+    was_disconnected: Arc<AtomicBool>,
 }
 
 impl ConnectionStatusTracker {
@@ -25,6 +26,7 @@ impl ConnectionStatusTracker {
     pub fn new() -> Self {
         Self {
             status: Arc::new(RwLock::new(ConnectionStatus::Disconnected)),
+            was_disconnected: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -32,6 +34,7 @@ impl ConnectionStatusTracker {
     pub fn with_status(initial_status: ConnectionStatus) -> Self {
         Self {
             status: Arc::new(RwLock::new(initial_status)),
+            was_disconnected: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -47,10 +50,22 @@ impl ConnectionStatusTracker {
         }
     }
 
+    pub fn was_disconnected(&self) -> bool {
+        self.was_disconnected.load(Ordering::Relaxed)
+    }
+
+    pub fn reset_disconnected(&self) {
+        self.was_disconnected.store(false, Ordering::Relaxed);
+    }
+
     /// Update the connection status
     pub fn update_status(&self, new_status: ConnectionStatus) {
         if let Ok(mut status_guard) = self.status.write() {
             *status_guard = new_status;
+
+            if new_status == ConnectionStatus::Disconnected {
+                self.was_disconnected.store(true, Ordering::Relaxed);
+            }
         } else {
             error!("Failed to update connection status due to poisoned lock");
         }
@@ -81,11 +96,3 @@ impl Default for ConnectionStatusTracker {
         Self::new()
     }
 }
-
-impl Clone for ConnectionStatusTracker {
-    fn clone(&self) -> Self {
-        Self {
-            status: Arc::clone(&self.status),
-        }
-    }
-} 

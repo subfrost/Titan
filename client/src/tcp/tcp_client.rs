@@ -14,7 +14,10 @@ use tokio::{
 };
 use tracing::{error, info, warn};
 
-use crate::tcp::{connection_status::ConnectionStatus, reconnection::{self, ReconnectionManager}};
+use crate::tcp::{
+    connection_status::ConnectionStatus,
+    reconnection::{self, ReconnectionManager},
+};
 
 use super::connection_status::ConnectionStatusTracker;
 
@@ -103,6 +106,16 @@ impl AsyncTcpClient {
     /// Get the current connection status
     pub fn get_status(&self) -> ConnectionStatus {
         self.status_tracker.get_status()
+    }
+
+    /// Get whether the client was disconnected at any point in time
+    pub fn was_disconnected(&self) -> bool {
+        self.status_tracker.was_disconnected()
+    }
+
+    /// Reset the disconnected flag
+    pub fn reset_disconnected(&self) {
+        self.status_tracker.reset_disconnected();
     }
 
     /// Checks if there is an active worker task.
@@ -450,6 +463,7 @@ mod tests {
     use super::*;
     use std::net::{SocketAddr, TcpListener};
     use std::sync::Arc;
+    use std::sync::Once;
     use titan_types::EventType;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener as TokioTcpListener;
@@ -457,7 +471,6 @@ mod tests {
     use tokio::task::JoinHandle;
     use tokio::time::sleep;
     use tracing_subscriber::{self, EnvFilter};
-    use std::sync::Once;
 
     // Initialize the logger once for all tests
     static INIT: Once = Once::new();
@@ -465,14 +478,14 @@ mod tests {
     fn init_test_logger() {
         INIT.call_once(|| {
             // Initialize a subscriber that prints all logs to stderr
-            let filter = EnvFilter::from_default_env()
-                .add_directive("titan_client=trace".parse().unwrap());
-                
+            let filter =
+                EnvFilter::from_default_env().add_directive("titan_client=trace".parse().unwrap());
+
             tracing_subscriber::fmt()
                 .with_env_filter(filter)
                 .with_test_writer() // This ensures logs go to the test output
                 .init();
-            
+
             println!("Test logger initialized at TRACE level");
         });
     }
@@ -481,17 +494,17 @@ mod tests {
     async fn start_async_test_server() -> (JoinHandle<()>, SocketAddr, oneshot::Sender<()>) {
         // Initialize the logger for testing
         init_test_logger();
-        
+
         // Create a shutdown channel
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
-        
+
         // Create the server
         let listener = TokioTcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        
+
         // Log that the server is starting
         info!("Test server starting on {}", addr);
-        
+
         // Spawn the server task
         let handle = tokio::spawn(async move {
             loop {
@@ -500,7 +513,7 @@ mod tests {
                         match accept_result {
                             Ok((mut stream, client_addr)) => {
                                 info!("Test server accepted connection from {}", client_addr);
-                                
+
                                 // Handle the connection in a new task
                                 tokio::spawn(async move {
                                     // Read the request
@@ -509,27 +522,27 @@ mod tests {
                                         Ok(n) if n > 0 => {
                                             let request = String::from_utf8_lossy(&buf[..n]);
                                             info!("Test server received request: {}", request);
-                                            
+
                                             // Send back a test event with a small delay to ensure client is ready
                                             sleep(Duration::from_millis(10)).await;
-                                            
+
                                             // This is the correct format for Event deserialization
                                             let event = r#"{"type":"TransactionsAdded","data": { "txids":["2222222222222222222222222222222222222222222222222222222222222222"]}}"#;
                                             match stream.write_all(event.as_bytes()).await {
                                                 Ok(_) => info!("Test server sent event"),
                                                 Err(e) => error!("Test server failed to write event: {}", e),
                                             }
-                                            
+
                                             match stream.write_all(b"\n").await {
                                                 Ok(_) => info!("Test server sent newline"),
                                                 Err(e) => error!("Test server failed to write newline: {}", e),
                                             }
-                                            
+
                                             match stream.flush().await {
                                                 Ok(_) => info!("Test server flushed output"),
                                                 Err(e) => error!("Test server failed to flush: {}", e),
                                             }
-                                            
+
                                             // Keep the connection open for a while
                                             info!("Test server keeping connection open");
                                             sleep(Duration::from_millis(500)).await;
@@ -560,11 +573,11 @@ mod tests {
             }
             info!("Test server shutting down");
         });
-        
+
         // Small delay to ensure server is ready
         sleep(Duration::from_millis(10)).await;
         info!("Test server setup complete, returning handle");
-        
+
         (handle, addr, shutdown_tx)
     }
 
@@ -573,107 +586,101 @@ mod tests {
         // Initialize logging for tests
         init_test_logger();
         info!("Starting test_shutdown_and_join");
-        
+
         // Create a TCP client with a mock server (that doesn't exist)
         let client = AsyncTcpClient::new_with_reconnect_settings(ReconnectSettings {
-            max_retries: Some(2), // Limit retries for quicker test
+            max_retries: Some(2),                    // Limit retries for quicker test
             retry_delay: Duration::from_millis(100), // Short delay for quicker test
             read_buffer_capacity: 4096,
             max_buffer_size: 10 * 1024 * 1024,
         });
-        
+
         // Subscribe to a non-existent server - this will keep retrying
-        let subscription_request = TcpSubscriptionRequest {
-            subscribe: vec![],
-        };
+        let subscription_request = TcpSubscriptionRequest { subscribe: vec![] };
         info!("Subscribing to non-existent server to test shutdown");
-        
+
         // We know this will fail to connect, but it starts the background task
         let result = client.subscribe("127.0.0.1:1", subscription_request).await;
         assert!(result.is_ok());
         info!("Subscription started, checking active task");
-        
+
         // Check that we have an active task
         assert!(client.has_active_task().unwrap());
-        
+
         // Wait a bit to let the reconnect logic run
         info!("Waiting for reconnection attempts to begin");
         sleep(Duration::from_millis(300)).await;
-        
+
         // Shutdown and join
         info!("Shutting down client");
         let result = client.shutdown_and_join().await;
-        
+
         // Should succeed
         assert!(result.is_ok());
         info!("Client shutdown successfully");
-        
+
         // Check we no longer have an active task
         assert!(!client.has_active_task().unwrap());
         info!("Test completed successfully");
     }
-    
+
     #[tokio::test]
     async fn test_multiple_subscribes() {
         // Initialize logging for tests
         init_test_logger();
         info!("Starting test_multiple_subscribes");
-        
+
         // Create a TCP client
         let client = AsyncTcpClient::new_with_reconnect_settings(ReconnectSettings {
-            max_retries: Some(1), // Limit retries for quicker test
+            max_retries: Some(1),                    // Limit retries for quicker test
             retry_delay: Duration::from_millis(100), // Short delay for quicker test
             read_buffer_capacity: 4096,
             max_buffer_size: 10 * 1024 * 1024,
         });
-        
+
         // First subscription
-        let subscription_request1 = TcpSubscriptionRequest {
-            subscribe: vec![],
-        };
+        let subscription_request1 = TcpSubscriptionRequest { subscribe: vec![] };
         info!("Creating first subscription");
         let result1 = client.subscribe("127.0.0.1:1", subscription_request1).await;
         assert!(result1.is_ok());
-        
+
         // We should have an active task
         assert!(client.has_active_task().unwrap());
         info!("First subscription active");
-        
+
         // Wait a bit
         sleep(Duration::from_millis(200)).await;
-        
+
         // Second subscription - should replace the first one
-        let subscription_request2 = TcpSubscriptionRequest {
-            subscribe: vec![],
-        };
+        let subscription_request2 = TcpSubscriptionRequest { subscribe: vec![] };
         info!("Creating second subscription (should replace the first)");
         let result2 = client.subscribe("127.0.0.1:2", subscription_request2).await;
         assert!(result2.is_ok());
-        
+
         // We should still have an active task
         assert!(client.has_active_task().unwrap());
         info!("Second subscription active");
-        
+
         // Shutdown and join
         info!("Shutting down client");
         let join_result = client.shutdown_and_join().await;
         assert!(join_result.is_ok());
-        
+
         // We should no longer have an active task
         assert!(!client.has_active_task().unwrap());
         info!("Test completed successfully");
     }
-    
+
     #[tokio::test]
     async fn test_async_connection_status_transitions() {
         // Initialize logging for tests
         init_test_logger();
         info!("Starting test_async_connection_status_transitions");
-        
+
         // Start a test server
         info!("Starting test server");
         let (server_handle, server_addr, shutdown_tx) = start_async_test_server().await;
-        
+
         // Create a client
         let client = AsyncTcpClient::new_with_reconnect_settings(ReconnectSettings {
             max_retries: Some(2),
@@ -681,37 +688,43 @@ mod tests {
             read_buffer_capacity: 4096,
             max_buffer_size: 10 * 1024 * 1024,
         });
-        
+
         // Initially disconnected
         assert_eq!(client.get_status(), ConnectionStatus::Disconnected);
         info!("Initial status: {:?}", client.get_status());
-        
+
         // Subscribe to the server
         let subscription_request = TcpSubscriptionRequest {
             subscribe: vec![EventType::TransactionsAdded],
         };
-        
+
         info!("Subscribing to test server at {}", server_addr);
-        let rx = client.subscribe(&format!("127.0.0.1:{}", server_addr.port()), subscription_request).await.unwrap();
-        
+        let rx = client
+            .subscribe(
+                &format!("127.0.0.1:{}", server_addr.port()),
+                subscription_request,
+            )
+            .await
+            .unwrap();
+
         // Give it time to connect
         info!("Waiting for connection to establish");
         sleep(Duration::from_millis(100)).await;
-        
+
         // Should be connected now
         let status = client.get_status();
         info!("Status after connection attempt: {:?}", status);
         assert_eq!(status, ConnectionStatus::Connected);
-        
+
         // Shutdown the client
         info!("Shutting down client");
         client.shutdown_and_join().await.unwrap();
-        
+
         // Check the client is disconnected
-        let final_status = client.get_status(); 
+        let final_status = client.get_status();
         info!("Final status: {:?}", final_status);
         assert_eq!(final_status, ConnectionStatus::Disconnected);
-        
+
         // Shutdown the server
         info!("Shutting down test server");
         let _ = shutdown_tx.send(());
@@ -724,12 +737,12 @@ mod tests {
         // Initialize logging for tests
         init_test_logger();
         info!("Starting test_async_receive_events");
-        
+
         // Start a test server
         info!("Starting test server");
         let (server_handle, server_addr, shutdown_tx) = start_async_test_server().await;
         info!("Test server started at {}", server_addr);
-        
+
         // Create a client
         let client = AsyncTcpClient::new_with_reconnect_settings(ReconnectSettings {
             max_retries: Some(2),
@@ -737,58 +750,71 @@ mod tests {
             read_buffer_capacity: 4096,
             max_buffer_size: 10 * 1024 * 1024,
         });
-        
+
         // Subscribe to the server
         let subscription_request = TcpSubscriptionRequest {
             subscribe: vec![EventType::TransactionsAdded],
         };
-        
+
         info!("Subscribing to test server at {}", server_addr);
-        let mut rx = client.subscribe(&format!("127.0.0.1:{}", server_addr.port()), subscription_request).await.unwrap();
-        
+        let mut rx = client
+            .subscribe(
+                &format!("127.0.0.1:{}", server_addr.port()),
+                subscription_request,
+            )
+            .await
+            .unwrap();
+
         // Give it enough time to establish the connection
         info!("Waiting for connection to establish");
         sleep(Duration::from_millis(100)).await;
-        
+
         info!("Checking connection status: {:?}", client.get_status());
-        assert_eq!(client.get_status(), ConnectionStatus::Connected, 
-            "Expected client to be connected, but status is {:?}", client.get_status());
-        
+        assert_eq!(
+            client.get_status(),
+            ConnectionStatus::Connected,
+            "Expected client to be connected, but status is {:?}",
+            client.get_status()
+        );
+
         // Try to receive an event with timeout
         info!("Waiting to receive an event");
         let event = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await;
-        
+
         if let Err(e) = &event {
             error!("Timeout waiting for event: {}", e);
             // Try to diagnose what happened
             info!("Current client status: {:?}", client.get_status());
             assert!(false, "Failed to receive event within timeout");
         }
-        
+
         let event = event.unwrap();
-        
+
         if let None = &event {
             error!("Received None from channel - sender was likely dropped");
             info!("Current client status: {:?}", client.get_status());
             assert!(false, "Expected Some(event) but got None");
         }
-        
+
         match event.unwrap() {
             Event::TransactionsAdded { txids } => {
                 info!("Received transaction event with {} txids", txids.len());
                 assert_eq!(txids.len(), 1, "Expected 1 txid in event");
-                assert_eq!(txids[0].to_string(), "2222222222222222222222222222222222222222222222222222222222222222");
-            },
+                assert_eq!(
+                    txids[0].to_string(),
+                    "2222222222222222222222222222222222222222222222222222222222222222"
+                );
+            }
             other => {
                 error!("Received unexpected event type: {:?}", other);
                 panic!("Received unexpected event type: {:?}", other);
             }
         }
-        
+
         // Shutdown the client
         info!("Shutting down client");
         client.shutdown_and_join().await.unwrap();
-        
+
         // Shutdown the server
         info!("Shutting down test server");
         let _ = shutdown_tx.send(());
@@ -801,7 +827,7 @@ mod tests {
         // Initialize logging for tests
         init_test_logger();
         info!("Starting test_async_connection_error_handling");
-        
+
         // Create a client with short timeout
         let client = AsyncTcpClient::new_with_reconnect_settings(ReconnectSettings {
             max_retries: Some(2),
@@ -809,35 +835,39 @@ mod tests {
             read_buffer_capacity: 4096,
             max_buffer_size: 10 * 1024 * 1024,
         });
-        
+
         // Initially disconnected
         assert_eq!(client.get_status(), ConnectionStatus::Disconnected);
         info!("Initial status: {:?}", client.get_status());
-        
+
         // Try to connect to a non-existent server
         let subscription_request = TcpSubscriptionRequest {
             subscribe: vec![EventType::TransactionsAdded],
         };
-        
+
         info!("Subscribing to non-existent server to test error handling");
-        let rx = client.subscribe("127.0.0.1:1", subscription_request).await.unwrap();
-        
+        let rx = client
+            .subscribe("127.0.0.1:1", subscription_request)
+            .await
+            .unwrap();
+
         // Give it time to attempt connection and reconnection
         info!("Waiting for connection attempts");
         sleep(Duration::from_millis(500)).await;
-        
+
         // Should be in reconnecting state or disconnected if it already gave up
         let status = client.get_status();
         info!("Status after connection attempts: {:?}", status);
         assert!(
             status == ConnectionStatus::Reconnecting || status == ConnectionStatus::Disconnected,
-            "Expected Reconnecting or Disconnected state, got {:?}", status
+            "Expected Reconnecting or Disconnected state, got {:?}",
+            status
         );
-        
+
         // Shutdown the client
         info!("Shutting down client");
         client.shutdown_and_join().await.unwrap();
-        
+
         // Check the client is disconnected
         let final_status = client.get_status();
         info!("Final status: {:?}", final_status);
@@ -850,7 +880,7 @@ mod tests {
         // Initialize logging for tests
         init_test_logger();
         info!("Starting test_async_shutdown_during_reconnect");
-        
+
         // Create a client with many more retries and a longer delay to ensure we
         // have time to catch it in the reconnecting state
         let client = AsyncTcpClient::new_with_reconnect_settings(ReconnectSettings {
@@ -859,23 +889,26 @@ mod tests {
             read_buffer_capacity: 4096,
             max_buffer_size: 10 * 1024 * 1024,
         });
-        
+
         // Subscribe to a non-existent server to trigger reconnection attempts
         let subscription_request = TcpSubscriptionRequest {
             subscribe: vec![EventType::TransactionsAdded],
         };
-        
+
         info!("Subscribing to non-existent server to trigger reconnection");
-        let rx = client.subscribe("127.0.0.1:1", subscription_request).await.unwrap();
-        
+        let rx = client
+            .subscribe("127.0.0.1:1", subscription_request)
+            .await
+            .unwrap();
+
         // Give it just enough time for the first connection attempt to fail and enter reconnecting
         // This is much shorter than before to ensure we don't go through all retries
         info!("Waiting for client to enter reconnection state");
         sleep(Duration::from_millis(50)).await;
-        
+
         let status_before_shutdown = client.get_status();
         info!("Status before shutdown: {:?}", status_before_shutdown);
-        
+
         // If we're not in the reconnecting state yet, wait a little longer
         if status_before_shutdown != ConnectionStatus::Reconnecting {
             info!("Not in reconnecting state yet, waiting longer");
@@ -883,27 +916,34 @@ mod tests {
             let status_before_shutdown = client.get_status();
             info!("Status after additional wait: {:?}", status_before_shutdown);
         }
-        
+
         // Now assert - this should work because we're either catching it during the first
         // reconnection attempt or we've waited a bit longer
         assert_eq!(client.get_status(), ConnectionStatus::Reconnecting);
-        
+
         // Shutdown the client while it's reconnecting
         info!("Shutting down client during reconnection");
         client.shutdown();
-        
+
         // Status should be immediately set to Disconnected by the shutdown method
         let status_after_shutdown = client.get_status();
-        info!("Status immediately after shutdown: {:?}", status_after_shutdown);
+        info!(
+            "Status immediately after shutdown: {:?}",
+            status_after_shutdown
+        );
         assert_eq!(status_after_shutdown, ConnectionStatus::Disconnected);
-        
+
         // Now try joining the task
         info!("Joining worker task");
         sleep(Duration::from_millis(50)).await;
         let result = client.join().await;
         info!("Join result: {:?}", result);
-        assert!(result.is_ok(), "Failed to join task during reconnection: {:?}", result);
-        
+        assert!(
+            result.is_ok(),
+            "Failed to join task during reconnection: {:?}",
+            result
+        );
+
         // Status should definitely be disconnected now
         let final_status = client.get_status();
         info!("Final status: {:?}", final_status);
@@ -916,13 +956,13 @@ mod tests {
         // Initialize logging for tests
         init_test_logger();
         info!("Starting test_async_buffer_size_limit");
-        
+
         // Create a special test server that sends oversized data
         info!("Starting oversized data test server");
         let listener = TokioTcpListener::bind("127.0.0.1:0").await.unwrap();
         let server_addr = listener.local_addr().unwrap();
         info!("Test server bound to {}", server_addr);
-        
+
         // Spawn server
         let server_handle = tokio::spawn(async move {
             info!("Test server waiting for connection");
@@ -934,24 +974,24 @@ mod tests {
                     Ok(n) => {
                         let request = String::from_utf8_lossy(&buf[..n]);
                         info!("Test server received request: {}", request);
-                        
+
                         // Send a large response that exceeds the small buffer size
                         info!("Sending 100KB payload to test buffer limits");
-                        
+
                         // Start with a valid JSON prefix - make sure it's valid Event format
                         let prefix = r#"{"type":"TransactionsAdded", "data": {"txids":["#;
                         stream.write_all(prefix.as_bytes()).await.unwrap();
-                        
+
                         // Add the large payload inside the JSON
                         let large_payload = "x".repeat(100_000); // 100KB of 'x' characters
                         stream.write_all(large_payload.as_bytes()).await.unwrap();
-                        
+
                         // Close the JSON properly
                         let suffix = r#"}]}}"#;
                         stream.write_all(suffix.as_bytes()).await.unwrap();
                         stream.write_all(b"\n").await.unwrap();
                         info!("Large payload sent");
-                        
+
                         // Keep connection open for a bit
                         sleep(Duration::from_millis(100)).await;
                     }
@@ -962,36 +1002,43 @@ mod tests {
             }
             info!("Test server shutting down");
         });
-        
+
         // Create a client with a very small buffer size
         info!("Creating client with small buffer size");
         let client = AsyncTcpClient::new_with_reconnect_settings(ReconnectSettings {
             max_retries: Some(1),
             retry_delay: Duration::from_millis(100),
-            read_buffer_capacity: 1024,       // 1KB initial capacity
-            max_buffer_size: 10 * 1024,       // Only 10KB max buffer size
+            read_buffer_capacity: 1024, // 1KB initial capacity
+            max_buffer_size: 10 * 1024, // Only 10KB max buffer size
         });
-        
+
         // Subscribe to the server
         let subscription_request = TcpSubscriptionRequest {
             subscribe: vec![EventType::TransactionsAdded],
         };
-        
+
         info!("Subscribing to server with buffer size limit test");
-        let _rx = client.subscribe(&format!("127.0.0.1:{}", server_addr.port()), subscription_request).await.unwrap();
-        
+        let _rx = client
+            .subscribe(
+                &format!("127.0.0.1:{}", server_addr.port()),
+                subscription_request,
+            )
+            .await
+            .unwrap();
+
         // Give some time for the client to connect and process data
         info!("Waiting for buffer overflow to occur");
         sleep(Duration::from_millis(300)).await;
-        
+
         // The client should have disconnected due to buffer overflow
         let status = client.get_status();
         info!("Client status after buffer overflow test: {:?}", status);
         assert!(
             status == ConnectionStatus::Reconnecting || status == ConnectionStatus::Disconnected,
-            "Expected client to disconnect due to buffer overflow, but status is {:?}", status
+            "Expected client to disconnect due to buffer overflow, but status is {:?}",
+            status
         );
-        
+
         // Clean up
         info!("Cleaning up");
         client.shutdown_and_join().await.unwrap();
