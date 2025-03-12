@@ -1,4 +1,7 @@
-use std::sync::{atomic::{AtomicBool, Ordering}, Arc, RwLock};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, RwLock,
+};
 use tracing::error;
 
 /// Represents the current state of the TCP connection
@@ -58,14 +61,20 @@ impl ConnectionStatusTracker {
         self.was_disconnected.store(false, Ordering::Relaxed);
     }
 
+    fn flag_disconnected(&self, new_status: ConnectionStatus) {
+        if new_status == ConnectionStatus::Disconnected
+            || new_status == ConnectionStatus::Reconnecting
+        {
+            self.was_disconnected.store(true, Ordering::Relaxed);
+        }
+    }
+
     /// Update the connection status
     pub fn update_status(&self, new_status: ConnectionStatus) {
         if let Ok(mut status_guard) = self.status.write() {
             *status_guard = new_status;
 
-            if new_status == ConnectionStatus::Disconnected {
-                self.was_disconnected.store(true, Ordering::Relaxed);
-            }
+            self.flag_disconnected(new_status);
         } else {
             error!("Failed to update connection status due to poisoned lock");
         }
@@ -78,6 +87,8 @@ impl ConnectionStatusTracker {
         move |new_status| {
             if let Ok(mut status_guard) = status.write() {
                 *status_guard = new_status;
+
+                self.flag_disconnected(new_status);
             } else {
                 error!("Failed to update connection status due to poisoned lock");
             }

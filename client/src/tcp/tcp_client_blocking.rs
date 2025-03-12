@@ -1,6 +1,6 @@
 use std::{
     io::{BufRead, BufReader, Write},
-    net::TcpStream,
+    net::{TcpStream, ToSocketAddrs},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc, Mutex,
@@ -28,7 +28,7 @@ pub enum TcpClientError {
     #[error("serde error: {0}")]
     SerdeError(#[from] serde_json::Error),
     #[error("address parse error: {0}")]
-    AddrParseError(#[from] std::net::AddrParseError),
+    AddrParseError(String),
 }
 /// Configuration for TCP client reconnection.
 #[derive(Debug, Clone)]
@@ -254,7 +254,14 @@ fn subscribe(
     // Create a standard mpsc channel to forward events.
     let (tx, rx) = mpsc::channel::<Event>();
 
-    let address = addr.parse()?;
+    let address = addr
+        .to_socket_addrs()
+        .map_err(|_| TcpClientError::AddrParseError(format!("Invalid address: {}", addr)))?
+        .next()
+        .ok_or(TcpClientError::AddrParseError(format!(
+            "Invalid address: {}",
+            addr
+        )))?;
 
     // Set initial status to Connecting
     status_tracker.update_status(ConnectionStatus::Connecting);

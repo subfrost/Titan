@@ -513,7 +513,7 @@ impl Updater {
             let txid = tx.compute_txid();
             match transaction_parser.parse(cache, u32::try_from(i).unwrap(), tx) {
                 Ok(result) => {
-                    info!("Indexing tx {} in block {}", txid, block_height);
+                    debug!("Indexing tx {} in block {}", txid, block_height);
                     transaction_updater.save(
                         cache,
                         block_header.time,
@@ -612,7 +612,7 @@ impl Updater {
         address_updater: Option<&mut AddressUpdater>,
     ) -> Result<bool> {
         if cache.does_tx_exist(*txid)? {
-            info!(
+            debug!(
                 "Skipping tx {} in {} because it already exists",
                 txid,
                 if cache.settings.mempool {
