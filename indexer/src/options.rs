@@ -55,6 +55,12 @@ pub struct Options {
     )]
     pub(super) bitcoin_rpc_limit: u32,
     #[arg(
+        long,
+        help = "Max number of RPC clients in pool. [default: 500]",
+        default_value = "500"
+    )]
+    pub(super) bitcoin_rpc_pool_size: u32,
+    #[arg(
         long = "chain",
         value_enum,
         help = "Use <CHAIN>. [default: mainnet]",

@@ -4,11 +4,12 @@ use {
         query::{to_hash, to_rune_id},
     },
     crate::{
+        bitcoin_rpc::PooledClient,
         index::{Index, IndexError},
         subscription::{self, WebhookSubscriptionManager},
     },
     bitcoin::{consensus, Address, OutPoint, Txid},
-    bitcoincore_rpc::{Client, RpcApi},
+    bitcoincore_rpc::RpcApi,
     http::HeaderMap,
     std::{collections::HashMap, sync::Arc},
     titan_types::{
@@ -130,7 +131,7 @@ pub fn last_rune_transactions(
     Ok(transactions)
 }
 
-pub fn broadcast_transaction(index: Arc<Index>, client: Client, hex: &str) -> Result<Txid> {
+pub fn broadcast_transaction(index: Arc<Index>, client: PooledClient, hex: &str) -> Result<Txid> {
     let transaction: bitcoin::Transaction = consensus::deserialize(&hex::decode(hex)?)?;
     let txid = transaction.compute_txid();
 
@@ -156,7 +157,11 @@ pub fn broadcast_transaction(index: Arc<Index>, client: Client, hex: &str) -> Re
     Ok(new_txid)
 }
 
-pub fn bitcoin_transaction_raw(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Vec<u8>> {
+pub fn bitcoin_transaction_raw(
+    index: Arc<Index>,
+    client: PooledClient,
+    txid: &Txid,
+) -> Result<Vec<u8>> {
     if index.is_indexing_bitcoin_transactions() {
         Ok(index.get_transaction_raw(txid)?)
     } else {
@@ -166,12 +171,16 @@ pub fn bitcoin_transaction_raw(index: Arc<Index>, client: Client, txid: &Txid) -
     }
 }
 
-pub fn bitcoin_transaction_hex(index: Arc<Index>, client: Client, txid: &Txid) -> Result<String> {
+pub fn bitcoin_transaction_hex(
+    index: Arc<Index>,
+    client: PooledClient,
+    txid: &Txid,
+) -> Result<String> {
     let transaction = bitcoin_transaction_raw(index, client, txid)?;
     Ok(hex::encode(transaction))
 }
 
-pub fn transaction(index: Arc<Index>, client: Client, txid: &Txid) -> Result<Transaction> {
+pub fn transaction(index: Arc<Index>, client: PooledClient, txid: &Txid) -> Result<Transaction> {
     let transaction = if index.is_indexing_bitcoin_transactions() {
         index.get_transaction(txid)?
     } else {

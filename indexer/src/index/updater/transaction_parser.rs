@@ -1,7 +1,8 @@
 use {
     super::cache::UpdaterCache,
     crate::{
-        index::{bitcoin_rpc::BitcoinCoreRpcResultExt, Chain, StoreError},
+        bitcoin_rpc::BitcoinCoreRpcResultExt,
+        index::{Chain, StoreError},
         models::{Lot, TransactionStateChange},
         util::IntoUsize,
     },

@@ -1,7 +1,8 @@
 use {
     crate::{
         api::{content::ContentError, ApiError},
-        index::{IndexError, RpcClientError, StoreError},
+        bitcoin_rpc::{RpcClientError, RpcClientPoolError},
+        index::{IndexError, StoreError},
     },
     axum::response::{IntoResponse, Response},
     http::{header, HeaderValue, StatusCode},
@@ -19,6 +20,9 @@ pub(super) enum ServerError {
 
     #[error("rpc client error: {0}")]
     RpcClientError(#[from] RpcClientError),
+
+    #[error("rpc client pool error: {0}")]
+    RpcClientPoolError(#[from] RpcClientPoolError),
 
     #[error("api error: {0}")]
     ApiError(#[from] ApiError),
@@ -52,6 +56,16 @@ impl IntoResponse for ServerError {
             }
             Self::RpcClientError(error) => {
                 error!("rpc client error: {error}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    StatusCode::INTERNAL_SERVER_ERROR
+                        .canonical_reason()
+                        .unwrap_or_default(),
+                )
+                    .into_response()
+            }
+            Self::RpcClientPoolError(error) => {
+                error!("rpc client pool error: {error}");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     StatusCode::INTERNAL_SERVER_ERROR

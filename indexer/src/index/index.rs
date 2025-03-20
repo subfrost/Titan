@@ -5,9 +5,9 @@ use {
         store::{Store, StoreError},
         updater::Updater,
         zmq::ZmqManager,
-        RpcClientError,
     },
     crate::{
+        bitcoin_rpc::{RpcClientError, RpcClientPool},
         index::updater::{ReorgError, UpdaterError},
         models::{block_id_to_transaction_status, Inscription, RuneEntry},
     },
@@ -50,6 +50,7 @@ pub struct Index {
     db: Arc<dyn Store + Send + Sync>,
     settings: Settings,
     updater: Arc<Updater>,
+
     shutdown_flag: Arc<AtomicBool>,
 
     zmq_manager: Arc<ZmqManager>,
@@ -58,6 +59,7 @@ pub struct Index {
 impl Index {
     pub fn new(
         db: Arc<dyn Store + Send + Sync>,
+        bitcoin_rpc_pool: RpcClientPool,
         settings: Settings,
         sender: Option<Sender<Event>>,
     ) -> Self {
@@ -66,11 +68,13 @@ impl Index {
         metrics.start(shutdown_flag.clone());
 
         let zmq_manager = ZmqManager::new(settings.zmq_endpoint.clone());
+
         Self {
             db: db.clone(),
             settings: settings.clone(),
             updater: Arc::new(Updater::new(
                 db.clone(),
+                bitcoin_rpc_pool,
                 settings.clone(),
                 &metrics,
                 shutdown_flag.clone(),
@@ -145,8 +149,11 @@ impl Index {
                 })) => {
                     continue;
                 }
-                Err(UpdaterError::BitcoinRpc(_)) => {
-                    warn!("We're getting network connection issues, retrying...");
+                Err(UpdaterError::BitcoinRpc(e)) => {
+                    warn!(
+                        "We're getting network connection issues, retrying... {}",
+                        e.to_string()
+                    );
                     continue;
                 }
                 Err(e) => {
@@ -157,8 +164,11 @@ impl Index {
 
             match self.updater.index_mempool() {
                 Ok(_) => (),
-                Err(UpdaterError::BitcoinRpc(_)) => {
-                    warn!("We're getting network connection issues, retrying...");
+                Err(UpdaterError::BitcoinRpc(e)) => {
+                    warn!(
+                        "We're getting network connection issues, retrying... {}",
+                        e.to_string()
+                    );
                     continue;
                 }
                 Err(e) => {

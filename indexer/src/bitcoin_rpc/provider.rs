@@ -1,5 +1,5 @@
 use {
-    super::*,
+    crate::index::Chain,
     bitcoincore_rpc::{Client, RpcApi},
     std::{thread, time::Duration},
     thiserror::Error,
@@ -15,7 +15,7 @@ pub enum RpcClientError {
     FailedToConnect(String),
 }
 
-pub trait RpcClientProvider {
+pub trait RpcClientProvider: Send + Sync + 'static {
     fn get_new_rpc_client(&self) -> Result<Client, RpcClientError>;
 }
 
@@ -58,28 +58,4 @@ pub fn validate_rpc_connection(client: Client, chain: Chain) -> Result<(), RpcCl
     }
 
     Ok(())
-}
-
-pub(crate) trait BitcoinCoreRpcResultExt<T> {
-    fn into_option(self) -> Result<Option<T>, bitcoincore_rpc::Error>;
-}
-
-impl<T> BitcoinCoreRpcResultExt<T> for Result<T, bitcoincore_rpc::Error> {
-    fn into_option(self) -> Result<Option<T>, bitcoincore_rpc::Error> {
-        match self {
-            Ok(ok) => Ok(Some(ok)),
-            Err(bitcoincore_rpc::Error::JsonRpc(bitcoincore_rpc::jsonrpc::error::Error::Rpc(
-                bitcoincore_rpc::jsonrpc::error::RpcError { code: -8, .. },
-            ))) => Ok(None),
-            Err(bitcoincore_rpc::Error::JsonRpc(bitcoincore_rpc::jsonrpc::error::Error::Rpc(
-                bitcoincore_rpc::jsonrpc::error::RpcError {
-                    code: -5, message, ..
-                },
-            ))) if message.starts_with("No such mempool or blockchain transaction") => Ok(None),
-            Err(bitcoincore_rpc::Error::JsonRpc(bitcoincore_rpc::jsonrpc::error::Error::Rpc(
-                bitcoincore_rpc::jsonrpc::error::RpcError { message, .. },
-            ))) if message.ends_with("not found") => Ok(None),
-            Err(err) => Err(err.into()),
-        }
-    }
 }

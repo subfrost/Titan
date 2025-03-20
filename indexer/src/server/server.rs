@@ -6,7 +6,8 @@ use {
     },
     crate::{
         api::{self, content::AcceptEncoding},
-        index::{Index, RpcClientProvider},
+        bitcoin_rpc::{RpcClientPool, RpcClientProvider},
+        index::Index,
         subscription::WebhookSubscriptionManager,
     },
     axum::{
@@ -49,6 +50,7 @@ impl Server {
         &self,
         index: Arc<Index>,
         webhook_subscription_manager: Arc<WebhookSubscriptionManager>,
+        bitcoin_rpc_pool: RpcClientPool,
         config: Arc<ServerConfig>,
         handle: Handle,
     ) -> SpawnResult<task::JoinHandle<io::Result<()>>> {
@@ -91,6 +93,7 @@ impl Server {
             .layer(Extension(index))
             .layer(Extension(webhook_subscription_manager))
             .layer(Extension(config.clone()))
+            .layer(Extension(bitcoin_rpc_pool))
             .layer(
                 CorsLayer::new()
                     .allow_methods([http::Method::GET])
@@ -158,11 +161,11 @@ impl Server {
 
     async fn broadcast_transaction(
         Extension(index): Extension<Arc<Index>>,
-        Extension(config): Extension<Arc<ServerConfig>>,
+        Extension(bitcoin_rpc_pool): Extension<RpcClientPool>,
         hex: String,
     ) -> ServerResult {
         task::block_in_place(|| {
-            let txid = api::broadcast_transaction(index, config.get_new_rpc_client()?, &hex)?;
+            let txid = api::broadcast_transaction(index, bitcoin_rpc_pool.get()?, &hex)?;
 
             Ok((
                 StatusCode::OK,
@@ -175,22 +178,22 @@ impl Server {
 
     async fn transaction(
         Extension(index): Extension<Arc<Index>>,
-        Extension(config): Extension<Arc<ServerConfig>>,
+        Extension(bitcoin_rpc_pool): Extension<RpcClientPool>,
         Path(txid): Path<Txid>,
     ) -> ServerResult {
         task::block_in_place(|| {
-            let transaction = api::transaction(index, config.get_new_rpc_client()?, &txid)?;
+            let transaction = api::transaction(index, bitcoin_rpc_pool.get()?, &txid)?;
             Ok(Json(transaction).into_response())
         })
     }
 
     async fn transaction_raw(
         Extension(index): Extension<Arc<Index>>,
-        Extension(config): Extension<Arc<ServerConfig>>,
+        Extension(bitcoin_rpc_pool): Extension<RpcClientPool>,
         Path(txid): Path<Txid>,
     ) -> ServerResult {
         task::block_in_place(|| {
-            let raw_tx = api::bitcoin_transaction_raw(index, config.get_new_rpc_client()?, &txid)?;
+            let raw_tx = api::bitcoin_transaction_raw(index, bitcoin_rpc_pool.get()?, &txid)?;
 
             Ok((
                 StatusCode::OK,
@@ -203,12 +206,11 @@ impl Server {
 
     async fn transaction_hex(
         Extension(index): Extension<Arc<Index>>,
-        Extension(config): Extension<Arc<ServerConfig>>,
+        Extension(bitcoin_rpc_pool): Extension<RpcClientPool>,
         Path(txid): Path<Txid>,
     ) -> ServerResult {
         task::block_in_place(|| {
-            let hex_string =
-                api::bitcoin_transaction_hex(index, config.get_new_rpc_client()?, &txid)?;
+            let hex_string = api::bitcoin_transaction_hex(index, bitcoin_rpc_pool.get()?, &txid)?;
 
             Ok((
                 StatusCode::OK,

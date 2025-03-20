@@ -4,9 +4,8 @@ use {
         *,
     },
     crate::{
-        index::{
-            metrics::Metrics, store::Store, RpcClientError, RpcClientProvider, Settings, StoreError,
-        },
+        bitcoin_rpc::{RpcClientError, RpcClientPool, RpcClientPoolError, RpcClientProvider},
+        index::{metrics::Metrics, store::Store, Settings, StoreError},
         models::{BlockId, RuneEntry},
     },
     address::AddressUpdater,
@@ -91,6 +90,8 @@ pub enum UpdaterError {
     EventSender(#[from] SendError<Event>),
     #[error("invalid main chain tip")]
     InvalidMainChainTip,
+    #[error("bitcoin rpc pool error {0}")]
+    BitcoinRpcPool(#[from] RpcClientPoolError),
 }
 
 type Result<T> = std::result::Result<T, UpdaterError>;
@@ -99,6 +100,8 @@ pub struct Updater {
     db: Arc<StoreWithLock>,
     settings: Settings,
     is_at_tip: AtomicBool,
+
+    bitcoin_rpc_pool: RpcClientPool,
 
     shutdown_flag: Arc<AtomicBool>,
 
@@ -118,6 +121,7 @@ pub struct Updater {
 impl Updater {
     pub fn new(
         db: Arc<dyn Store + Send + Sync>,
+        bitcoin_rpc_pool: RpcClientPool,
         settings: Settings,
         metrics: &Metrics,
         shutdown_flag: Arc<AtomicBool>,
@@ -126,6 +130,7 @@ impl Updater {
         Self {
             db: Arc::new(StoreWithLock::new(db)),
             settings,
+            bitcoin_rpc_pool,
             is_at_tip: AtomicBool::new(false),
             broadcast_lock: Mutex::new(()),
             pre_index_submitted_txs: RwLock::new(HashSet::new()),
@@ -177,7 +182,7 @@ impl Updater {
         )?;
 
         // Get RPC client and get block height
-        let bitcoin_block_client = self.settings.get_new_rpc_client()?;
+        let bitcoin_block_client = self.bitcoin_rpc_pool.get()?;
         let mut chain_info = bitcoin_block_client.get_blockchain_info()?;
 
         let mut first_block = true;
@@ -191,12 +196,12 @@ impl Updater {
                 self.open_progress_bar(cache.get_block_height_tip(), chain_info.blocks);
 
             let rx = fetch_blocks_from(
-                Arc::new(self.settings.clone()),
+                self.bitcoin_rpc_pool.clone(),
                 cache.get_block_count(),
                 chain_info.blocks + 1,
             )?;
 
-            let rpc_client = self.settings.get_new_rpc_client()?;
+            let rpc_client = self.bitcoin_rpc_pool.get()?;
 
             while let Ok(block) = rx.recv() {
                 if self.shutdown_flag.load(Ordering::SeqCst) {
@@ -301,7 +306,7 @@ impl Updater {
             .with_label_values(&["index_mempool"])
             .start_timer();
 
-        let client = self.settings.get_new_rpc_client()?;
+        let client = self.bitcoin_rpc_pool.get()?;
 
         // Get current mempool transactions
         let lock = self.broadcast_lock.lock().unwrap();
@@ -500,7 +505,7 @@ impl Updater {
         // Fetch the transactions that we need to index.
         if !to_fetch.is_empty() {
             let fetched = mempool::fetch_transactions(
-                Arc::new(self.settings.clone()),
+                self.bitcoin_rpc_pool.clone(),
                 &to_fetch,
                 self.shutdown_flag.clone(),
             );
@@ -674,7 +679,7 @@ impl Updater {
             .unwrap()
             .as_secs();
 
-        let rpc_client = self.settings.get_new_rpc_client()?;
+        let rpc_client = self.bitcoin_rpc_pool.get()?;
         let mut transaction_parser =
             TransactionParser::new(&rpc_client, self.settings.chain, height, true)?;
 
@@ -832,7 +837,7 @@ impl Updater {
 
             if let Some(sender) = &self.sender {
                 if !flush && (!categorized.removed.is_empty() || !categorized.added.is_empty()) {
-                    let client = self.settings.get_new_rpc_client()?;
+                    let client = self.bitcoin_rpc_pool.get()?;
 
                     let chain_info = client.get_blockchain_info()?;
 

@@ -1,6 +1,6 @@
 use {
     super::*,
-    bitcoin_rpc::RpcClientProvider,
+    crate::bitcoin_rpc::{RpcClientError, RpcClientProvider},
     bitcoincore_rpc::{Auth, Client},
     std::path::PathBuf,
 };

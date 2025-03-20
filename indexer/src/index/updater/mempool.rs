@@ -9,7 +9,7 @@ use std::sync::Arc;
 use threadpool::ThreadPool;
 use tracing::error;
 
-use crate::index::{RpcClientError, RpcClientProvider};
+use crate::bitcoin_rpc::{RpcClientError, RpcClientPool};
 
 #[derive(thiserror::Error, Debug)]
 pub enum MempoolError {
@@ -25,7 +25,7 @@ pub enum MempoolError {
 /// Each task gets a new RPC client from the provider and fetches the raw transaction.
 /// The results are sent over a channel and then collected into a HashMap.
 pub fn fetch_transactions(
-    client_provider: Arc<dyn RpcClientProvider + Send + Sync>,
+    bitcoin_rpc_pool: RpcClientPool,
     txids: &Vec<Txid>,
     interrupt: Arc<AtomicBool>,
 ) -> HashMap<Txid, Transaction> {
@@ -38,7 +38,7 @@ pub fn fetch_transactions(
 
     // For each txid, submit a task to the pool.
     for &txid in txids.iter() {
-        let client_provider = client_provider.clone();
+        let bitcoin_rpc_pool = bitcoin_rpc_pool.clone();
         let sender = sender.clone();
         let interrupt = interrupt.clone();
         pool.execute(move || {
@@ -47,7 +47,7 @@ pub fn fetch_transactions(
                 return;
             }
             // Get a new RPC client.
-            let client = match client_provider.get_new_rpc_client() {
+            let client = match bitcoin_rpc_pool.get() {
                 Ok(c) => c,
                 Err(e) => {
                     error!("Failed to get new RPC client for txid {}: {}", txid, e);

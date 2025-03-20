@@ -1,5 +1,8 @@
 use {
-    crate::index::{Chain, RpcClientError, RpcClientProvider},
+    crate::{
+        bitcoin_rpc::{RpcClientError, RpcClientProvider},
+        index::Chain,
+    },
     bitcoincore_rpc::{Auth, Client},
 };
 

@@ -1,7 +1,8 @@
 use axum_server::Handle;
+use bitcoin_rpc::{validate_rpc_connection, RpcClientPool, RpcClientProvider};
 use clap::Parser;
 use db::RocksDB;
-use index::{validate_rpc_connection, Index, RpcClientProvider, Settings};
+use index::{Index, Settings};
 use options::Options;
 use server::{Server, ServerConfig};
 use std::{io, panic, sync::Arc};
@@ -16,6 +17,7 @@ use tokio::{
 use tracing::{error, info};
 
 mod api;
+mod bitcoin_rpc;
 mod db;
 mod index;
 mod models;
@@ -44,7 +46,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     set_panic_hook(db_arc.clone());
 
     // 5. If subscriptions are enabled, spawn the dispatcher + cleanup tasks
-    let spawn_subscription_result = spawn_subscription_tasks(db_arc.clone(), options.clone().into());
+    let spawn_subscription_result =
+        spawn_subscription_tasks(db_arc.clone(), options.clone().into());
 
     let (webhook_subscription_manager, event_sender) = match spawn_subscription_result.as_ref() {
         Some(sub) => (
@@ -57,7 +60,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // 6. Create the index
-    let index = Arc::new(Index::new(db_arc.clone(), settings.clone(), event_sender));
+    let bitcoin_rpc_pool = RpcClientPool::new(
+        Arc::new(settings.clone()),
+        options.bitcoin_rpc_pool_size as usize,
+    );
+
+    let index = Arc::new(Index::new(
+        db_arc.clone(),
+        bitcoin_rpc_pool.clone(),
+        settings.clone(),
+        event_sender,
+    ));
     index.validate_index()?;
 
     // 7. Spawn background threads (indexer, ZMQ listener, etc.)
@@ -70,6 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         index.clone(),
         webhook_subscription_manager
             .unwrap_or(Arc::new(WebhookSubscriptionManager::new(db_arc.clone()))),
+        bitcoin_rpc_pool.clone(),
         Arc::new(server_config),
         handle.clone(),
     )?;

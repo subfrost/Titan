@@ -1,13 +1,8 @@
 use {
-    crate::index::{bitcoin_rpc::BitcoinCoreRpcResultExt, RpcClientProvider},
+    crate::bitcoin_rpc::{BitcoinCoreRpcResultExt, RpcClientPool},
     bitcoin::{Block, BlockHash},
     bitcoincore_rpc::{Client, RpcApi},
-    std::{
-        collections::BTreeMap,
-        sync::{mpsc, Arc},
-        thread,
-        time::Duration,
-    },
+    std::{collections::BTreeMap, sync::mpsc, thread, time::Duration},
     threadpool::ThreadPool,
     tracing::{error, warn},
 };
@@ -18,7 +13,7 @@ pub enum BlockLocator {
 }
 
 pub fn fetch_blocks_from(
-    client_provider: Arc<dyn RpcClientProvider + Send + Sync>,
+    bitcoin_rpc_pool: RpcClientPool,
     start_height: u64,
     limit: u64,
 ) -> Result<mpsc::Receiver<Block>, bitcoincore_rpc::Error> {
@@ -63,10 +58,10 @@ pub fn fetch_blocks_from(
     while current_start < limit {
         let current_end = std::cmp::min(current_start + window_size, limit);
         for height in current_start..current_end {
-            let client_provider = client_provider.clone();
+            let bitcoin_rpc_pool = bitcoin_rpc_pool.clone();
             let intermediate_sender = intermediate_sender.clone();
             pool.execute(move || {
-                let client = match client_provider.get_new_rpc_client() {
+                let client = match bitcoin_rpc_pool.get() {
                     Ok(c) => c,
                     Err(e) => {
                         error!("Failed to create RPC client for height {}: {}", height, e);
