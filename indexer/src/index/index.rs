@@ -219,7 +219,7 @@ impl Index {
         Ok(self.db.get_mempool_entries(txids)?)
     }
 
-    pub fn get_mempool_entries_all(&self) -> Result<HashMap<Txid, MempoolEntry>> {
+    pub fn get_all_mempool_entries(&self) -> Result<HashMap<Txid, MempoolEntry>> {
         Ok(self.db.get_mempool_txids()?)
     }
 

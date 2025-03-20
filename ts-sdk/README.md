@@ -178,6 +178,15 @@ testTcpSubscription();
 - **getMempoolTxids()**: `Promise<string[]>`
   Retrieves the transaction IDs currently in the mempool.
 
+- **getMempoolEntry(txid: string)**: `Promise<MempoolEntry>`
+  Retrieves a specific mempool entry by its txid.
+
+- **getMempoolEntries(txids: string[])**: `Promise<Map<string, MempoolEntry>>`
+  Retrieves multiple mempool entries by their txids.
+
+- **getAllMempoolEntries()**: `Promise<Map<string, MempoolEntry>>`
+  Retrieves all mempool entries.
+
 - **getSubscription(id: string)**: `Promise<Subscription>`
   Retrieves a subscription by its ID.
 

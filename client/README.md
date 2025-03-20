@@ -17,18 +17,15 @@
 
 ## Features
 
-- **Asynchronous HTTP Client:**  
+- **Asynchronous HTTP Client:**
   - Built on top of `reqwest` and uses async/await.
   - Provides methods to fetch status, blocks, transactions, addresses, inscriptions, runes, and subscriptions.
-  
-- **Synchronous (Blocking) HTTP Client:**  
+- **Synchronous (Blocking) HTTP Client:**
   - Uses `reqwest::blocking` for environments that do not use async.
-  
-- **TCP Subscription Clients:**  
+- **TCP Subscription Clients:**
   - Asynchronous and blocking versions to subscribe to real-time events.
   - Automatic reconnection is supported in the asynchronous client.
-  
-- **Comprehensive API:**  
+- **Comprehensive API:**
   - Both clients support a wide array of endpoints, including broadcast and query endpoints for transactions, outputs, inscriptions, runes, and more.
 
 ---
@@ -261,6 +258,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 - **get_mempool_txids()**: `Result<Vec<Txid>, Error>`  
   Retrieves the current mempool transaction IDs.
 
+- **get_mempool_entry(txid: &str)**: `Result<MempoolEntry, Error>`  
+  Retrieves a specific mempool entry by its txid.
+
+- **get_mempool_entries(txids: &[Txid])**: `Result<HashMap<Txid, Option<MempoolEntry>>, Error>`  
+  Retrieves multiple mempool entries by their txids.
+
+- **get_all_mempool_entries()**: `Result<HashMap<Txid, MempoolEntry>, Error>`  
+  Retrieves all mempool entries.
+
 - **get_subscription(id: &str)**: `Result<Subscription, Error>`  
   Retrieves a subscription by its ID.
 
@@ -280,9 +286,11 @@ Provides the same set of methods as the async client, but in a blocking (synchro
 ### TCP Subscription Clients
 
 #### Asynchronous TCP Client:
+
 - Use `subscribe_to_titan(addr, subscription_request, shutdown_rx)` to subscribe.
 - Returns a Tokio mpsc receiver that streams incoming events.
 
 #### Synchronous (Blocking) TCP Client:
+
 - Use `subscribe_to_titan_blocking(addr, subscription_request, shutdown_flag)` to subscribe.
 - Returns a standard mpsc receiver for events.

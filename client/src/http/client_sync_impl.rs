@@ -196,7 +196,7 @@ impl TitanApiSync for SyncClient {
         Ok(serde_json::from_str(&response).map_err(Error::from)?)
     }
 
-    fn get_mempool_entries_all(&self) -> Result<HashMap<Txid, MempoolEntry>, Error> {
+    fn get_all_mempool_entries(&self) -> Result<HashMap<Txid, MempoolEntry>, Error> {
         let text = self.call_text("/mempool/entries/all")?;
         serde_json::from_str(&text).map_err(Error::from)
     }

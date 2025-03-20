@@ -168,6 +168,14 @@ export class TitanHttpClient {
     return new Map(Object.entries(response.data));
   }
 
+  async getAllMempoolEntries(): Promise<Map<string, MempoolEntry>> {
+    const response = await this.http.get<Record<string, MempoolEntry>>(
+      '/mempool/entries/all',
+    );
+
+    return new Map(Object.entries(response.data));
+  }
+
   async getSubscription(id: string): Promise<Subscription | undefined> {
     return await this.get<Subscription>(`/subscription/${id}`);
   }

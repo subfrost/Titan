@@ -80,7 +80,7 @@ impl Server {
             // Mempool entries
             .route("/mempool/entry/{txid}", get(Self::mempool_tx))
             .route("/mempool/entries", post(Self::mempool_entries))
-            .route("/mempool/entries/all", get(Self::mempool_entries_all))
+            .route("/mempool/entries/all", get(Self::mempool_all_entries))
             // Subscriptions
             .route(
                 "/subscription/{id}",
@@ -294,7 +294,7 @@ impl Server {
         task::block_in_place(|| Ok(Json(api::mempool_entries(index, &txids)?).into_response()))
     }
 
-    async fn mempool_entries_all(Extension(index): Extension<Arc<Index>>) -> ServerResult {
+    async fn mempool_all_entries(Extension(index): Extension<Arc<Index>>) -> ServerResult {
         task::block_in_place(|| Ok(Json(api::mempool_entries_all(index)?).into_response()))
     }
 

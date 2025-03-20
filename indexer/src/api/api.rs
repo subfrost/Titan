@@ -225,7 +225,7 @@ pub fn mempool_entries(
 }
 
 pub fn mempool_entries_all(index: Arc<Index>) -> Result<HashMap<Txid, MempoolEntry>> {
-    Ok(index.get_mempool_entries_all()?)
+    Ok(index.get_all_mempool_entries()?)
 }
 
 pub fn address(index: Arc<Index>, address: &Address) -> Result<AddressData> {
