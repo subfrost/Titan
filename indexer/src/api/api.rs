@@ -224,6 +224,10 @@ pub fn mempool_entries(
     Ok(index.get_mempool_entries(txids)?)
 }
 
+pub fn mempool_entries_all(index: Arc<Index>) -> Result<HashMap<Txid, MempoolEntry>> {
+    Ok(index.get_mempool_entries_all()?)
+}
+
 pub fn address(index: Arc<Index>, address: &Address) -> Result<AddressData> {
     let outpoints = index.get_script_pubkey_outpoints(&address)?;
     Ok(outpoints)

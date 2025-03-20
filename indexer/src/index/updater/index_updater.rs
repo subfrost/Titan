@@ -315,11 +315,17 @@ impl Updater {
         drop(lock);
 
         // Find new transactions to index
-        let new_txs: Vec<Txid> = current_mempool
-            .iter()
-            .filter(|(txid, _)| !stored_mempool.contains_key(*txid))
-            .map(|(txid, _)| txid.clone())
-            .collect();
+        let (new_txs, new_txs_with_mempool_entry): (Vec<Txid>, Vec<(Txid, MempoolEntry)>) =
+            current_mempool
+                .iter()
+                .filter(|(txid, _)| !stored_mempool.contains_key(*txid))
+                .map(|(txid, mempool_entry)| {
+                    (
+                        txid.clone(),
+                        (txid.clone(), MempoolEntry::from(mempool_entry)),
+                    )
+                })
+                .unzip();
 
         // Find transactions to remove (they're no longer in mempool)
         let removed_txs: Vec<Txid> = stored_mempool
@@ -330,14 +336,26 @@ impl Updater {
 
         // Index new transactions
         let new_txs_len = new_txs.len();
+
+        let mut cache = UpdaterCache::new(
+            self.db.clone(),
+            UpdaterCacheSettings::new(&self.settings, true),
+        )?;
+
+        let updated_txids =
+            self.update_mempool_entries(&mut cache, &stored_mempool, &current_mempool);
+
+        self.send_mempool_events(
+            &mut cache,
+            new_txs_with_mempool_entry,
+            removed_txs.clone(),
+            updated_txids,
+        )?;
+
         if new_txs_len > 0 {
             let tx_map = self.choose_mempool_transactions_to_index(&new_txs)?;
 
             let tx_order = mempool::sort_transaction_order(&current_mempool, &tx_map)?;
-            let mut cache = UpdaterCache::new(
-                self.db.clone(),
-                UpdaterCacheSettings::new(&self.settings, true),
-            )?;
 
             let mut address_updater = AddressUpdater::new();
 
@@ -358,12 +376,11 @@ impl Updater {
                 address_updater.batch_update_script_pubkey(&mut cache)?;
             }
 
-            self.update_mempool_entries(&mut cache, &stored_mempool, &current_mempool);
-
             cache.add_address_events(self.settings.chain);
-            cache.flush()?;
-            cache.send_events(&self.sender)?;
         }
+
+        cache.flush()?;
+        cache.send_events(&self.sender)?;
 
         let removed_len = removed_txs.len();
         if removed_txs.len() > 0 {
@@ -398,7 +415,7 @@ impl Updater {
         cache: &mut UpdaterCache,
         stored_mempool: &HashMap<Txid, MempoolEntry>,
         current_mempool: &HashMap<Txid, GetMempoolEntryResult>,
-    ) {
+    ) -> Vec<(Txid, MempoolEntry)> {
         let mut updated_txids = Vec::new();
         for (stored_txid, stored_mempool_entry) in stored_mempool {
             if let Some(mempool_entry_result) = current_mempool.get(stored_txid) {
@@ -411,11 +428,33 @@ impl Updater {
             }
         }
 
+        updated_txids
+    }
+
+    fn send_mempool_events(
+        &self,
+        cache: &mut UpdaterCache,
+        new_txids: Vec<(Txid, MempoolEntry)>,
+        removed_txids: Vec<Txid>,
+        updated_txids: Vec<(Txid, MempoolEntry)>,
+    ) -> Result<()> {
+        if !new_txids.is_empty() {
+            cache.add_event(Event::MempoolTransactionsAdded { txids: new_txids });
+        }
+
+        if !removed_txids.is_empty() {
+            cache.add_event(Event::MempoolTransactionsReplaced {
+                txids: removed_txids,
+            });
+        }
+
         if !updated_txids.is_empty() {
             cache.add_event(Event::MempoolEntriesUpdated {
                 txids: updated_txids,
             });
         }
+
+        Ok(())
     }
 
     fn choose_mempool_transactions_to_index(
@@ -779,16 +818,13 @@ impl Updater {
             .with_label_values(&["notify_tx_updates"])
             .start_timer();
         if self.settings.index_bitcoin_transactions {
-            let (categorized, mempool_categorized) = {
+            let categorized = {
                 let transaction_update = self
                     .transaction_update
                     .read()
                     .map_err(|_| UpdaterError::Mutex)?;
 
-                (
-                    transaction_update.categorize_to_change_set(),
-                    transaction_update.categorize_to_mempool(),
-                )
+                transaction_update.categorize_to_change_set()
             };
 
             if let Some(sender) = &self.sender {
@@ -825,18 +861,6 @@ impl Updater {
                 if !categorized.added.is_empty() {
                     sender.blocking_send(Event::TransactionsAdded {
                         txids: categorized.added.into_iter().collect(),
-                    })?;
-                }
-
-                if !mempool_categorized.added.is_empty() {
-                    sender.blocking_send(Event::MempoolTransactionsAdded {
-                        txids: mempool_categorized.added.into_iter().collect(),
-                    })?;
-                }
-
-                if !mempool_categorized.removed.is_empty() {
-                    sender.blocking_send(Event::MempoolTransactionsReplaced {
-                        txids: mempool_categorized.removed.into_iter().collect(),
                     })?;
                 }
             }

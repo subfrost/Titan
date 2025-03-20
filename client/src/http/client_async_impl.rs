@@ -190,6 +190,11 @@ impl TitanApiAsync for AsyncClient {
         serde_json::from_str(&text).map_err(Error::from)
     }
 
+    async fn get_mempool_entries_all(&self) -> Result<HashMap<Txid, MempoolEntry>, Error> {
+        let text = self.call_text("/mempool/entries/all").await?;
+        serde_json::from_str(&text).map_err(Error::from)
+    }
+
     async fn get_subscription(&self, id: &str) -> Result<Subscription, Error> {
         let text = self.call_text(&format!("/subscription/{}", id)).await?;
         serde_json::from_str(&text).map_err(Error::from)

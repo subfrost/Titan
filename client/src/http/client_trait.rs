@@ -83,6 +83,9 @@ pub trait TitanApiAsync: Send + Sync + Clone + 'static {
         txids: &[Txid],
     ) -> Result<HashMap<Txid, Option<MempoolEntry>>, Error>;
 
+    /// Returns all mempool entries.
+    async fn get_mempool_entries_all(&self) -> Result<HashMap<Txid, MempoolEntry>, Error>;
+
     /// Fetches a single subscription by `id`.
     async fn get_subscription(&self, id: &str) -> Result<Subscription, Error>;
 
@@ -167,6 +170,9 @@ pub trait TitanApiSync: Send + Sync + Clone + 'static {
         &self,
         txids: &[Txid],
     ) -> Result<HashMap<Txid, Option<MempoolEntry>>, Error>;
+
+    /// Returns all mempool entries.
+    fn get_mempool_entries_all(&self) -> Result<HashMap<Txid, MempoolEntry>, Error>;
 
     /// Fetches a single subscription by `id`, blocking.
     fn get_subscription(&self, id: &str) -> Result<Subscription, Error>;

@@ -151,7 +151,7 @@ pub enum Event {
         txids: Vec<Txid>,
     },
     MempoolTransactionsAdded {
-        txids: Vec<Txid>,
+        txids: Vec<(Txid, MempoolEntry)>,
     },
     MempoolTransactionsReplaced {
         txids: Vec<Txid>,
