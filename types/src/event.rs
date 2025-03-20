@@ -143,6 +143,7 @@ pub enum Event {
     },
     TransactionSubmitted {
         txid: Txid,
+        entry: MempoolEntry,
     },
     TransactionsAdded {
         txids: Vec<Txid>,

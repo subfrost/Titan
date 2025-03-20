@@ -39,7 +39,7 @@ use {
     thiserror::Error,
     titan_types::{Block, Event, MempoolEntry},
     tokio::sync::mpsc::{error::SendError, Sender},
-    tracing::{debug, error, info, trace},
+    tracing::{debug, error, info},
     transaction_parser::TransactionParser,
     transaction_updater::TransactionUpdater,
 };
@@ -615,11 +615,14 @@ impl Updater {
         if self.index_tx(
             txid,
             tx,
-            Some(mempool_entry),
+            Some(mempool_entry.clone()),
             &mut cache,
             Some(&mut address_updater),
         )? {
-            cache.add_event(Event::TransactionSubmitted { txid: *txid });
+            cache.add_event(Event::TransactionSubmitted {
+                txid: *txid,
+                entry: mempool_entry,
+            });
 
             if self.settings.index_addresses {
                 address_updater.batch_update_script_pubkey(&mut cache)?;
