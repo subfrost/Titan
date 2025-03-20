@@ -109,13 +109,10 @@ impl AsyncTcpClient {
     }
 
     /// Get whether the client was disconnected at any point in time
-    pub fn was_disconnected(&self) -> bool {
-        self.status_tracker.was_disconnected()
-    }
-
-    /// Reset the disconnected flag
-    pub fn reset_disconnected(&self) {
-        self.status_tracker.reset_disconnected();
+    pub fn create_status_subscriber(&self) -> mpsc::Receiver<ConnectionStatus> {
+        let (tx, rx) = mpsc::channel(100);
+        self.status_tracker.register_listener(tx);
+        rx
     }
 
     /// Checks if there is an active worker task.
