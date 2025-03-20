@@ -40,9 +40,10 @@ pub type Result<T> = std::result::Result<T, ApiError>;
 
 pub fn tip(index: Arc<Index>) -> Result<BlockTip> {
     let block_count = index.get_block_count()?;
-    let block_hash = index.get_block_hash(block_count - 1)?;
+    let height = block_count.saturating_sub(1);
+    let block_hash = index.get_block_hash(height)?;
     Ok(BlockTip {
-        height: block_count - 1,
+        height,
         hash: block_hash.to_string(),
     })
 }
