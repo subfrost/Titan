@@ -64,6 +64,18 @@ impl<'a> TransactionUpdater<'a> {
         transaction_state_change: &TransactionStateChange,
         mempool_entry: Option<MempoolEntry>,
     ) -> Result<()> {
+        if let Some((id, rune)) = transaction_state_change.etched {
+            self.etched_rune(
+                cache,
+                block_time,
+                block_id.as_ref().map(|id| id.height),
+                txid,
+                transaction,
+                &id,
+                rune,
+            )?;
+        }
+
         // Update burned rune
         for (rune_id, amount) in transaction_state_change.burned.iter() {
             self.burn_rune(
@@ -83,18 +95,6 @@ impl<'a> TransactionUpdater<'a> {
                 txid,
                 &minted.rune_id,
                 minted.amount,
-            )?;
-        }
-
-        if let Some((id, rune)) = transaction_state_change.etched {
-            self.etched_rune(
-                cache,
-                block_time,
-                block_id.as_ref().map(|id| id.height),
-                txid,
-                transaction,
-                &id,
-                rune,
             )?;
         }
 
