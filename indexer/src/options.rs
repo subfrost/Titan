@@ -108,11 +108,11 @@ pub struct Options {
     )]
     pub(super) index_addresses: bool,
 
-    /// Commit interval in blocks. [default: 5000]
+    /// Commit interval in blocks. [default: 500]
     #[arg(
         long,
-        help = "Commit interval in blocks. [default: 5000]",
-        default_value = "5000"
+        help = "Commit interval in blocks. [default: 500]",
+        default_value = "500"
     )]
     pub(super) commit_interval: u64,
 
