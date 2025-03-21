@@ -4,7 +4,7 @@ use {
     bitcoincore_rpc::{Client, RpcApi},
     std::{collections::BTreeMap, sync::mpsc, thread, time::Duration},
     threadpool::ThreadPool,
-    tracing::{error, warn},
+    tracing::{error, trace, warn},
 };
 
 pub enum BlockLocator {
@@ -32,7 +32,7 @@ pub fn fetch_blocks_from(
             while let Ok((height, block)) = intermediate_receiver.recv() {
                 if height == next_expected {
                     if final_sender.send(block).is_err() {
-                        warn!("Final receiver disconnected");
+                        trace!("Final receiver disconnected");
                         return;
                     }
                     next_expected += 1;
@@ -72,7 +72,8 @@ pub fn fetch_blocks_from(
                 match get_block_with_retries(&client, BlockLocator::Height(height)) {
                     Ok(Some(block)) => {
                         if intermediate_sender.send((height, block)).is_err() {
-                            warn!("Intermediate receiver disconnected");
+                            trace!("Intermediate receiver disconnected");
+                            return;
                         }
                     }
                     Ok(None) => error!("Block not found for height {}", height),
