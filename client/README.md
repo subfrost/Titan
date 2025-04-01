@@ -33,18 +33,25 @@
 ## Requirements
 
 - **Rust 1.56+** (using the 2021 edition).
+- Bitcoin Node 27.0 (https://bitcoincore.org/bin/bitcoin-core-27.0/)
 - A running instance of the Titan Indexer (HTTP on a specified port and TCP for event subscriptions).
 - For the TCP clients, note that the async version uses Tokio while the blocking version uses standard Rust threads and non-blocking I/O.
+
+Detailed Setup: Follow the [Setup Instructions](../SetupInstructions.md) for step-by-step guidance.
 
 ---
 
 ## Installation
 
-Add the following to your `Cargo.toml`:
+Run the following Cargo command in your project directory:
+```bash
+cargo add titan-client
+```
 
+Or add the following line to your Cargo.toml:
 ```toml
 [dependencies]
-titan-client = "0.1.9"
+titan-client = "0.1.31"
 ```
 
 ## Usage

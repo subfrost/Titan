@@ -23,6 +23,10 @@ The HTTP client uses [axios](https://axios-http.com/) to call REST API endpoints
 - **Node.js**: Required for the TCP client since it depends on Node's `net` module.
 - **axios**: Used for making HTTP requests.
 - **TypeScript**: For type safety and development.
+- Bitcoin Node 27.0 (https://bitcoincore.org/bin/bitcoin-core-27.0/)
+- A running instance of the Titan Indexer (HTTP on a specified port and TCP for event subscriptions).
+
+Detailed Setup: Follow the [Setup Instructions](../SetupInstructions.md) for step-by-step guidance.
 
 ---
 
