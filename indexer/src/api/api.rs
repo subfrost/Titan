@@ -8,7 +8,7 @@ use {
         index::{Index, IndexError},
         subscription::{self, WebhookSubscriptionManager},
     },
-    bitcoin::{consensus, Address, OutPoint, Txid},
+    bitcoin::{consensus, Address, BlockHash, OutPoint, Txid},
     bitcoincore_rpc::RpcApi,
     http::HeaderMap,
     std::{collections::HashMap, sync::Arc},
@@ -217,6 +217,23 @@ pub fn transaction(index: Arc<Index>, client: PooledClient, txid: &Txid) -> Resu
 
 pub fn transaction_status(index: Arc<Index>, txid: &Txid) -> Result<TransactionStatus> {
     Ok(index.get_transaction_status(txid)?)
+}
+
+pub fn transaction_statuses(
+    index: Arc<Index>,
+    txids: &Vec<Txid>,
+    blockhash: &Option<BlockHash>,
+) -> Result<HashMap<Txid, Option<TransactionStatus>>> {
+    if let Some(blockhash) = blockhash {
+        let latest_block_hash = index.get_block_hash(index.get_block_count()? - 1)?;
+        if *blockhash != latest_block_hash {
+            return Err(ApiError::IndexError(IndexError::InvalidBestBlockHash(
+                blockhash.to_string(),
+            )));
+        }
+    }
+
+    Ok(index.get_transactions_statuses(txids)?)
 }
 
 pub fn mempool_txids(index: Arc<Index>) -> Result<Vec<Txid>> {

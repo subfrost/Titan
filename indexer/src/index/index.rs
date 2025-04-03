@@ -36,6 +36,8 @@ pub enum IndexError {
     StoreError(#[from] StoreError),
     #[error("invalid index: {0}")]
     InvalidIndex(String),
+    #[error("invalid best block hash: {0}")]
+    InvalidBestBlockHash(String),
     #[error("rpc client error: {0}")]
     RpcClientError(#[from] RpcClientError),
     #[error("rpc api error: {0}")]
@@ -366,6 +368,26 @@ impl Index {
             }
             Err(e) => Err(IndexError::StoreError(e)),
         }
+    }
+
+    pub fn get_transactions_statuses(
+        &self,
+        txids: &Vec<Txid>,
+    ) -> Result<HashMap<Txid, Option<TransactionStatus>>> {
+        let (exist, _) = self.db.partition_transactions_by_existence(txids)?;
+        let result = self.db.get_transaction_confirming_blocks(&exist)?;
+
+        Ok(txids
+            .into_iter()
+            .map(|txid| {
+                let block_id = result.get(txid);
+                match block_id {
+                    Some(Some(block_id)) => (*txid, Some(block_id.into_transaction_status())),
+                    Some(None) => (*txid, Some(TransactionStatus::unconfirmed())),
+                    None => (*txid, None),
+                }
+            })
+            .collect())
     }
 
     pub fn pre_index_new_submitted_transaction(&self, txid: &Txid) -> Result<()> {

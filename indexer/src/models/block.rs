@@ -4,7 +4,7 @@ use {
     titan_types::TransactionStatus,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct BlockId {
     pub hash: BlockHash,
     pub height: u64,

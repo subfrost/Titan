@@ -122,7 +122,7 @@ pub trait Store {
     ) -> Result<HashMap<Txid, Option<BlockId>>, StoreError>;
     fn partition_transactions_by_existence(
         &self,
-        txids: &HashSet<Txid>,
+        txids: &Vec<Txid>,
     ) -> Result<(Vec<Txid>, Vec<Txid>), StoreError>;
 
     // rune transactions
@@ -463,7 +463,7 @@ impl Store for RocksDB {
 
     fn partition_transactions_by_existence(
         &self,
-        txids: &HashSet<Txid>,
+        txids: &Vec<Txid>,
     ) -> Result<(Vec<Txid>, Vec<Txid>), StoreError> {
         Ok(self.partition_transactions_by_existence(txids)?)
     }

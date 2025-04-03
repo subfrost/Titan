@@ -6,7 +6,7 @@ use {
     },
     crate::{
         api::{self, content::AcceptEncoding},
-        bitcoin_rpc::{RpcClientPool, RpcClientProvider},
+        bitcoin_rpc::RpcClientPool,
         index::Index,
         subscription::WebhookSubscriptionManager,
     },
@@ -18,7 +18,7 @@ use {
         Router,
     },
     axum_server::Handle,
-    bitcoin::{address::NetworkUnchecked, Address, OutPoint, Txid},
+    bitcoin::{address::NetworkUnchecked, Address, BlockHash, OutPoint, Txid},
     http::{header, StatusCode},
     std::{io, net::ToSocketAddrs, sync::Arc},
     titan_types::{query, InscriptionId, Pagination, Subscription},
@@ -66,6 +66,7 @@ impl Server {
             .route("/address/{address}", get(Self::address))
             // Transactions
             .route("/tx/broadcast", post(Self::broadcast_transaction))
+            .route("/txs/statuses", post(Self::transaction_statuses))
             .route("/tx/{txid}", get(Self::transaction))
             .route("/tx/{txid}/raw", get(Self::transaction_raw))
             .route("/tx/{txid}/hex", get(Self::transaction_hex))
@@ -226,6 +227,23 @@ impl Server {
         Path(txid): Path<Txid>,
     ) -> ServerResult {
         task::block_in_place(|| Ok(Json(api::transaction_status(index, &txid)?).into_response()))
+    }
+
+    async fn transaction_statuses(
+        Extension(index): Extension<Arc<Index>>,
+        Query(blockhash): Query<Option<BlockHash>>,
+        txids: Json<Vec<Txid>>,
+    ) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::transaction_statuses(index, &txids, &blockhash)?;
+
+            Ok((
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "application/json")],
+                Json(result),
+            )
+                .into_response())
+        })
     }
 
     async fn output(
