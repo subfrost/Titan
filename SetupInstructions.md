@@ -282,8 +282,9 @@ No need to create .env file in titan indexer project
 ```bash
 cd titan
 
-./target/release/titan --bitcoin-rpc-url http://localhost:18444 --bitcoin-rpc-username <USERNAME> --bitcoin-rpc-password <PASSWORD> --chain regtest --index-addresses --index-bitcoin-transactions --enable-tcp-subscriptions --data-dir ~/titan-indexer
+cargo run -p titan -- --bitcoin-rpc-url http://localhost:18444 --bitcoin-rpc-username <USERNAME> --bitcoin-rpc-password <PASSWORD> --chain regtest --index-addresses --index-bitcoin-transactions --enable-tcp-subscriptions --data-dir ~/titan-indexer
 ```
+
 ***Output:***
 ```bash
 2025-03-29T13:37:48.091391Z  INFO titan::subscription::dispatcher: event_dispatcher started

@@ -16,6 +16,11 @@ Titan is a next-gen Bitcoin indexer by Saturn, designed for real-time blockchain
 - Rust v1.56+ (using the 2021 edition)
 - Cargo v1.85.1
 
+## How to run it
+```bash
+cargo run -p titan -- --bitcoin-rpc-url http://localhost:<PORT> --bitcoin-rpc-username <USERNAME> --bitcoin-rpc-password <PASSWORD> --chain regtest --index-addresses --index-bitcoin-transactions --enable-tcp-subscriptions --data-dir ~/titan-indexer
+```
+
 ## How to build it
 ```bash
 cargo build --release
