@@ -5,7 +5,7 @@ use {
     },
     crate::{
         bitcoin_rpc::{RpcClientError, RpcClientPool, RpcClientPoolError, RpcClientProvider},
-        index::{metrics::Metrics, store::Store, Settings, StoreError},
+        index::{metrics::Metrics, store::Store, Chain, Settings, StoreError},
         models::{BlockId, RuneEntry},
     },
     address::AddressUpdater,
@@ -195,9 +195,17 @@ impl Updater {
             let progress_bar =
                 self.open_progress_bar(cache.get_block_height_tip(), chain_info.blocks);
 
+            let mut current_block_count = cache.get_block_count();
+
+            // In regtest, the first block is not accessible via RPC and for testing purposes we
+            // don't need to start at block 0.
+            if self.settings.chain == Chain::Regtest && current_block_count == 0 {
+                current_block_count = 1;
+            }
+
             let rx = fetch_blocks_from(
                 self.bitcoin_rpc_pool.clone(),
-                cache.get_block_count(),
+                current_block_count,
                 chain_info.blocks + 1,
             )?;
 
