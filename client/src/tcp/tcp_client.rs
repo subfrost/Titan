@@ -277,90 +277,92 @@ impl AsyncTcpClient {
                             }
                         }
 
-                        // Initialize the line buffer with the configured capacity
-                        let mut line =
-                            String::with_capacity(reconnect_settings.read_buffer_capacity);
-                        let mut read_in_progress = false;
+                        // Initialize the byte buffer with the configured capacity
+                        let mut byte_buf =
+                            Vec::with_capacity(reconnect_settings.read_buffer_capacity);
                         // Read loop: continuously receive events.
                         loop {
                             // Check if the buffer has grown too large
-                            if line.capacity() > reconnect_settings.max_buffer_size {
+                            if byte_buf.capacity() > reconnect_settings.max_buffer_size {
                                 error!(
                                     "Buffer capacity exceeded maximum allowed size ({}), resetting connection.",
                                     reconnect_settings.max_buffer_size
                                 );
-                                break;
+                                break; // Break inner loop to trigger reconnect
                             }
 
                             tokio::select! {
-                                result = reader.read_line(&mut line) => {
+                                result = reader.read_until(b'\n', &mut byte_buf) => {
                                     match result {
                                         Ok(0) => {
                                             // Connection closed by the server.
                                             warn!("TCP connection closed by server.");
                                             update_status(ConnectionStatus::Reconnecting);
-                                            break;
+                                            break; // Break inner loop to trigger reconnect
                                         }
-                                        Ok(n) => {
-                                            // We got some data - check if it's a complete line
-                                            if line.ends_with('\n') {
-                                                // We have a complete line
-                                                read_in_progress = false;
-                                                let trimmed = line.trim();
+                                        Ok(n) if n > 0 => {
+                                            // We read n bytes, including the newline.
+                                            // Process the received bytes.
+                                            // Note: read_until includes the delimiter in the buffer.
+                                            // Trim whitespace and the trailing newline before processing.
+                                            let message_bytes = byte_buf.trim_ascii_end(); // Efficient trim for ASCII/UTF8 whitespace + newline
 
-                                                if !trimmed.is_empty() {
-                                                    // Check if this is a pong response
-                                                    if trimmed == "PONG" {
-                                                        if awaiting_pong {
-                                                            awaiting_pong = false;
-                                                            last_pong_time = std::time::Instant::now();
-                                                        }
+                                            if !message_bytes.is_empty() {
+                                                // Check if this is a pong response
+                                                if message_bytes == b"PONG" {
+                                                    if awaiting_pong {
+                                                        awaiting_pong = false;
+                                                        last_pong_time = std::time::Instant::now();
+                                                        debug!("Received PONG");
                                                     } else {
-                                                        // Check if line is too large before attempting to parse
-                                                        if trimmed.len() > reconnect_settings.max_buffer_size {
-                                                            error!(
-                                                                "Received line exceeds maximum allowed size ({}), skipping.",
-                                                                reconnect_settings.max_buffer_size
-                                                            );
-                                                        } else {
-                                                            // Try to parse as an event
-                                                            match serde_json::from_str::<Event>(trimmed) {
-                                                                Ok(event) => {
-                                                                    // Every successful message resets pong timer since we know
-                                                                    // the connection is alive
-                                                                    last_pong_time = std::time::Instant::now();
-                                                                    if let Err(e) = tx.send(event).await {
-                                                                        error!("Failed to send event to channel: {}", e);
-                                                                        break;
-                                                                    }
+                                                        warn!("Received unexpected PONG");
+                                                    }
+                                                } else {
+                                                    // Check if message size exceeds limit *before* parsing JSON
+                                                    if message_bytes.len() > reconnect_settings.max_buffer_size {
+                                                        error!(
+                                                            "Received message exceeds maximum allowed size ({}), skipping. Message starts with: {:?}",
+                                                            reconnect_settings.max_buffer_size,
+                                                            String::from_utf8_lossy(&message_bytes[..std::cmp::min(message_bytes.len(), 50)]) // Log first 50 bytes
+                                                        );
+                                                        // Note: We don't break here, just clear the buffer and continue reading the next message.
+                                                    } else {
+                                                        // Try to parse as an event from the byte slice
+                                                        match serde_json::from_slice::<Event>(message_bytes) {
+                                                            Ok(event) => {
+                                                                // Every successful message resets pong timer
+                                                                last_pong_time = std::time::Instant::now();
+                                                                awaiting_pong = false; // Also reset awaiting_pong if we received a valid event
+                                                                if let Err(e) = tx.send(event).await {
+                                                                    error!("Failed to send event to channel: {}", e);
+                                                                    update_status(ConnectionStatus::Disconnected); // Channel broken, can't continue
+                                                                    return; // Exit the task
                                                                 }
-                                                                Err(e) => {
-                                                                    error!("Failed to parse event: {}. Line: {}", e, trimmed);
-                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                error!(
+                                                                    "Failed to parse event: {}. Raw data (first 100 bytes): {:?}",
+                                                                    e,
+                                                                    String::from_utf8_lossy(&message_bytes[..std::cmp::min(message_bytes.len(), 100)])
+                                                                );
+                                                                update_status(ConnectionStatus::Reconnecting);
+                                                                break;
                                                             }
                                                         }
                                                     }
                                                 }
-
-                                                // Clear the line buffer after processing a complete line
-                                                line.clear();
-                                            } else {
-                                                // Partial line (without newline terminator)
-                                                read_in_progress = true;
-                                                debug!("Partial read in progress ({} bytes so far), waiting for more data", line.len());
                                             }
+                                            // Clear the buffer for the next message AFTER processing the current one
+                                            byte_buf.clear();
+                                        }
+                                        Ok(_) => {
+                                            // n == 0, should be handled by Ok(0) case, but safety belt
+                                            byte_buf.clear();
                                         }
                                         Err(e) => {
-                                            error!("Error reading from TCP socket: {}", e);
-                                            // Keep track of partial reads, but don't spam logs
-                                            if !line.is_empty() {
-                                                read_in_progress = true;
-                                                debug!("Partial read in progress ({} bytes so far) when error occurred", line.len());
-                                            } else {
-                                                read_in_progress = false;
-                                            }
-                                            // Add a small delay before retrying on error.
-                                            tokio::time::sleep(Duration::from_millis(100)).await;
+                                            error!("Error reading from TCP socket using read_until: {}", e);
+                                            update_status(ConnectionStatus::Reconnecting);
+                                            break; // Break inner loop to trigger reconnect
                                         }
                                     }
                                 }
@@ -534,6 +536,8 @@ mod tests {
     use titan_types::EventType;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener as TokioTcpListener;
+    use tokio::select;
+    use tokio::signal::unix::{signal, SignalKind};
     use tokio::sync::oneshot;
     use tokio::task::JoinHandle;
     use tokio::time::sleep;
@@ -583,45 +587,84 @@ mod tests {
 
                                 // Handle the connection in a new task
                                 tokio::spawn(async move {
-                                    // Read the request
-                                    let mut buf = vec![0u8; 1024];
-                                    match stream.read(&mut buf).await {
-                                        Ok(n) if n > 0 => {
-                                            let request = String::from_utf8_lossy(&buf[..n]);
-                                            info!("Test server received request: {}", request);
+                                    let (reader, mut writer) = stream.split();
+                                    let mut reader = BufReader::new(reader);
+                                    let mut request_buf = Vec::new();
 
-                                            // Send back a test event with a small delay to ensure client is ready
+                                    // Read the request line
+                                    match reader.read_until(b'\n', &mut request_buf).await {
+                                        Ok(n) if n > 0 => {
+                                            let request_bytes = request_buf.trim_ascii_end();
+                                            info!("Test server received request: {}", String::from_utf8_lossy(request_bytes));
+
+                                            // Send back a test event with a small delay
                                             sleep(Duration::from_millis(10)).await;
 
-                                            // This is the correct format for Event deserialization
-                                            let event = r#"{"type":"TransactionsAdded","data": { "txids":["2222222222222222222222222222222222222222222222222222222222222222"]}}"#;
-                                            match stream.write_all(event.as_bytes()).await {
-                                                Ok(_) => info!("Test server sent event"),
-                                                Err(e) => error!("Test server failed to write event: {}", e),
+                                            let event_json = r#"{"type":"TransactionsAdded","data": { "txids":["2222222222222222222222222222222222222222222222222222222222222222"]}}"#;
+                                            if let Err(e) = writer.write_all(event_json.as_bytes()).await {
+                                                 error!("Test server failed to write event: {}", e); return;
                                             }
-
-                                            match stream.write_all(b"\n").await {
-                                                Ok(_) => info!("Test server sent newline"),
-                                                Err(e) => error!("Test server failed to write newline: {}", e),
+                                            if let Err(e) = writer.write_all(b"\n").await {
+                                                error!("Test server failed to write newline: {}", e); return;
                                             }
-
-                                            match stream.flush().await {
-                                                Ok(_) => info!("Test server flushed output"),
-                                                Err(e) => error!("Test server failed to flush: {}", e),
+                                            if let Err(e) = writer.flush().await {
+                                                 error!("Test server failed to flush: {}", e); return;
                                             }
+                                            info!("Test server sent event and newline");
 
-                                            // Keep the connection open for a while
-                                            info!("Test server keeping connection open");
-                                            sleep(Duration::from_millis(500)).await;
-                                            info!("Test server connection handler complete");
+                                            // Handle PING/PONG
+                                            let mut line_buf = Vec::new();
+                                            loop {
+                                                 // Clear buffer for next read
+                                                line_buf.clear();
+                                                tokio::select! {
+                                                    read_res = reader.read_until(b'\n', &mut line_buf) => {
+                                                        match read_res {
+                                                            Ok(0) => {
+                                                                info!("Test server: Client disconnected");
+                                                                break; // Exit loop on disconnect
+                                                            }
+                                                            Ok(m) if m > 0 => {
+                                                                let trimmed_line = line_buf.trim_ascii_end();
+                                                                if trimmed_line == b"PING" {
+                                                                    info!("Test server received PING");
+                                                                    if let Err(e) = writer.write_all(b"PONG\n").await {
+                                                                        error!("Test server failed to send PONG: {}", e);
+                                                                        break; // Exit loop on write error
+                                                                    }
+                                                                    if let Err(e) = writer.flush().await {
+                                                                         error!("Test server failed to flush PONG: {}", e);
+                                                                         break; // Exit loop on flush error
+                                                                    }
+                                                                    info!("Test server sent PONG");
+                                                                } else if !trimmed_line.is_empty() {
+                                                                    // Log unexpected input
+                                                                    info!("Test server received unexpected data: {}", String::from_utf8_lossy(trimmed_line));
+                                                                }
+                                                            }
+                                                            Ok(_) => {
+                                                                // Should not happen with Ok(0) case above
+                                                            }
+                                                            Err(e) => {
+                                                                error!("Test server read error in PING loop: {}", e);
+                                                                break; // Exit loop on read error
+                                                            }
+                                                        }
+                                                    }
+                                                    // Add a timeout or shutdown mechanism here if needed for the test server's loop
+                                                    _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                                                        // Periodically check or just idle
+                                                    }
+                                                }
+                                            }
                                         },
                                         Ok(0) => {
-                                            info!("Test server received empty read, client closed connection");
+                                            info!("Test server received empty read, client closed connection early");
                                         },
                                         Ok(n) => {
-                                            info!("Test server received {} bytes, but not processing", n);
+                                             info!("Test server received {} bytes, but not processing as initial request", n);
                                         },
-                                        Err(e) => error!("Test server read error: {}", e),
+                                        Err(e) => error!("Test server initial read error: {}", e),
                                     }
                                 });
                             },

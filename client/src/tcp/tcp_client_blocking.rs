@@ -347,9 +347,8 @@ fn subscribe(
                         }
                     }
 
-                    // Initialize the line buffer with the configured capacity
-                    let mut line = String::with_capacity(config.read_buffer_capacity);
-                    let mut read_in_progress = false;
+                    // Initialize the byte buffer with the configured capacity
+                    let mut byte_buf = Vec::with_capacity(config.read_buffer_capacity);
 
                     // Ping-pong state tracking
                     let mut last_ping_time = std::time::Instant::now();
@@ -360,7 +359,6 @@ fn subscribe(
                     loop {
                         if shutdown_flag.load(Ordering::SeqCst) {
                             info!("Shutdown flag set. Exiting inner read loop.");
-                            // Update status to disconnected
                             update_status(ConnectionStatus::Disconnected);
                             break;
                         }
@@ -373,7 +371,7 @@ fn subscribe(
                             if awaiting_pong {
                                 // Check if we've exceeded the pong timeout
                                 if now.duration_since(last_pong_time) >= config.pong_timeout {
-                                    warn!("Pong response timed out after {:?}, considering connection dead", 
+                                    warn!("Pong response timed out after {:?}, considering connection dead",
                                           now.duration_since(last_pong_time));
                                     update_status(ConnectionStatus::Reconnecting);
                                     break;
@@ -399,108 +397,108 @@ fn subscribe(
                             }
                         }
 
-                        // Set a shorter read timeout to ensure we can send pings on time
-                        // This is critical - we use a very short timeout (50ms) so we can check ping state frequently
+                        // Set read timeout to allow for ping checks and shutdown signals
                         if let Err(e) = stream.set_read_timeout(Some(Duration::from_millis(50))) {
                             error!("Failed to set read timeout: {}", e);
                             update_status(ConnectionStatus::Reconnecting);
                             break;
                         }
 
-                        // Use a temporary buffer for the current read attempt
-                        let mut temp_buffer = String::new();
-
-                        // Try to read, and handle timeout as normal operation
-                        match reader.read_line(&mut temp_buffer) {
+                        // Try to read until newline
+                        match reader.read_until(b'\n', &mut byte_buf) {
                             Ok(0) => {
                                 // Connection closed by server
                                 warn!("TCP connection closed by server. Attempting to reconnect.");
                                 update_status(ConnectionStatus::Reconnecting);
                                 break;
                             }
-                            Ok(n) => {
-                                // Successful read of n bytes
-                                if n > 0 {
-                                    if read_in_progress {
-                                        // We were waiting for more data, append to existing line
-                                        line.push_str(&temp_buffer);
+                            Ok(n) if n > 0 => {
+                                // Note: read_until includes the delimiter in the buffer.
+                                // Trim whitespace and the trailing newline before processing.
+                                let message_bytes = byte_buf.trim_ascii_end();
+
+                                if !message_bytes.is_empty() {
+                                    // Check if this is a PONG response
+                                    if message_bytes == b"PONG" {
+                                        if awaiting_pong {
+                                            awaiting_pong = false;
+                                            last_pong_time = std::time::Instant::now();
+                                            debug!("Received PONG");
+                                        } else {
+                                            warn!("Received unexpected PONG");
+                                        }
                                     } else {
-                                        // Start a new line
-                                        line = temp_buffer;
-                                    }
-
-                                    // Check if we have a complete line (ends with newline)
-                                    if line.ends_with('\n') {
-                                        // Complete line received, process it
-                                        read_in_progress = false;
-                                        let trimmed = line.trim();
-
-                                        if !trimmed.is_empty() {
-                                            // Check if this is a PONG response
-                                            if trimmed == "PONG" {
-                                                if awaiting_pong {
-                                                    awaiting_pong = false;
+                                        // Check if message size exceeds limit *before* parsing JSON
+                                        if message_bytes.len() > config.max_buffer_size {
+                                            error!(
+                                                "Received message exceeds maximum allowed size ({}), skipping. Message starts with: {:?}",
+                                                config.max_buffer_size,
+                                                String::from_utf8_lossy(&message_bytes[..std::cmp::min(message_bytes.len(), 50)]) // Log first 50 bytes
+                                            );
+                                            // Don't break, just clear buffer and continue reading the next message.
+                                        } else {
+                                            // Try to parse as an event from the byte slice
+                                            match serde_json::from_slice::<Event>(message_bytes) {
+                                                Ok(event) => {
+                                                    // Any successful message means the connection is alive
                                                     last_pong_time = std::time::Instant::now();
-                                                }
-                                            } else {
-                                                // Try to parse as an event
-                                                match serde_json::from_str::<Event>(trimmed) {
-                                                    Ok(event) => {
-                                                        // Any successful message means the connection is alive
-                                                        last_pong_time = std::time::Instant::now();
+                                                    awaiting_pong = false; // Reset awaiting_pong if we received a valid event
 
-                                                        if tx.send(event).is_err() {
-                                                            error!("Receiver dropped. Exiting subscription thread.");
-                                                            return;
-                                                        }
+                                                    if tx.send(event).is_err() {
+                                                        error!("Receiver dropped. Exiting subscription thread.");
+                                                        update_status(
+                                                            ConnectionStatus::Disconnected,
+                                                        ); // Set status before returning
+                                                        return; // Exit the thread
                                                     }
-                                                    Err(e) => {
-                                                        error!(
-                                                            "Failed to parse event: {}. Line: {}",
-                                                            e, trimmed
-                                                        );
-                                                    }
+                                                }
+                                                Err(e) => {
+                                                    error!(
+                                                        "Failed to parse event: {}. Raw data (first 100 bytes): {:?}",
+                                                        e,
+                                                        String::from_utf8_lossy(&message_bytes[..std::cmp::min(message_bytes.len(), 100)])
+                                                    );
+                                                    // Consider if this error should cause a reconnect or just skip
+                                                    // For now, let's try reconnecting on parse error for safety
+                                                    update_status(ConnectionStatus::Reconnecting);
+                                                    break; // Trigger reconnect on parse error
                                                 }
                                             }
                                         }
-
-                                        // Clear the line for the next read
-                                        line.clear();
-                                    } else {
-                                        // Incomplete line, note that we're waiting for more data
-                                        read_in_progress = true;
-                                        debug!("Partial read in progress ({} bytes so far), continuing...", line.len());
                                     }
                                 }
-                                // else: Empty read, continue
+                                // Clear the buffer for the next message AFTER processing the current one
+                                byte_buf.clear();
+                            }
+                            Ok(_) => {
+                                // n == 0, should be handled by Ok(0) case, safety belt
+                                byte_buf.clear();
                             }
                             Err(e) => {
                                 if e.kind() == std::io::ErrorKind::TimedOut
                                     || e.kind() == std::io::ErrorKind::WouldBlock
                                 {
-                                    // This is expected - just a timeout to let us check ping state
-                                    // Don't log anything for timeout errors during normal operation
+                                    // Expected timeout - continue the loop to check ping/shutdown
                                     continue;
                                 } else {
                                     // Real error
-                                    error!("Error reading from TCP socket: {}", e);
-                                    read_in_progress = false;
-                                    thread::sleep(Duration::from_millis(100));
+                                    error!("Error reading from TCP socket using read_until: {}", e);
                                     update_status(ConnectionStatus::Reconnecting);
-                                    break;
+                                    break; // Break inner loop to trigger reconnect
                                 }
                             }
                         }
 
-                        // Check if the buffer has grown too large
-                        if line.len() > config.max_buffer_size {
+                        // Check if buffer capacity is exceeding limits (less critical with clear(), but good safety)
+                        if byte_buf.capacity() > config.max_buffer_size {
                             error!("Buffer capacity exceeded maximum allowed size ({}), resetting connection.", config.max_buffer_size);
+                            update_status(ConnectionStatus::Reconnecting);
                             break;
                         }
                     } // end inner loop for current connection
 
-                    // When we exit the inner loop (connection lost)
-                    // Update status to reconnecting
+                    // When we exit the inner loop (connection lost or shutdown)
+                    // Update status to reconnecting only if not shutting down
                     if !shutdown_flag.load(Ordering::SeqCst) {
                         update_status(ConnectionStatus::Reconnecting);
                     }
@@ -512,6 +510,12 @@ fn subscribe(
                 }
             }
 
+            // Before attempting reconnect, check shutdown flag again
+            if shutdown_flag.load(Ordering::SeqCst) {
+                update_status(ConnectionStatus::Disconnected);
+                break;
+            }
+
             // Get the next delay from the reconnection manager
             match reconnection_manager.next_delay() {
                 Some(wait_time) => {
@@ -521,12 +525,21 @@ fn subscribe(
                         reconnection_manager.current_attempt(),
                         reconnection_manager.config().max_attempts
                     );
-                    thread::sleep(wait_time);
+                    // Use a flag-aware sleep
+                    let sleep_start = std::time::Instant::now();
+                    while sleep_start.elapsed() < wait_time {
+                        if shutdown_flag.load(Ordering::SeqCst) {
+                            info!("Shutdown detected during reconnect wait.");
+                            update_status(ConnectionStatus::Disconnected);
+                            return; // Exit thread immediately
+                        }
+                        thread::sleep(Duration::from_millis(50)); // Check flag periodically
+                    }
                 }
                 None => {
                     error!(
                         "Reached maximum reconnection attempts ({}). Exiting.",
-                        reconnection_manager.config().max_attempts.unwrap()
+                        reconnection_manager.config().max_attempts.unwrap_or(0)
                     );
                     // Set status to disconnected when max attempts reached
                     update_status(ConnectionStatus::Disconnected);
@@ -535,7 +548,7 @@ fn subscribe(
             }
         }
         info!("Exiting TCP subscription thread.");
-        // Ensure status is Disconnected when thread exits
+        // Ensure status is Disconnected when thread exits naturally
         update_status(ConnectionStatus::Disconnected);
     });
 
@@ -545,7 +558,7 @@ fn subscribe(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read, Write};
+    use std::io::{BufRead, Read, Write};
     use std::net::{SocketAddr, TcpListener};
     use std::thread;
     use std::time::Duration;
@@ -563,26 +576,42 @@ mod tests {
 
             // Accept one connection
             if let Ok((mut stream, _)) = listener.accept() {
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request_buf = Vec::new();
+
                 // Read the subscription request
-                let mut buffer = [0; 1024];
-                match stream.read(&mut buffer) {
-                    Ok(n) => {
-                        let request = String::from_utf8_lossy(&buffer[..n]);
-                        println!("Server received request: {}", request);
+                match reader.read_until(b'\n', &mut request_buf) {
+                    Ok(n) if n > 0 => {
+                        let request_bytes = request_buf.trim_ascii_end();
+                        println!(
+                            "Server received request: {}",
+                            String::from_utf8_lossy(request_bytes)
+                        );
 
                         // Add a small delay to ensure the client is ready to receive
                         thread::sleep(Duration::from_millis(50));
 
                         // Send a sample event - using correct format for Event
                         let event = r#"{"type":"TransactionsAdded","data": {"txids":["1111111111111111111111111111111111111111111111111111111111111111"]}}"#;
-                        stream.write_all(event.as_bytes()).unwrap();
-                        stream.write_all(b"\n").unwrap();
-                        stream.flush().unwrap();
+                        if let Err(e) = stream.write_all(event.as_bytes()) {
+                            println!("Server write error: {}", e);
+                            return;
+                        }
+                        if let Err(e) = stream.write_all(b"\n") {
+                            println!("Server write error: {}", e);
+                            return;
+                        }
+                        if let Err(e) = stream.flush() {
+                            println!("Server flush error: {}", e);
+                            return;
+                        }
 
                         // Keep the connection open for a while to ensure the client can read the response
                         thread::sleep(Duration::from_millis(500));
                     }
+                    Ok(0) => println!("Server: Client disconnected before sending request"),
                     Err(e) => println!("Test server read error: {}", e),
+                    _ => println!("Server: Unexpected read result for request"),
                 }
             }
         })
@@ -709,7 +738,7 @@ mod tests {
             subscribe: vec![EventType::TransactionsAdded],
         };
 
-        let rx = client
+        let _rx = client
             .subscribe("127.0.0.1:1".to_string(), subscription_request)
             .unwrap();
 
@@ -751,6 +780,9 @@ mod tests {
         // Drop the receiver channel
         drop(rx);
 
+        // Give the thread a moment to notice the receiver is dropped (if applicable)
+        thread::sleep(Duration::from_millis(50));
+
         // Shutdown and join the client
         let joined = client.shutdown_and_join();
         assert!(joined, "Should have successfully joined the worker thread");
@@ -778,19 +810,36 @@ mod tests {
 
                 // Create a buffer reader
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
-                let mut line = String::new();
+                let mut line_buf = Vec::new(); // Use Vec<u8> for read_until
 
                 // Read the subscription request
-                match reader.read_line(&mut line) {
+                match reader.read_until(b'\n', &mut line_buf) {
                     Ok(n) if n > 0 => {
-                        println!("Ping-pong server received request: {}", line.trim());
+                        let request_bytes = line_buf.trim_ascii_end();
+                        println!(
+                            "Ping-pong server received request: {}",
+                            String::from_utf8_lossy(request_bytes)
+                        );
 
                         // Send a sample event
                         let event = r#"{"type":"TransactionsAdded","data": {"txids":["1111111111111111111111111111111111111111111111111111111111111111"]}}"#;
-                        stream.write_all(event.as_bytes()).unwrap();
-                        stream.write_all(b"\n").unwrap();
-                        stream.flush().unwrap();
+                        if let Err(e) = stream.write_all(event.as_bytes()) {
+                            println!("Server write error: {}", e);
+                            return;
+                        }
+                        if let Err(e) = stream.write_all(b"\n") {
+                            println!("Server write error: {}", e);
+                            return;
+                        }
+                        if let Err(e) = stream.flush() {
+                            println!("Server flush error: {}", e);
+                            return;
+                        }
                         println!("Ping-pong server sent initial event");
+                    }
+                    Ok(0) => {
+                        println!("Ping-pong server: Client disconnected early");
+                        return;
                     }
                     _ => {
                         println!("Ping-pong server failed to read subscription request");
@@ -799,42 +848,50 @@ mod tests {
                 }
 
                 // Clear line for next reads
-                line.clear();
+                line_buf.clear();
 
                 // Keep handling ping/pong for a while
                 let start = std::time::Instant::now();
                 let timeout = Duration::from_secs(5); // Run for 5 seconds
 
                 while start.elapsed() < timeout {
-                    match reader.read_line(&mut line) {
-                        Ok(n) => {
-                            if n == 0 {
-                                println!("Ping-pong server: client closed connection");
-                                break;
-                            } else if n > 0 {
-                                let trimmed = line.trim();
-                                println!("Ping-pong server received: {}", trimmed);
+                    match reader.read_until(b'\n', &mut line_buf) {
+                        // Use read_until here too
+                        Ok(0) => {
+                            println!("Ping-pong server: client closed connection");
+                            break;
+                        }
+                        Ok(n) if n > 0 => {
+                            let trimmed_line = line_buf.trim_ascii_end(); // Trim bytes
+                            println!(
+                                "Ping-pong server received: {}",
+                                String::from_utf8_lossy(trimmed_line)
+                            );
 
-                                if trimmed == "PING" {
-                                    println!("Ping-pong server sending PONG");
-                                    if let Err(e) = stream.write_all(b"PONG\n") {
-                                        println!("Ping-pong server failed to send PONG: {}", e);
-                                        break;
-                                    }
-                                    if let Err(e) = stream.flush() {
-                                        println!("Ping-pong server failed to flush: {}", e);
-                                        break;
-                                    }
+                            if trimmed_line == b"PING" {
+                                // Compare bytes
+                                println!("Ping-pong server sending PONG");
+                                if let Err(e) = stream.write_all(b"PONG\n") {
+                                    println!("Ping-pong server failed to send PONG: {}", e);
+                                    break;
                                 }
-
-                                line.clear();
+                                if let Err(e) = stream.flush() {
+                                    println!("Ping-pong server failed to flush PONG: {}", e);
+                                    break;
+                                }
                             }
+                            line_buf.clear(); // Clear buffer after processing
+                        }
+                        Ok(_) => {
+                            /* n==0 case handled above */
+                            line_buf.clear();
                         }
                         Err(e)
                             if e.kind() == std::io::ErrorKind::WouldBlock
                                 || e.kind() == std::io::ErrorKind::TimedOut =>
                         {
                             // Expected timeout - continue
+                            line_buf.clear(); // Ensure buffer is cleared even on timeout
                         }
                         Err(e) => {
                             println!("Ping-pong server error: {}", e);
@@ -878,7 +935,7 @@ mod tests {
             subscribe: vec![EventType::TransactionsAdded],
         };
 
-        let rx = client
+        let _rx = client
             .subscribe(format!("{}", server_addr), subscription_request)
             .unwrap();
 

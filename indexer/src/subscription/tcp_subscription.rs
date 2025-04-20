@@ -152,8 +152,8 @@ async fn handle_tcp_connection(
             maybe_event = rx.recv() => {
                 match maybe_event {
                     Some(event) => {
-                        let json = serde_json::to_string(&event)?;
-                        writer.write_all(json.as_bytes()).await?;
+                        let json_bytes = serde_json::to_vec(&event)?;
+                        writer.write_all(&json_bytes).await?;
                         writer.write_all(b"\n").await?;
                     },
                     None => {
