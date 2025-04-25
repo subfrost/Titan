@@ -20,7 +20,7 @@ use {
         IteratorMode, MultiThreaded, Options, WriteBatch,
     },
     std::{
-        collections::HashMap,
+        collections::{HashMap, HashSet, VecDeque},
         sync::{Arc, RwLock},
     },
     titan_types::{
@@ -855,6 +855,55 @@ impl RocksDB {
         }
 
         Ok(mempool_entries)
+    }
+
+    pub fn get_mempool_entries_with_ancestors(
+        &self,
+        txids: &Vec<Txid>,
+    ) -> DBResult<HashMap<Txid, MempoolEntry>> {
+        let mut result: HashMap<Txid, MempoolEntry> = HashMap::new();
+        let mut queue: VecDeque<Txid> = VecDeque::new();
+        let mut visited: HashSet<Txid> = HashSet::new();
+
+        // Initialize the queue with all provided txids
+        for txid in txids {
+            queue.push_back(*txid);
+        }
+
+        while !queue.is_empty() {
+            let mut batch_txids: Vec<Txid> = Vec::new();
+            while let Some(current_txid) = queue.pop_front() {
+                if visited.contains(&current_txid) {
+                    continue;
+                }
+                batch_txids.push(current_txid);
+                visited.insert(current_txid);
+            }
+
+            if batch_txids.is_empty() {
+                continue; // Nothing new to process in this iteration
+            }
+
+            let entries = self.get_mempool_entries(&batch_txids)?;
+
+            for (current_txid, entry_option) in entries {
+                if let Some(entry) = entry_option {
+                    // Add ancestors to the queue if not already visited
+                    for ancestor_txid in &entry.depends {
+                        if !visited.contains(ancestor_txid) {
+                            queue.push_back(*ancestor_txid);
+                        }
+                    }
+                    // Store the fetched entry
+                    result.insert(current_txid, entry);
+                }
+                // If entry_option is None, it means the txid (or an ancestor)
+                // was not found in the mempool CF, likely confirmed or invalid.
+                // We simply stop traversing that path.
+            }
+        }
+
+        Ok(result)
     }
 
     pub fn _validate_mempool_cache(&self) -> DBResult<()> {

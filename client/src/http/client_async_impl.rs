@@ -195,6 +195,26 @@ impl TitanApiAsync for AsyncClient {
         serde_json::from_str(&text).map_err(Error::from)
     }
 
+    async fn get_mempool_entries_with_ancestors(
+        &self,
+        txids: &[Txid],
+    ) -> Result<HashMap<Txid, MempoolEntry>, Error> {
+        let url = format!("{}/mempool/entries/ancestors", self.base_url);
+        let response = self
+            .http_client
+            .post(&url)
+            .json(txids)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let text = response.text().await?;
+            serde_json::from_str(&text).map_err(Error::from)
+        } else {
+            Err(Error::TitanError(response.status(), response.text().await?))
+        }
+    }
+
     async fn get_subscription(&self, id: &str) -> Result<Subscription, Error> {
         let text = self.call_text(&format!("/subscription/{}", id)).await?;
         serde_json::from_str(&text).map_err(Error::from)

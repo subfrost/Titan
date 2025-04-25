@@ -201,6 +201,21 @@ impl TitanApiSync for SyncClient {
         serde_json::from_str(&text).map_err(Error::from)
     }
 
+    fn get_mempool_entries_with_ancestors(
+        &self,
+        txids: &[Txid],
+    ) -> Result<HashMap<Txid, MempoolEntry>, Error> {
+        let url = format!("{}/mempool/entries/ancestors", self.base_url);
+        let response = self.http_client.post(&url).json(txids).send()?;
+
+        if response.status().is_success() {
+            let text = response.text()?;
+            serde_json::from_str(&text).map_err(Error::from)
+        } else {
+            Err(Error::TitanError(response.status(), response.text()?))
+        }
+    }
+
     fn get_subscription(&self, id: &str) -> Result<Subscription, Error> {
         let text = self.call_text(&format!("/subscription/{}", id))?;
         serde_json::from_str(&text).map_err(Error::from)

@@ -69,6 +69,10 @@ pub trait Store {
         &self,
         txids: &Vec<Txid>,
     ) -> Result<HashMap<Txid, Option<MempoolEntry>>, StoreError>;
+    fn get_mempool_entries_with_ancestors(
+        &self,
+        txids: &Vec<Txid>,
+    ) -> Result<HashMap<Txid, MempoolEntry>, StoreError>;
 
     // outpoint
     fn get_tx_out(
@@ -261,6 +265,13 @@ impl Store for RocksDB {
         txids: &Vec<Txid>,
     ) -> Result<HashMap<Txid, Option<MempoolEntry>>, StoreError> {
         Ok(self.get_mempool_entries(txids)?)
+    }
+
+    fn get_mempool_entries_with_ancestors(
+        &self,
+        txids: &Vec<Txid>,
+    ) -> Result<HashMap<Txid, MempoolEntry>, StoreError> {
+        Ok(self.get_mempool_entries_with_ancestors(txids)?)
     }
 
     fn get_tx_out(

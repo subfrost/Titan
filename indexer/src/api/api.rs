@@ -255,6 +255,13 @@ pub fn mempool_entries_all(index: Arc<Index>) -> Result<HashMap<Txid, MempoolEnt
     Ok(index.get_all_mempool_entries()?)
 }
 
+pub fn mempool_entries_with_ancestors(
+    index: Arc<Index>,
+    txids: &Vec<Txid>,
+) -> Result<HashMap<Txid, MempoolEntry>> {
+    Ok(index.get_mempool_entries_with_ancestors(txids)?)
+}
+
 pub fn address(index: Arc<Index>, address: &Address) -> Result<AddressData> {
     let outpoints = index.get_script_pubkey_outpoints(&address)?;
     Ok(outpoints)

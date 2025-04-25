@@ -235,6 +235,13 @@ impl Index {
         Ok(self.db.get_mempool_txids()?)
     }
 
+    pub fn get_mempool_entries_with_ancestors(
+        &self,
+        txids: &Vec<Txid>,
+    ) -> Result<HashMap<Txid, MempoolEntry>> {
+        Ok(self.db.get_mempool_entries_with_ancestors(txids)?)
+    }
+
     pub fn get_tx_out(&self, outpoint: &OutPoint) -> Result<TxOutEntry> {
         Ok(self
             .db
