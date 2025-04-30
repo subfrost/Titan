@@ -231,7 +231,7 @@ impl<'a> Rollback<'a> {
                 rune_entry.pending_burns = result;
             } else {
                 let result = rune_entry
-                    .pending_burns
+                    .burned
                     .checked_add_signed(amount)
                     .ok_or(RollbackError::Overflow("burn".to_string()))?;
 

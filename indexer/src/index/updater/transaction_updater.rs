@@ -270,7 +270,7 @@ impl<'a> TransactionUpdater<'a> {
             rune_entry.pending_burns = result;
         } else {
             let result = rune_entry
-                .pending_burns
+                .burned
                 .checked_add_signed(amount)
                 .ok_or(TransactionUpdaterError::Overflow("burn".to_string()))?;
 
