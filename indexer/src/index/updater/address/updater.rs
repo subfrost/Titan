@@ -82,31 +82,52 @@ impl AddressUpdater {
         //   This allows us to do all grouping in one structure.
         let mut spk_map: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)> = HashMap::new();
 
-        // a) Insert spent outpoints
+        // a) Insert spent outpoints that were NOT created in the same flush window
         for (outpoint, script_pubkey) in spent_map {
             let entry = spk_map.entry(script_pubkey).or_default();
             entry.1.push(outpoint); // spent
         }
 
-        // b) Insert new outpoints
+        // b) Prepare a set with outpoints that are both new and spent within the
+        //    current flush window (e.g. created in an earlier block but spent in a later
+        //    block before we flush). We must make sure that those outpoints do *not* end
+        //    up as "new" and are instead marked as "spent" so that they are removed from
+        //    the address index.
         let new_spent_outpoints = new_spent_outpoints.into_iter().collect::<HashSet<_>>();
+
+        // c) Insert new outpoints
         for (outpoint, script_pubkey) in &self.new_outpoints {
             let entry: &mut (Vec<OutPoint>, Vec<OutPoint>) =
                 spk_map.entry(script_pubkey.clone()).or_default();
 
-            // add it only if it's not already in the spent list
-            if !new_spent_outpoints.contains(outpoint) {
-                entry.0.push(*outpoint); // new
+            if new_spent_outpoints.contains(outpoint) {
+                // The outpoint was created and later spent in the same flush window – mark it as spent.
+                entry.1.push(*outpoint);
+            } else {
+                // Normal newly-created outpoint.
+                entry.0.push(*outpoint);
             }
         }
 
         cache.set_script_pubkey_entries(spk_map);
 
         // ------------------------------------------------------
-        // 3. Update OutPoint -> ScriptPubKey mapping for newly created outpoints
+        // 3. Update OutPoint -> ScriptPubKey mapping for *only* those outpoints
+        //    that are still considered "new" after the filtering above (i.e. exclude
+        //    outpoints that were already spent before the flush).
         // ------------------------------------------------------
         if !self.new_outpoints.is_empty() {
-            cache.batch_set_outpoints_to_script_pubkey(self.new_outpoints.clone());
+            // Build a filtered map without the outpoints that were spent.
+            let outpoints_to_add: HashMap<OutPoint, ScriptBuf> = self
+                .new_outpoints
+                .iter()
+                .filter(|(outpoint, _)| !new_spent_outpoints.contains(outpoint))
+                .map(|(outpoint, spk)| (*outpoint, spk.clone()))
+                .collect();
+
+            if !outpoints_to_add.is_empty() {
+                cache.batch_set_outpoints_to_script_pubkey(outpoints_to_add);
+            }
         }
 
         Ok(())
