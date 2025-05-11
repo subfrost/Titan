@@ -27,6 +27,7 @@ type Result<T> = std::result::Result<T, StoreError>;
 pub(super) struct UpdaterCacheSettings {
     pub max_recoverable_reorg_depth: u64,
     pub mempool: bool,
+    pub chain: Chain,
 }
 
 impl UpdaterCacheSettings {
@@ -34,6 +35,7 @@ impl UpdaterCacheSettings {
         Self {
             max_recoverable_reorg_depth: settings.max_recoverable_reorg_depth(),
             mempool,
+            chain: settings.chain,
         }
     }
 }
@@ -50,7 +52,7 @@ pub(super) struct UpdaterCache {
 
 impl UpdaterCache {
     pub fn new(db: Arc<StoreWithLock>, settings: UpdaterCacheSettings) -> Result<Self> {
-        let (rune_count, block_count, purged_blocks_count) = {
+        let (rune_count, mut block_count, purged_blocks_count) = {
             let db = db.read();
             (
                 db.get_runes_count()?,
@@ -58,6 +60,12 @@ impl UpdaterCache {
                 db.get_purged_blocks_count()?,
             )
         };
+
+        // In regtest, the first block is not accessible via RPC and for testing purposes we
+        // don't need to start at block 0.
+        if block_count == 0 && settings.chain == Chain::Regtest {
+            block_count = 1;
+        }
 
         Ok(Self {
             db,

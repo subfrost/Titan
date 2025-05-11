@@ -158,6 +158,11 @@ impl Updater {
             return Ok(false);
         }
 
+        // Add exception when indexing genesis block
+        if cache.get_block_height_tip() == 0 && chain_info.blocks == 0 {
+            return Ok(true);
+        }
+
         match cache.get_block_hash(chain_info.blocks) {
             Ok(block_hash) => {
                 // Compare hashes to detect reorgs
@@ -195,13 +200,7 @@ impl Updater {
             let progress_bar =
                 self.open_progress_bar(cache.get_block_height_tip(), chain_info.blocks);
 
-            let mut current_block_count = cache.get_block_count();
-
-            // In regtest, the first block is not accessible via RPC and for testing purposes we
-            // don't need to start at block 0.
-            if self.settings.chain == Chain::Regtest && current_block_count == 0 {
-                current_block_count = 1;
-            }
+            let current_block_count = cache.get_block_count();
 
             let rx = fetch_blocks_from(
                 self.bitcoin_rpc_pool.clone(),
