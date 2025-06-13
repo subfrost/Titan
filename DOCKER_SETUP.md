@@ -8,7 +8,7 @@ This project is configured to automatically build and publish Docker images to G
 
 1. Copy the environment example file:
    ```bash
-   cp env.example .env
+   cp .env.example .env
    ```
 
 2. Edit `.env` and update the `GITHUB_REPOSITORY` value (defaults to saturnbtc/titan):

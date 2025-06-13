@@ -52,10 +52,10 @@ update_env_file() {
     
     if [ ! -f "$env_file" ]; then
         echo -e "${YELLOW}Warning: $env_file not found, creating from example${NC}"
-        if [ -f "env.example" ]; then
-            cp env.example "$env_file"
+        if [ -f ".env.example" ]; then
+            cp .env.example "$env_file"
         else
-            echo -e "${RED}Error: env.example not found${NC}"
+            echo -e "${RED}Error: .env.example not found${NC}"
             exit 1
         fi
     fi
