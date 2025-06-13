@@ -17,7 +17,7 @@ use {
     ordinals::RuneId,
     rocksdb::{
         BlockBasedOptions, BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, Direction,
-        IteratorMode, MultiThreaded, Options, WriteBatch,
+        IteratorMode, MultiThreaded, Options, WriteBatch, WriteOptions,
     },
     std::{
         collections::{HashMap, HashSet, VecDeque},
@@ -38,6 +38,7 @@ use {
 pub struct RocksDB {
     db: DBWithThreadMode<MultiThreaded>,
     mempool_cache: RwLock<HashMap<Txid, MempoolEntry>>,
+    write_opts: WriteOptions,
 }
 
 pub type DBResult<T> = Result<T, RocksDBError>;
@@ -201,9 +202,14 @@ impl RocksDB {
         // Load initial state from DB
         let mempool_cache = Self::read_all_mempool_txids(&descriptors)?;
 
+        let mut write_opts = WriteOptions::default();
+        write_opts.disable_wal(true); // bulk writes do not need WAL
+        write_opts.set_sync(false); // let RocksDB flush asynchronously
+
         let rocks_db = RocksDB {
             db: descriptors,
             mempool_cache: RwLock::new(mempool_cache),
+            write_opts,
         };
         Ok(rocks_db)
     }
@@ -725,7 +731,7 @@ impl RocksDB {
         }
 
         // Write all batched operations atomically.
-        self.db.write(batch)?;
+        self.db.write_opt(batch, &self.write_opts)?;
         Ok(())
     }
 
@@ -795,7 +801,7 @@ impl RocksDB {
             batch.delete_cf(&secondary_cf, txid_to_bytes(&txid));
         }
 
-        self.db.write(batch)?;
+        self.db.write_opt(batch, &self.write_opts)?;
         Ok(())
     }
 
@@ -1199,11 +1205,7 @@ impl RocksDB {
             };
 
             for (outpoint, txout) in update.txouts.iter() {
-                batch.put_cf(
-                    &cf_handle,
-                    outpoint_to_bytes(&outpoint),
-                    txout.store_ref(),
-                );
+                batch.put_cf(&cf_handle, outpoint_to_bytes(&outpoint), txout.store_ref());
             }
         }
 
@@ -1249,7 +1251,11 @@ impl RocksDB {
 
             for (number, rune_id) in update.rune_numbers.iter() {
                 let rune_id_wrapper = RuneIdWrapper(rune_id.clone());
-                batch.put_cf(&cf_handle, number.to_le_bytes(), rune_id_wrapper.store_ref());
+                batch.put_cf(
+                    &cf_handle,
+                    number.to_le_bytes(),
+                    rune_id_wrapper.store_ref(),
+                );
             }
         }
 
@@ -1274,11 +1280,7 @@ impl RocksDB {
                 .write()
                 .map_err(|_| RocksDBError::LockPoisoned)?;
             for (txid, mempool_entry) in update.mempool_txs.iter() {
-                batch.put_cf(
-                    &cf_handle,
-                    txid_to_bytes(&txid),
-                    mempool_entry.store_ref(),
-                );
+                batch.put_cf(&cf_handle, txid_to_bytes(&txid), mempool_entry.store_ref());
 
                 mempool_cache.insert(txid.clone(), mempool_entry.clone());
             }
@@ -1398,7 +1400,7 @@ impl RocksDB {
         }
 
         // Proceed with the actual write
-        self.db.write(batch)?;
+        self.db.write_opt(batch, &self.write_opts)?;
 
         // 12. Update rune_transactions. This is batched on its own.
         if !update.rune_transactions.is_empty() {
@@ -1453,7 +1455,7 @@ impl RocksDB {
             }
         }
 
-        self.db.write(batch)?;
+        self.db.write_opt(batch, &self.write_opts)?;
         Ok(())
     }
 
@@ -1491,11 +1493,7 @@ impl RocksDB {
             };
 
             for (outpoint, txout) in rollback.txouts.iter() {
-                batch.put_cf(
-                    &cf_handle,
-                    outpoint_to_bytes(&outpoint),
-                    txout.store_ref(),
-                );
+                batch.put_cf(&cf_handle, outpoint_to_bytes(&outpoint), txout.store_ref());
             }
         }
 
@@ -1660,7 +1658,7 @@ impl RocksDB {
             }
         }
 
-        self.db.write(batch)?;
+        self.db.write_opt(batch, &self.write_opts)?;
 
         self.delete_rune_transactions(&rollback.txs_to_delete, mempool)?;
 
@@ -1734,7 +1732,7 @@ impl RocksDB {
             );
         }
 
-        self.db.write(batch)?;
+        self.db.write_opt(batch, &self.write_opts)?;
         Ok(())
     }
 
