@@ -430,9 +430,8 @@ impl UpdaterCache {
                     from_block_height_to_purge, to_block_height_to_purge,
                 );
 
-                for i in from_block_height_to_purge..to_block_height_to_purge {
-                    self.purge_block(i)?;
-                }
+                // Use the new batched purge implementation to minimize DB round-trips
+                self.purge_block_range(from_block_height_to_purge, to_block_height_to_purge)?;
             }
         }
 
@@ -465,33 +464,52 @@ impl UpdaterCache {
         Ok(total_tx_state_changes)
     }
 
-    fn purge_block(&mut self, height: u64) -> Result<()> {
-        let block = self.get_block_by_height(height)?;
-
-        let txids = block
-            .tx_ids
-            .iter()
-            .map(|txid| Txid::from_str(txid).unwrap())
-            .collect();
-
-        let tx_state_changes = self.get_txs_state_changes(&txids)?;
-
-        for txid in txids {
-            let tx_state_changes = tx_state_changes.get(&txid).unwrap_or_else(|| {
-                panic!(
-                    "Tx state changes not found for txid: {} in block {}",
-                    txid, height
-                );
-            });
-
-            for txin in tx_state_changes.inputs.iter() {
-                self.delete.script_pubkeys_outpoints.insert(txin.clone());
-            }
-
-            self.delete.tx_state_changes.insert(txid);
+    /// Purge a contiguous range of block heights `[from, to)` in batch to reduce
+    /// RocksDB look-ups. Requires `from < to`.
+    fn purge_block_range(&mut self, from: u64, to: u64) -> Result<()> {
+        if from >= to {
+            return Ok(());
         }
 
-        self.update.purged_blocks_count = height;
+        // 1. Load all blocks and gather txids
+        let mut blocks: Vec<(u64, Arc<Block>)> = Vec::with_capacity((to - from) as usize);
+        let mut all_txids: Vec<Txid> = Vec::new();
+
+        for height in from..to {
+            let block = self.get_block_by_height(height)?;
+
+            for txid_str in &block.tx_ids {
+                all_txids.push(Txid::from_str(txid_str).unwrap());
+            }
+
+            blocks.push((height, block));
+        }
+
+        // 2. Fetch all tx state changes in one DB call
+        let tx_state_changes = self.get_txs_state_changes(&all_txids)?;
+
+        // 3. Apply deletions
+        for (height, block) in blocks {
+            for txid_str in &block.tx_ids {
+                let txid = Txid::from_str(txid_str).unwrap();
+
+                let changes = tx_state_changes.get(&txid).unwrap_or_else(|| {
+                    panic!(
+                        "Tx state changes not found for txid: {} in block {}",
+                        txid, height
+                    );
+                });
+
+                for txin in &changes.inputs {
+                    self.delete.script_pubkeys_outpoints.insert(txin.clone());
+                }
+
+                self.delete.tx_state_changes.insert(txid);
+            }
+
+            // Update purged count
+            self.update.purged_blocks_count = height;
+        }
 
         Ok(())
     }
