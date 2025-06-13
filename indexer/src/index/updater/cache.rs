@@ -480,7 +480,9 @@ impl UpdaterCache {
         let tx_state_changes = self.get_txs_state_changes(&txids)?;
 
         for txid in txids {
-            let tx_state_changes = tx_state_changes.get(&txid).unwrap();
+            let tx_state_changes = tx_state_changes.get(&txid).unwrap_or_else(|| {
+                panic!("Tx state changes not found for txid: {} in block {}", txid, height);
+            });
 
             for txin in tx_state_changes.inputs.iter() {
                 self.delete.script_pubkeys_outpoints.insert(txin.clone());
