@@ -12,7 +12,7 @@ Titan is a next-gen Bitcoin indexer by Saturn, designed for real-time blockchain
 
 ## Requirements
 
-- Bitcoin Node 27.0
+- Bitcoin Node >= 27.0
 - Rust v1.56+ (using the 2021 edition)
 - Cargo v1.85.1
 
