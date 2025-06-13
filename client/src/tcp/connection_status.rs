@@ -82,7 +82,7 @@ impl ConnectionStatusTracker {
     pub fn update_status(&self, new_status: ConnectionStatus) {
         if let Ok(mut status_guard) = self.status.write() {
             *status_guard = new_status;
-            
+
             // Notify all listeners
             if let Ok(mut listeners) = self.listeners.write() {
                 // Keep only listeners that successfully received the notification
@@ -97,11 +97,11 @@ impl ConnectionStatusTracker {
     pub fn create_updater<'a>(&'a self) -> impl Fn(ConnectionStatus) + 'a {
         let status = Arc::clone(&self.status);
         let listeners = Arc::<RwLock<Vec<Box<dyn StatusListener>>>>::clone(&self.listeners);
-        
+
         move |new_status| {
             if let Ok(mut status_guard) = status.write() {
                 *status_guard = new_status;
-                
+
                 // Notify all listeners
                 if let Ok(mut listeners_guard) = listeners.write() {
                     listeners_guard.retain(|listener| listener.notify(new_status));

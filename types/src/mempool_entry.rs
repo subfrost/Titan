@@ -6,7 +6,9 @@ use {
     std::io::{Read, Result, Write},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, BorshSerialize, BorshDeserialize, Serialize, Deserialize,
+)]
 pub struct MempoolEntryFee {
     pub base: u64,
     pub descendant: u64,

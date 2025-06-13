@@ -1,4 +1,3 @@
-
 use {
     bitcoincore_rpc::{Client, RpcApi},
     std::{thread, time::Duration},

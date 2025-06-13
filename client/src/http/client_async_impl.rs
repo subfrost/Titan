@@ -200,12 +200,7 @@ impl TitanApiAsync for AsyncClient {
         txids: &[Txid],
     ) -> Result<HashMap<Txid, MempoolEntry>, Error> {
         let url = format!("{}/mempool/entries/ancestors", self.base_url);
-        let response = self
-            .http_client
-            .post(&url)
-            .json(txids)
-            .send()
-            .await?;
+        let response = self.http_client.post(&url).json(txids).send().await?;
 
         if response.status().is_success() {
             let text = response.text().await?;
