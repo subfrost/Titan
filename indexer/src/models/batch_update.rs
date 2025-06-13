@@ -2,11 +2,9 @@ use {
     super::{BlockId, Inscription, RuneEntry, TransactionStateChange},
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
     ordinals::RuneId,
-    std::{
-        collections::{HashMap, HashSet},
-        fmt::Display,
-    },
-    titan_types::{Block, InscriptionId, SpenderReference, TxOutEntry, MempoolEntry},
+    std::sync::Arc,
+    std::{collections::HashMap, fmt::Display},
+    titan_types::{Block, InscriptionId, MempoolEntry, SpenderReference, TxOutEntry},
 };
 
 #[derive(Debug, Clone)]
@@ -14,7 +12,7 @@ pub struct BatchUpdate {
     pub script_pubkeys: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)>,
     pub script_pubkeys_outpoints: HashMap<OutPoint, ScriptBuf>,
     pub spent_outpoints_in_mempool: HashMap<OutPoint, SpenderReference>,
-    pub blocks: HashMap<BlockHash, Block>,
+    pub blocks: HashMap<BlockHash, Arc<Block>>,
     pub block_hashes: HashMap<u64, BlockHash>,
     pub txouts: HashMap<OutPoint, TxOutEntry>,
     pub tx_state_changes: HashMap<Txid, TransactionStateChange>,
@@ -23,7 +21,7 @@ pub struct BatchUpdate {
     pub rune_ids: HashMap<u128, RuneId>,
     pub rune_numbers: HashMap<u64, RuneId>,
     pub inscriptions: HashMap<InscriptionId, Inscription>,
-    pub transactions: HashMap<Txid, Transaction>,
+    pub transactions: HashMap<Txid, Arc<Transaction>>,
     pub transaction_confirming_block: HashMap<Txid, BlockId>,
     pub mempool_txs: HashMap<Txid, MempoolEntry>,
     pub rune_count: u64,
@@ -71,6 +69,27 @@ impl BatchUpdate {
             && self.mempool_txs.is_empty()
             && self.transactions.is_empty()
             && self.transaction_confirming_block.is_empty()
+    }
+
+    /// Removes all per-batch collections while preserving the counter fields.
+    /// This lets the `HashMap`s keep their capacity, significantly reducing
+    /// the number of allocations that occur during repetitive flushing.
+    pub fn clear(&mut self) {
+        self.script_pubkeys.clear();
+        self.script_pubkeys_outpoints.clear();
+        self.spent_outpoints_in_mempool.clear();
+        self.blocks.clear();
+        self.block_hashes.clear();
+        self.txouts.clear();
+        self.tx_state_changes.clear();
+        self.rune_transactions.clear();
+        self.runes.clear();
+        self.rune_ids.clear();
+        self.rune_numbers.clear();
+        self.inscriptions.clear();
+        self.mempool_txs.clear();
+        self.transactions.clear();
+        self.transaction_confirming_block.clear();
     }
 }
 

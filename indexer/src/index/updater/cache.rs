@@ -110,17 +110,17 @@ impl UpdaterCache {
         }
     }
 
-    pub fn get_block_by_height(&self, height: u64) -> Result<Block> {
+    pub fn get_block_by_height(&self, height: u64) -> Result<Arc<Block>> {
         let hash = self.get_block_hash(height)?;
         self.get_block(&hash)
     }
 
-    pub fn get_block(&self, hash: &BlockHash) -> Result<Block> {
+    pub fn get_block(&self, hash: &BlockHash) -> Result<Arc<Block>> {
         if let Some(block) = self.update.blocks.get(hash) {
             return Ok(block.clone());
         } else {
             let block = self.db.read().get_block_by_hash(hash)?;
-            return Ok(block);
+            return Ok(Arc::new(block));
         }
     }
 
@@ -132,7 +132,7 @@ impl UpdaterCache {
         );
 
         let hash: BlockHash = block.header.block_hash();
-        self.update.blocks.insert(hash, block);
+        self.update.blocks.insert(hash, Arc::new(block));
         self.update
             .block_hashes
             .insert(self.get_block_count(), hash);
@@ -147,12 +147,13 @@ impl UpdaterCache {
         self.update.rune_count -= 1;
     }
 
-    pub fn get_transaction(&self, txid: Txid) -> Result<Transaction> {
+    pub fn get_transaction(&self, txid: Txid) -> Result<Arc<Transaction>> {
         if let Some(transaction) = self.update.transactions.get(&txid) {
             return Ok(transaction.clone());
         } else {
-            let transaction = self.db.read().get_transaction_raw(&txid, None)?;
-            return Ok(consensus::deserialize(&transaction)?);
+            let transaction_raw = self.db.read().get_transaction_raw(&txid, None)?;
+            let tx: Transaction = consensus::deserialize(&transaction_raw)?;
+            return Ok(Arc::new(tx));
         }
     }
 
@@ -168,10 +169,10 @@ impl UpdaterCache {
     pub fn precache_tx_outs(&mut self, txs: &Vec<Transaction>) -> Result<()> {
         let outpoints: Vec<_> = txs
             .iter()
-            .flat_map(|tx| tx.input.iter().map(|input| input.previous_output.into()))
+            .flat_map(|tx| tx.input.iter().map(|input| input.previous_output))
             .collect();
 
-        let mut to_fetch = HashSet::new();
+        let mut to_fetch = HashSet::with_capacity(outpoints.len());
         for outpoint in outpoints.iter() {
             if !self.update.txouts.contains_key(outpoint) {
                 to_fetch.insert(outpoint.clone());
@@ -200,8 +201,8 @@ impl UpdaterCache {
     }
 
     pub fn get_tx_outs(&self, outpoints: &Vec<OutPoint>) -> Result<HashMap<OutPoint, TxOutEntry>> {
-        let mut results = HashMap::new();
-        let mut to_fetch = HashSet::new();
+        let mut results = HashMap::with_capacity(outpoints.len());
+        let mut to_fetch = HashSet::with_capacity(outpoints.len());
         for outpoint in outpoints.iter() {
             if let Some(tx_out) = self.update.txouts.get(outpoint) {
                 results.insert(outpoint.clone(), tx_out.clone());
@@ -251,7 +252,7 @@ impl UpdaterCache {
         self.update.tx_state_changes.insert(txid, tx_state_changes);
     }
 
-    pub fn set_transaction(&mut self, txid: Txid, transaction: Transaction) -> () {
+    pub fn set_transaction(&mut self, txid: Txid, transaction: Arc<Transaction>) -> () {
         self.update.transactions.insert(txid, transaction);
     }
 
@@ -369,12 +370,8 @@ impl UpdaterCache {
         }
 
         // Clear the cache
-        self.update = BatchUpdate::new(
-            self.update.rune_count,
-            self.update.block_count,
-            self.update.purged_blocks_count,
-        );
-        self.delete = BatchDelete::new();
+        self.update.clear();
+        self.delete.clear();
         self.first_block_height = self.update.block_count;
         self.last_block_height = None;
 
@@ -402,12 +399,12 @@ impl UpdaterCache {
         event_sender: &Option<mpsc::Sender<Event>>,
     ) -> std::result::Result<(), mpsc::error::SendError<Event>> {
         if let Some(sender) = event_sender {
-            for event in self.events.iter() {
-                sender.blocking_send(event.clone())?;
+            for event in self.events.drain(..) {
+                sender.blocking_send(event)?;
             }
+        } else {
+            self.events.clear();
         }
-
-        self.events = vec![];
 
         Ok(())
     }
@@ -446,8 +443,8 @@ impl UpdaterCache {
         &self,
         txids: &Vec<Txid>,
     ) -> Result<HashMap<Txid, TransactionStateChange>> {
-        let mut total_tx_state_changes = HashMap::new();
-        let mut to_fetch = HashSet::new();
+        let mut total_tx_state_changes = HashMap::with_capacity(txids.len());
+        let mut to_fetch = HashSet::with_capacity(txids.len());
         for txid in txids {
             if let Some(tx_state_changes) = self.update.tx_state_changes.get(txid) {
                 total_tx_state_changes.insert(txid.clone(), tx_state_changes.clone());
@@ -481,7 +478,10 @@ impl UpdaterCache {
 
         for txid in txids {
             let tx_state_changes = tx_state_changes.get(&txid).unwrap_or_else(|| {
-                panic!("Tx state changes not found for txid: {} in block {}", txid, height);
+                panic!(
+                    "Tx state changes not found for txid: {} in block {}",
+                    txid, height
+                );
             });
 
             for txin in tx_state_changes.inputs.iter() {

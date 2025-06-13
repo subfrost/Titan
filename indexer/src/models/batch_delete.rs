@@ -27,6 +27,14 @@ impl BatchDelete {
             && self.spent_outpoints_in_mempool.is_empty()
             && self.tx_state_changes.is_empty()
     }
+
+    /// Empties all collections while preserving their allocated capacity.
+    pub fn clear(&mut self) {
+        self.tx_outs.clear();
+        self.script_pubkeys_outpoints.clear();
+        self.spent_outpoints_in_mempool.clear();
+        self.tx_state_changes.clear();
+    }
 }
 
 impl Display for BatchDelete {

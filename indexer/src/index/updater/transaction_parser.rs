@@ -74,7 +74,7 @@ impl<'client> TransactionParser<'client> {
         };
 
         // update outpoint balances
-        let mut tx_outs: Vec<TxOutEntry> = vec![];
+        let mut tx_outs: Vec<TxOutEntry> = Vec::with_capacity(tx.output.len());
         for (vout, balances) in allocated.into_iter().enumerate() {
             let mut balances = balances.into_iter().collect::<Vec<(RuneId, Lot)>>();
 
@@ -519,15 +519,15 @@ impl<'client> TransactionParser<'client> {
         cache: &UpdaterCache,
         tx: &Transaction,
     ) -> Result<(HashMap<RuneId, Lot>, HashMap<RuneId, Lot>)> {
-        let mut unallocated = HashMap::new();
-        let mut risky_unallocated = HashMap::new();
+        let estimated_inputs = tx.input.len();
+        let mut unallocated = HashMap::with_capacity(estimated_inputs);
+        let mut risky_unallocated = HashMap::with_capacity(estimated_inputs);
 
         // 1) Collect all outpoints:
-        let outpoints: Vec<_> = tx
-            .input
-            .iter()
-            .map(|input| input.previous_output.into())
-            .collect();
+        let mut outpoints = Vec::with_capacity(tx.input.len());
+        for input in &tx.input {
+            outpoints.push(input.previous_output.into());
+        }
 
         if tx.is_coinbase() {
             return Ok((unallocated, risky_unallocated));

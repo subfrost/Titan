@@ -1173,7 +1173,7 @@ impl RocksDB {
                 batch.put_cf(
                     &cf_handle,
                     block_hash.as_raw_hash().to_byte_array(),
-                    block.clone().store(),
+                    block.as_ref().store_ref(),
                 );
             }
         }
@@ -1202,7 +1202,7 @@ impl RocksDB {
                 batch.put_cf(
                     &cf_handle,
                     outpoint_to_bytes(&outpoint),
-                    txout.clone().store(),
+                    txout.store_ref(),
                 );
             }
         }
@@ -1219,7 +1219,7 @@ impl RocksDB {
                 batch.put_cf(
                     &cf_handle,
                     txid_to_bytes(&txid),
-                    tx_state_change.clone().store(),
+                    tx_state_change.store_ref(),
                 );
             }
         }
@@ -1229,7 +1229,7 @@ impl RocksDB {
             let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(RUNES_CF)?;
 
             for (rune_id, rune) in update.runes.iter() {
-                batch.put_cf(&cf_handle, rune_id_to_bytes(&rune_id), rune.clone().store());
+                batch.put_cf(&cf_handle, rune_id_to_bytes(&rune_id), rune.store_ref());
             }
         }
 
@@ -1239,7 +1239,7 @@ impl RocksDB {
 
             for (rune, rune_id) in update.rune_ids.iter() {
                 let rune_id_wrapper = RuneIdWrapper(rune_id.clone());
-                batch.put_cf(&cf_handle, rune.to_le_bytes(), rune_id_wrapper.store());
+                batch.put_cf(&cf_handle, rune.to_le_bytes(), rune_id_wrapper.store_ref());
             }
         }
 
@@ -1249,7 +1249,7 @@ impl RocksDB {
 
             for (number, rune_id) in update.rune_numbers.iter() {
                 let rune_id_wrapper = RuneIdWrapper(rune_id.clone());
-                batch.put_cf(&cf_handle, number.to_le_bytes(), rune_id_wrapper.store());
+                batch.put_cf(&cf_handle, number.to_le_bytes(), rune_id_wrapper.store_ref());
             }
         }
 
@@ -1261,7 +1261,7 @@ impl RocksDB {
                 batch.put_cf(
                     &cf_handle,
                     inscription_id_to_bytes(&inscription_id),
-                    inscription.clone().store(),
+                    inscription.store_ref(),
                 );
             }
         }
@@ -1277,7 +1277,7 @@ impl RocksDB {
                 batch.put_cf(
                     &cf_handle,
                     txid_to_bytes(&txid),
-                    mempool_entry.clone().store(),
+                    mempool_entry.store_ref(),
                 );
 
                 mempool_cache.insert(txid.clone(), mempool_entry.clone());
@@ -1365,7 +1365,7 @@ impl RocksDB {
                 batch.put_cf(
                     &cf_handle,
                     outpoint_to_bytes(&outpoint),
-                    spender_reference.clone().store(),
+                    spender_reference.store_ref(),
                 );
             }
         }
@@ -1382,7 +1382,7 @@ impl RocksDB {
                 batch.put_cf(
                     &cf_handle,
                     txid_to_bytes(&txid),
-                    consensus::serialize(&transaction.clone()),
+                    consensus::serialize(transaction.as_ref()),
                 );
             }
         }
@@ -1393,7 +1393,7 @@ impl RocksDB {
                 self.cf_handle(TRANSACTION_CONFIRMING_BLOCK_CF)?;
 
             for (txid, block_id) in update.transaction_confirming_block.iter() {
-                batch.put_cf(&cf_handle, txid_to_bytes(&txid), block_id.clone().store());
+                batch.put_cf(&cf_handle, txid_to_bytes(&txid), block_id.store_ref());
             }
         }
 
@@ -1477,7 +1477,7 @@ impl RocksDB {
                 batch.put_cf(
                     &cf_handle,
                     rune_id_to_bytes(&rune_id),
-                    rune_entry.clone().store(),
+                    rune_entry.store_ref(),
                 );
             }
         }
@@ -1494,7 +1494,7 @@ impl RocksDB {
                 batch.put_cf(
                     &cf_handle,
                     outpoint_to_bytes(&outpoint),
-                    txout.clone().store(),
+                    txout.store_ref(),
                 );
             }
         }
@@ -1724,7 +1724,7 @@ impl RocksDB {
             batch.put_cf(
                 &runes_cf_handle,
                 rune_id_to_bytes(&rune_id),
-                rune_entry.clone().store(),
+                rune_entry.store_ref(),
             );
 
             batch.put_cf(
@@ -1741,7 +1741,7 @@ impl RocksDB {
     pub fn set_subscription(&self, sub: &Subscription) -> DBResult<()> {
         let cf_handle = self.cf_handle(SUBSCRIPTIONS_CF)?;
         self.db
-            .put_cf(&cf_handle, sub.id.as_bytes(), sub.clone().store())?;
+            .put_cf(&cf_handle, sub.id.as_bytes(), sub.store_ref())?;
         Ok(())
     }
 

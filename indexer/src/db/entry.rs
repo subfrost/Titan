@@ -14,6 +14,16 @@ pub trait Entry: Sized + BorshDeserialize + BorshSerialize {
         self.serialize(&mut serialized).unwrap();
         serialized
     }
+
+    /// Serialize the entry by reference without consuming `self`.
+    /// Useful when the caller only has `&T` (e.g. inside an `Arc<T>`) and
+    /// wants to avoid an expensive deep clone just to satisfy the trait's
+    /// ownership requirements of `store`.
+    fn store_ref(&self) -> Vec<u8> {
+        let mut serialized = Vec::new();
+        self.serialize(&mut serialized).unwrap();
+        serialized
+    }
 }
 
 impl Entry for Block {}

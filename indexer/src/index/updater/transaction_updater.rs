@@ -6,6 +6,7 @@ use {
     },
     bitcoin::{OutPoint, Transaction, Txid},
     ordinals::{Artifact, Etching, Rune, RuneId, Runestone, SpacedRune},
+    std::sync::Arc,
     thiserror::Error,
     titan_types::{Event, MempoolEntry, SpenderReference, SpentStatus, TxOutEntry},
     tokio::sync::mpsc::error::SendError,
@@ -145,7 +146,8 @@ impl<'a> TransactionUpdater<'a> {
         }
 
         if self.settings.index_bitcoin_transactions {
-            cache.set_transaction(txid, transaction.clone());
+            let tx_arc = Arc::new(transaction.clone());
+            cache.set_transaction(txid, tx_arc);
         }
 
         if !cache.settings.mempool {
