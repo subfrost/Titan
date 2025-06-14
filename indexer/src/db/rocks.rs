@@ -155,10 +155,31 @@ impl RocksDB {
         db_opts.set_max_log_file_size(64 * 1024 * 1024); // 64 MB
         db_opts.set_keep_log_file_num(10);
         db_opts.set_recycle_log_file_num(5);
+
+        // Compression & compaction
         db_opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
         db_opts.set_bottommost_compression_type(rocksdb::DBCompressionType::Zstd);
         db_opts.set_periodic_compaction_seconds(86400); // Run compaction every 24 hours
-        db_opts.set_write_buffer_size(64 * 1024 * 1024); // 64 MB
+
+        // Larger, multi-level write buffers for higher throughput
+        db_opts.set_write_buffer_size(128 * 1024 * 1024); // 128 MB per memtable
+        db_opts.set_max_write_buffer_number(4);
+        db_opts.set_min_write_buffer_number_to_merge(2);
+
+        // Parallel background jobs / pipelined WAL
+        let cpus = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        db_opts.increase_parallelism(cpus as i32);
+        db_opts.set_enable_pipelined_write(true);
+
+        // Direct I/O to avoid double buffering
+        db_opts.set_use_direct_reads(true);
+        db_opts.set_use_direct_io_for_flush_and_compaction(true);
+
+        // Skipping checksum verification during compaction is not available
+        // in the current rocksdb crate version. The default checksum behaviour
+        // is retained.
 
         let mut block_based_options = BlockBasedOptions::default();
         block_based_options.set_block_size(16 * 1024); // 16 KB
