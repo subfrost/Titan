@@ -112,22 +112,17 @@ impl AddressUpdater {
         cache.set_script_pubkey_entries(spk_map);
 
         // ------------------------------------------------------
-        // 3. Update OutPoint -> ScriptPubKey mapping for *only* those outpoints
-        //    that are still considered "new" after the filtering above (i.e. exclude
-        //    outpoints that were already spent before the flush).
+        // 3. Persist OutPoint → ScriptPubKey mapping for ALL newly-created outpoints.
+        //    Even if an outpoint is immediately spent in the same block we still
+        //    insert the mapping so that later operations (e.g. rollbacks) can always
+        //    resolve a previous_output to its scriptPubKey without hitting the DB.
         // ------------------------------------------------------
         if !self.new_outpoints.is_empty() {
-            // Build a filtered map without the outpoints that were spent.
-            let outpoints_to_add: HashMap<OutPoint, ScriptBuf> = self
-                .new_outpoints
-                .iter()
-                .filter(|(outpoint, _)| !new_spent_outpoints.contains(outpoint))
-                .map(|(outpoint, spk)| (*outpoint, spk.clone()))
-                .collect();
-
-            if !outpoints_to_add.is_empty() {
-                cache.batch_set_outpoints_to_script_pubkey(outpoints_to_add);
-            }
+            // Build a map containing *all* newly created outpoints. We intentionally
+            // include outpoints that might have been spent later in the same block so
+            // that a reliable OutPoint → ScriptPubKey mapping is always available for
+            // potential rollback operations.
+            cache.batch_set_outpoints_to_script_pubkey(self.new_outpoints.clone());
         }
 
         Ok(())
