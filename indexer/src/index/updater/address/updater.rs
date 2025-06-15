@@ -56,7 +56,7 @@ impl AddressUpdater {
     /// if an outpoint is created and spent within the same block,
     /// we can find it in ephemeral memory.
     fn batch_update_script_pubkeys_for_block(
-        &self,
+        &mut self,
         cache: &mut UpdaterCache,
     ) -> Result<(), StoreError> {
         // For any spent outpoint that wasn't created in the same block,
@@ -117,19 +117,19 @@ impl AddressUpdater {
         //    insert the mapping so that later operations (e.g. rollbacks) can always
         //    resolve a previous_output to its scriptPubKey without hitting the DB.
         // ------------------------------------------------------
-        if !self.new_outpoints.is_empty() {
-            // Build a map containing *all* newly created outpoints. We intentionally
-            // include outpoints that might have been spent later in the same block so
-            // that a reliable OutPoint → ScriptPubKey mapping is always available for
-            // potential rollback operations.
-            cache.batch_set_outpoints_to_script_pubkey(self.new_outpoints.clone());
+
+        // Move all newly created outpoints into the cache without cloning.
+        let new_outpoints_map = std::mem::take(&mut self.new_outpoints);
+
+        if !new_outpoints_map.is_empty() {
+            cache.batch_set_outpoints_to_script_pubkey(new_outpoints_map);
         }
 
         Ok(())
     }
 
     fn batch_update_script_pubkeys_for_mempool(
-        &self,
+        &mut self,
         cache: &mut UpdaterCache,
     ) -> Result<(), StoreError> {
         let mut spk_map: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)> = HashMap::new();
@@ -141,10 +141,17 @@ impl AddressUpdater {
         }
 
         cache.set_script_pubkey_entries(spk_map);
-        cache.batch_set_outpoints_to_script_pubkey(self.new_outpoints.clone());
 
-        // b) Insert spent outpoints
-        cache.batch_set_spent_outpoints_in_mempool(self.spent_outpoints.clone());
+        // Move the maps into the cache without cloning.
+        let new_outpoints_map = std::mem::take(&mut self.new_outpoints);
+        if !new_outpoints_map.is_empty() {
+            cache.batch_set_outpoints_to_script_pubkey(new_outpoints_map);
+        }
+
+        let spent_outpoints_map = std::mem::take(&mut self.spent_outpoints);
+        if !spent_outpoints_map.is_empty() {
+            cache.batch_set_spent_outpoints_in_mempool(spent_outpoints_map);
+        }
 
         Ok(())
     }
