@@ -262,7 +262,7 @@ impl Updater {
                     }
 
                     cache.add_address_events(self.settings.chain);
-                    cache.flush()?;
+                    cache.flush(false)?;
                     cache.send_events(&self.sender)?;
                 }
 
@@ -297,7 +297,7 @@ impl Updater {
         }
 
         cache.add_address_events(self.settings.chain);
-        cache.flush()?;
+        cache.flush(true)?;
         cache.send_events(&self.sender)?;
 
         if !self.shutdown_flag.load(Ordering::SeqCst) {
@@ -391,7 +391,7 @@ impl Updater {
             cache.add_address_events(self.settings.chain);
         }
 
-        cache.flush()?;
+        cache.flush(true)?;
         cache.send_events(&self.sender)?;
 
         let removed_len = removed_txs.len();
@@ -641,7 +641,7 @@ impl Updater {
             }
 
             cache.add_address_events(self.settings.chain);
-            cache.flush()?;
+            cache.flush(true)?;
             cache.send_events(&self.sender)?;
         }
 

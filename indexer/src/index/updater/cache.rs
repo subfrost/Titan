@@ -350,10 +350,10 @@ impl UpdaterCache {
         self.update.blocks.len() >= max_size
     }
 
-    pub fn flush(&mut self) -> Result<()> {
+    pub fn flush(&mut self, at_tip: bool) -> Result<()> {
         let db = self.db.write();
 
-        if !self.settings.mempool {
+        if !self.settings.mempool && at_tip {
             self.prepare_to_delete(self.settings.max_recoverable_reorg_depth)?;
         }
 
