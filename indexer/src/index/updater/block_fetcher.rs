@@ -48,7 +48,7 @@ pub fn fetch_blocks_from(
     // Final channel for ordered blocks.
     let (final_sender, final_rx) = mpsc::sync_channel(32);
 
-    const CHANNEL_CAPACITY: usize = 10_000;
+    const CHANNEL_CAPACITY: usize = 1_000;
 
     // Intermediate channel for unordered (height, block) tuples. Using a bounded
     // crossbeam channel keeps the send side lock-free but still provides back-pressure.
