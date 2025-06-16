@@ -1,7 +1,7 @@
 use {
-    super::store_lock::StoreWithLock,
+    super::{read_cache::ReadCache, store_lock::StoreWithLock},
     crate::{
-        index::{store::StoreError, Chain, Settings},
+        index::{store::StoreError, updater::read_cache::ReadCacheSettings, Chain, Settings},
         models::{
             BatchDelete, BatchUpdate, BlockId, Inscription, RuneEntry, TransactionStateChange,
         },
@@ -28,6 +28,7 @@ pub(super) struct UpdaterCacheSettings {
     pub max_recoverable_reorg_depth: u64,
     pub mempool: bool,
     pub chain: Chain,
+    pub read_cache: ReadCacheSettings,
 }
 
 impl UpdaterCacheSettings {
@@ -36,6 +37,7 @@ impl UpdaterCacheSettings {
             max_recoverable_reorg_depth: settings.max_recoverable_reorg_depth(),
             mempool,
             chain: settings.chain,
+            read_cache: ReadCacheSettings::default(),
         }
     }
 }
@@ -48,6 +50,7 @@ pub(super) struct UpdaterCache {
     first_block_height: u64,
     last_block_height: Option<u64>,
     pub settings: UpdaterCacheSettings,
+    read_cache: ReadCache,
 }
 
 impl UpdaterCache {
@@ -67,6 +70,8 @@ impl UpdaterCache {
             block_count = 1;
         }
 
+        let read_cache_settings = settings.read_cache;
+
         Ok(Self {
             db,
             update: BatchUpdate::new(rune_count, block_count, purged_blocks_count),
@@ -74,6 +79,7 @@ impl UpdaterCache {
             events: vec![],
             first_block_height: block_count,
             last_block_height: None,
+            read_cache: ReadCache::with_settings(read_cache_settings),
             settings,
         })
     }
@@ -99,29 +105,40 @@ impl UpdaterCache {
         self.update.block_count += 1;
     }
 
-    pub fn get_block_hash(&self, height: u64) -> Result<BlockHash> {
-        let hash = self.update.block_hashes.get(&height);
-
-        if let Some(hash) = hash {
+    pub fn get_block_hash(&mut self, height: u64) -> Result<BlockHash> {
+        if let Some(hash) = self.update.block_hashes.get(&height) {
             return Ok(hash.clone());
-        } else {
-            let hash = self.db.read().get_block_hash(height)?;
+        }
+
+        if let Some(hash) = self.read_cache.get_block_hash(&height) {
             return Ok(hash);
         }
+
+        let hash = self.db.read().get_block_hash(height)?;
+        // cache for future
+        self.read_cache.insert_block_hash(height, hash.clone());
+        Ok(hash)
     }
 
-    pub fn get_block_by_height(&self, height: u64) -> Result<Arc<Block>> {
+    pub fn get_block_by_height(&mut self, height: u64) -> Result<Arc<Block>> {
         let hash = self.get_block_hash(height)?;
         self.get_block(&hash)
     }
 
-    pub fn get_block(&self, hash: &BlockHash) -> Result<Arc<Block>> {
+    pub fn get_block(&mut self, hash: &BlockHash) -> Result<Arc<Block>> {
         if let Some(block) = self.update.blocks.get(hash) {
             return Ok(block.clone());
-        } else {
-            let block = self.db.read().get_block_by_hash(hash)?;
-            return Ok(Arc::new(block));
         }
+
+        if let Some(block) = self.read_cache.get_block(hash) {
+            return Ok(block);
+        }
+
+        let block = self.db.read().get_block_by_hash(hash)?;
+        let arc_block = Arc::new(block);
+        self.read_cache
+            .insert_block(hash.clone(), arc_block.clone());
+        Ok(arc_block)
     }
 
     pub fn set_new_block(&mut self, block: Block) -> () {
@@ -136,6 +153,15 @@ impl UpdaterCache {
         self.update
             .block_hashes
             .insert(self.get_block_count(), hash);
+
+        // Also cache in read cache for faster future reads
+        self.read_cache
+            .insert_block_hash(self.get_block_count(), hash);
+        // Need the block Arc we stored
+        if let Some(block_arc) = self.update.blocks.get(&hash) {
+            self.read_cache.insert_block(hash, block_arc.clone());
+        }
+
         self.increment_block_count();
     }
 
@@ -147,14 +173,20 @@ impl UpdaterCache {
         self.update.rune_count -= 1;
     }
 
-    pub fn get_transaction(&self, txid: Txid) -> Result<Arc<Transaction>> {
+    pub fn get_transaction(&mut self, txid: Txid) -> Result<Arc<Transaction>> {
         if let Some(transaction) = self.update.transactions.get(&txid) {
             return Ok(transaction.clone());
-        } else {
-            let transaction_raw = self.db.read().get_transaction_raw(&txid, None)?;
-            let tx: Transaction = consensus::deserialize(&transaction_raw)?;
-            return Ok(Arc::new(tx));
         }
+
+        if let Some(tx) = self.read_cache.get_transaction(&txid) {
+            return Ok(tx);
+        }
+
+        let transaction_raw = self.db.read().get_transaction_raw(&txid, None)?;
+        let tx: Transaction = consensus::deserialize(&transaction_raw)?;
+        let arc_tx = Arc::new(tx);
+        self.read_cache.insert_transaction(txid, arc_tx.clone());
+        Ok(arc_tx)
     }
 
     pub fn get_transaction_confirming_block(&self, txid: Txid) -> Result<BlockId> {
@@ -174,7 +206,9 @@ impl UpdaterCache {
 
         let mut to_fetch = HashSet::with_capacity(outpoints.len());
         for outpoint in outpoints.iter() {
-            if !self.update.txouts.contains_key(outpoint) {
+            if !self.update.txouts.contains_key(outpoint)
+                && !self.read_cache.contains_tx_out(outpoint)
+            {
                 to_fetch.insert(outpoint.clone());
             }
         }
@@ -185,27 +219,47 @@ impl UpdaterCache {
                 .read()
                 .get_tx_outs(&to_fetch.iter().cloned().collect(), None)?;
 
-            self.update.txouts.extend(tx_outs);
+            for (op, entry) in tx_outs {
+                // Store in read cache for future fast reads
+                self.read_cache.insert_tx_out(op.clone(), entry.clone());
+                // do NOT insert into update.txouts because these are immutable reads
+            }
         }
 
         Ok(())
     }
 
-    pub fn get_tx_out(&self, outpoint: &OutPoint) -> Result<TxOutEntry> {
+    pub fn get_tx_out(&mut self, outpoint: &OutPoint) -> Result<TxOutEntry> {
         if let Some(tx_out) = self.update.txouts.get(outpoint) {
             return Ok(tx_out.clone());
-        } else {
-            let tx_out = self.db.read().get_tx_out(outpoint, None)?;
+        }
+
+        if let Some(tx_out) = self.read_cache.get_tx_out(outpoint) {
             return Ok(tx_out);
         }
+
+        let tx_out = self.db.read().get_tx_out(outpoint, None)?;
+        // populate read cache for next time
+        self.read_cache
+            .insert_tx_out(outpoint.clone(), tx_out.clone());
+        Ok(tx_out)
     }
 
-    pub fn get_tx_outs(&self, outpoints: &Vec<OutPoint>) -> Result<HashMap<OutPoint, TxOutEntry>> {
+    pub fn get_tx_outs(
+        &mut self,
+        outpoints: &Vec<OutPoint>,
+    ) -> Result<HashMap<OutPoint, TxOutEntry>> {
         let mut results = HashMap::with_capacity(outpoints.len());
         let mut to_fetch = HashSet::with_capacity(outpoints.len());
+
         for outpoint in outpoints.iter() {
             if let Some(tx_out) = self.update.txouts.get(outpoint) {
                 results.insert(outpoint.clone(), tx_out.clone());
+                continue;
+            }
+
+            if let Some(tx_out) = self.read_cache.get_tx_out(outpoint) {
+                results.insert(outpoint.clone(), tx_out);
             } else {
                 to_fetch.insert(outpoint.clone());
             }
@@ -217,6 +271,10 @@ impl UpdaterCache {
                 .read()
                 .get_tx_outs(&to_fetch.iter().cloned().collect(), None)?;
 
+            for (op, entry) in &tx_outs {
+                self.read_cache.insert_tx_out(op.clone(), entry.clone());
+            }
+
             results.extend(tx_outs);
         }
 
@@ -224,7 +282,8 @@ impl UpdaterCache {
     }
 
     pub fn set_tx_out(&mut self, outpoint: OutPoint, tx_out: TxOutEntry) -> () {
-        self.update.txouts.insert(outpoint, tx_out);
+        self.update.txouts.insert(outpoint.clone(), tx_out.clone());
+        self.read_cache.insert_tx_out(outpoint, tx_out);
     }
 
     pub fn does_tx_exist(&self, txid: Txid) -> Result<bool> {
@@ -270,30 +329,42 @@ impl UpdaterCache {
             .push(txid);
     }
 
-    pub fn get_rune(&self, rune_id: &RuneId) -> Result<RuneEntry> {
+    pub fn get_rune(&mut self, rune_id: &RuneId) -> Result<RuneEntry> {
         if let Some(rune) = self.update.runes.get(rune_id) {
             return Ok(rune.clone());
-        } else {
-            let rune = self.db.read().get_rune(rune_id)?;
+        }
+
+        if let Some(rune) = self.read_cache.get_rune(rune_id) {
             return Ok(rune);
         }
+
+        let rune = self.db.read().get_rune(rune_id)?;
+        self.read_cache.insert_rune(*rune_id, rune.clone());
+        Ok(rune)
     }
 
     pub fn set_rune(&mut self, rune_id: RuneId, rune: RuneEntry) -> () {
-        self.update.runes.insert(rune_id, rune);
+        self.update.runes.insert(rune_id, rune.clone());
+        self.read_cache.insert_rune(rune_id, rune);
     }
 
-    pub fn get_rune_id(&self, rune: &Rune) -> Result<RuneId> {
+    pub fn get_rune_id(&mut self, rune: &Rune) -> Result<RuneId> {
         if let Some(rune_id) = self.update.rune_ids.get(&rune.0) {
             return Ok(rune_id.clone());
-        } else {
-            let rune_id = self.db.read().get_rune_id(rune)?;
+        }
+
+        if let Some(rune_id) = self.read_cache.get_rune_id(&rune.0) {
             return Ok(rune_id);
         }
+
+        let rune_id = self.db.read().get_rune_id(rune)?;
+        self.read_cache.insert_rune_id(rune.0, rune_id.clone());
+        Ok(rune_id)
     }
 
     pub fn set_rune_id(&mut self, rune: Rune, rune_id: RuneId) -> () {
-        self.update.rune_ids.insert(rune.0, rune_id);
+        self.update.rune_ids.insert(rune.0, rune_id.clone());
+        self.read_cache.insert_rune_id(rune.0, rune_id);
     }
 
     pub fn set_rune_id_number(&mut self, number: u64, rune_id: RuneId) -> () {

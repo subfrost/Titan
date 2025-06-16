@@ -41,3 +41,4 @@ uuid = { version = "1.12.1", features = ["borsh", "serde", "v4"] }
 async_zmq = "0.4.0"
 rand = "0.9.0"
 num_cpus = "1.16.0"
+clru = "0.6.2"

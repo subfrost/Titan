@@ -4,8 +4,8 @@ use {
         *,
     },
     crate::{
-        bitcoin_rpc::{RpcClientError, RpcClientPool, RpcClientPoolError, RpcClientProvider},
-        index::{metrics::Metrics, store::Store, Chain, Settings, StoreError},
+        bitcoin_rpc::{RpcClientError, RpcClientPool, RpcClientPoolError},
+        index::{metrics::Metrics, store::Store, Settings, StoreError},
         models::{BlockId, RuneEntry},
     },
     address::AddressUpdater,
@@ -151,7 +151,7 @@ impl Updater {
 
     fn is_chain_synced(
         &self,
-        cache: &UpdaterCache,
+        cache: &mut UpdaterCache,
         chain_info: &GetBlockchainInfoResult,
     ) -> Result<bool> {
         if cache.get_block_height_tip() != chain_info.blocks {
@@ -193,7 +193,7 @@ impl Updater {
         let mut first_block = true;
 
         // Fetch new blocks if needed.
-        while !self.is_chain_synced(&cache, &chain_info)? {
+        while !self.is_chain_synced(&mut cache, &chain_info)? {
             let was_at_tip = self.is_at_tip.load(Ordering::Relaxed);
             self.is_at_tip.store(false, Ordering::Release);
 

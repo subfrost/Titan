@@ -57,7 +57,7 @@ impl<'client> TransactionParser<'client> {
 
     pub(super) fn parse(
         &mut self,
-        cache: &UpdaterCache,
+        cache: &mut UpdaterCache,
         tx_index: u32,
         tx: &Transaction,
     ) -> Result<TransactionStateChange> {
@@ -133,7 +133,7 @@ impl<'client> TransactionParser<'client> {
 
     fn parse_runes(
         &mut self,
-        cache: &UpdaterCache,
+        cache: &mut UpdaterCache,
         tx_index: u32,
         tx: &Transaction,
     ) -> Result<(
@@ -339,7 +339,7 @@ impl<'client> TransactionParser<'client> {
 
     fn etched(
         &mut self,
-        cache: &UpdaterCache,
+        cache: &mut UpdaterCache,
         tx_index: u32,
         tx: &Transaction,
         artifact: &Artifact,
@@ -392,7 +392,7 @@ impl<'client> TransactionParser<'client> {
         Ok(Some((rune_id, rune)))
     }
 
-    fn mint(&mut self, cache: &UpdaterCache, id: RuneId) -> Result<Option<Lot>> {
+    fn mint(&mut self, cache: &mut UpdaterCache, id: RuneId) -> Result<Option<Lot>> {
         let rune_entry = match cache.get_rune(&id) {
             Ok(rune_entry) => rune_entry,
             Err(err) => {
@@ -413,7 +413,7 @@ impl<'client> TransactionParser<'client> {
 
     fn tx_commits_to_rune(
         &self,
-        cache: &UpdaterCache,
+        cache: &mut UpdaterCache,
         tx: &Transaction,
         rune: Rune,
     ) -> Result<bool> {
@@ -460,7 +460,7 @@ impl<'client> TransactionParser<'client> {
 
     fn validate_commit_transaction_with_cache(
         &self,
-        cache: &UpdaterCache,
+        cache: &mut UpdaterCache,
         outpoint: OutPoint,
     ) -> Result<bool> {
         let transaction = cache.get_transaction(outpoint.txid)?;
@@ -516,7 +516,7 @@ impl<'client> TransactionParser<'client> {
 
     fn unallocated(
         &self,
-        cache: &UpdaterCache,
+        cache: &mut UpdaterCache,
         tx: &Transaction,
     ) -> Result<(HashMap<RuneId, Lot>, HashMap<RuneId, Lot>)> {
         let estimated_inputs = tx.input.len();
