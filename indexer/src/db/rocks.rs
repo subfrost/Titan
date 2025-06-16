@@ -19,6 +19,7 @@ use {
         BlockBasedOptions, BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, Direction,
         IteratorMode, MultiThreaded, Options, WriteBatch, WriteOptions,
     },
+    rustc_hash::FxHashMap,
     std::{
         collections::{HashMap, HashSet, VecDeque},
         sync::{Arc, RwLock},
@@ -459,7 +460,7 @@ impl RocksDB {
 
     pub fn get_tx_outs(
         &self,
-        outpoints: &Vec<OutPoint>,
+        outpoints: &[OutPoint],
         mempool: Option<bool>,
     ) -> DBResult<HashMap<OutPoint, TxOutEntry>> {
         if let Some(mempool) = mempool {
@@ -484,7 +485,7 @@ impl RocksDB {
 
     fn get_tx_outs_with_mempool(
         &self,
-        outpoints: &Vec<OutPoint>,
+        outpoints: &[OutPoint],
         mempool: bool,
     ) -> DBResult<HashMap<OutPoint, TxOutEntry>> {
         let cf_handle = if mempool {
@@ -717,7 +718,7 @@ impl RocksDB {
     /// and then updates both the primary rune transactions and the secondary tx-index in one batch.
     pub fn add_rune_transactions_batch(
         &self,
-        rune_tx_map: &HashMap<RuneId, Vec<Txid>>,
+        rune_tx_map: &FxHashMap<RuneId, Vec<Txid>>,
         mempool: bool,
     ) -> DBResult<()> {
         // Get the appropriate column families for primary and secondary indexes.

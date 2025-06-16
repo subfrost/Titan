@@ -1,6 +1,7 @@
 use {
     crate::index::{updater::cache::UpdaterCache, StoreError},
     bitcoin::{OutPoint, ScriptBuf},
+    rustc_hash::FxHashMap,
     std::collections::{HashMap, HashSet},
     titan_types::SpenderReference,
 };
@@ -8,17 +9,17 @@ use {
 #[derive(Default)]
 pub struct AddressUpdater {
     /// All outpoints newly created in this block: (outpoint, script_pubkey)
-    new_outpoints: HashMap<OutPoint, ScriptBuf>,
+    new_outpoints: FxHashMap<OutPoint, ScriptBuf>,
 
     /// All outpoints spent in this block (except coinbase).
-    spent_outpoints: HashMap<OutPoint, SpenderReference>,
+    spent_outpoints: FxHashMap<OutPoint, SpenderReference>,
 }
 
 impl AddressUpdater {
     pub fn new() -> Self {
         Self {
-            new_outpoints: HashMap::new(),
-            spent_outpoints: HashMap::new(),
+            new_outpoints: FxHashMap::default(),
+            spent_outpoints: FxHashMap::default(),
         }
     }
 
@@ -80,7 +81,8 @@ impl AddressUpdater {
         // ------------------------------------------------------
         //   We'll store new outpoints in (0) and spent outpoints in (1).
         //   This allows us to do all grouping in one structure.
-        let mut spk_map: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)> = HashMap::new();
+        let mut spk_map: FxHashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)> =
+            FxHashMap::default();
 
         // a) Insert spent outpoints that were NOT created in the same flush window
         for (outpoint, script_pubkey) in spent_map {
@@ -132,7 +134,8 @@ impl AddressUpdater {
         &mut self,
         cache: &mut UpdaterCache,
     ) -> Result<(), StoreError> {
-        let mut spk_map: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)> = HashMap::new();
+        let mut spk_map: FxHashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)> =
+            FxHashMap::default();
 
         // a) Insert new outpoints
         for (outpoint, script_pubkey) in &self.new_outpoints {

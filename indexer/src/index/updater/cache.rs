@@ -7,19 +7,21 @@ use {
         },
     },
     bitcoin::{consensus, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
+    crossbeam_channel::{bounded, Sender},
     ordinals::{Rune, RuneId},
+    rustc_hash::{FxHashMap, FxHashSet},
     std::{
-        cmp,
         collections::{HashMap, HashSet},
         str::FromStr,
         sync::Arc,
-        time::Instant,
+        thread,
+        time::{Duration, Instant},
     },
     titan_types::{
         Block, Event, InscriptionId, Location, MempoolEntry, SpenderReference, TxOutEntry,
     },
     tokio::sync::mpsc,
-    tracing::{info, trace},
+    tracing::info,
 };
 
 type Result<T> = std::result::Result<T, StoreError>;
@@ -29,6 +31,7 @@ pub(super) struct UpdaterCacheSettings {
     pub mempool: bool,
     pub chain: Chain,
     pub read_cache: ReadCacheSettings,
+    pub max_async_batches: usize,
 }
 
 impl UpdaterCacheSettings {
@@ -38,6 +41,7 @@ impl UpdaterCacheSettings {
             mempool,
             chain: settings.chain,
             read_cache: ReadCacheSettings::default(),
+            max_async_batches: 8, // default batches in flight
         }
     }
 }
@@ -51,6 +55,12 @@ pub(super) struct UpdaterCache {
     last_block_height: Option<u64>,
     pub settings: UpdaterCacheSettings,
     read_cache: ReadCache,
+
+    // background flush
+    bg_tx: Option<Sender<Arc<BatchUpdate>>>,
+    pending_batches: Vec<Arc<BatchUpdate>>,
+    // Handle to background writer thread so we can join on drop
+    writer_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl UpdaterCache {
@@ -81,6 +91,10 @@ impl UpdaterCache {
             last_block_height: None,
             read_cache: ReadCache::with_settings(read_cache_settings),
             settings,
+
+            bg_tx: None,
+            pending_batches: Vec::new(),
+            writer_handle: None,
         })
     }
 
@@ -106,16 +120,24 @@ impl UpdaterCache {
     }
 
     pub fn get_block_hash(&mut self, height: u64) -> Result<BlockHash> {
+        // 1. Check current in-memory update.
         if let Some(hash) = self.update.block_hashes.get(&height) {
             return Ok(hash.clone());
         }
 
+        // 2. Check any pending batches that have been flushed but not yet persisted.
+        if let Some(hash) = self.find_in_pending(|b| b.block_hashes.get(&height).cloned()) {
+            return Ok(hash);
+        }
+
+        // 3. Check read-through cache.
         if let Some(hash) = self.read_cache.get_block_hash(&height) {
             return Ok(hash);
         }
 
+        // 4. Fall back to the persistent store.
         let hash = self.db.read().get_block_hash(height)?;
-        // cache for future
+        // Cache for future accesses.
         self.read_cache.insert_block_hash(height, hash.clone());
         Ok(hash)
     }
@@ -126,14 +148,22 @@ impl UpdaterCache {
     }
 
     pub fn get_block(&mut self, hash: &BlockHash) -> Result<Arc<Block>> {
+        // 1. Check current in-memory update.
         if let Some(block) = self.update.blocks.get(hash) {
             return Ok(block.clone());
         }
 
+        // 2. Check pending batches.
+        if let Some(block) = self.find_in_pending(|b| b.blocks.get(hash).cloned()) {
+            return Ok(block);
+        }
+
+        // 3. Check read cache.
         if let Some(block) = self.read_cache.get_block(hash) {
             return Ok(block);
         }
 
+        // 4. Fetch from persistent store and cache.
         let block = self.db.read().get_block_by_hash(hash)?;
         let arc_block = Arc::new(block);
         self.read_cache
@@ -174,14 +204,22 @@ impl UpdaterCache {
     }
 
     pub fn get_transaction(&mut self, txid: Txid) -> Result<Arc<Transaction>> {
+        // 1. Check current in-memory update.
         if let Some(transaction) = self.update.transactions.get(&txid) {
             return Ok(transaction.clone());
         }
 
+        // 2. Check pending batches.
+        if let Some(tx) = self.find_in_pending(|b| b.transactions.get(&txid).cloned()) {
+            return Ok(tx);
+        }
+
+        // 3. Check read cache.
         if let Some(tx) = self.read_cache.get_transaction(&txid) {
             return Ok(tx);
         }
 
+        // 4. Fallback to DB.
         let transaction_raw = self.db.read().get_transaction_raw(&txid, None)?;
         let tx: Transaction = consensus::deserialize(&transaction_raw)?;
         let arc_tx = Arc::new(tx);
@@ -190,54 +228,80 @@ impl UpdaterCache {
     }
 
     pub fn get_transaction_confirming_block(&self, txid: Txid) -> Result<BlockId> {
+        // 1. Check current in-memory update.
         if let Some(block_id) = self.update.transaction_confirming_block.get(&txid) {
             return Ok(block_id.clone());
-        } else {
-            let block_id = self.db.read().get_transaction_confirming_block(&txid)?;
+        }
+
+        // 2. Check pending batches.
+        if let Some(block_id) =
+            self.find_in_pending(|b| b.transaction_confirming_block.get(&txid).cloned())
+        {
             return Ok(block_id);
         }
+
+        // 3. Fallback to DB.
+        let block_id = self.db.read().get_transaction_confirming_block(&txid)?;
+        Ok(block_id)
     }
 
     pub fn precache_tx_outs(&mut self, txs: &Vec<Transaction>) -> Result<()> {
-        let outpoints: Vec<_> = txs
-            .iter()
-            .flat_map(|tx| tx.input.iter().map(|input| input.previous_output))
-            .collect();
+        // Collect unique input outpoints that are not yet cached.
+        // Use FxHashSet for faster hashing performance and avoid allocating an
+        // intermediate Vec of all outpoints.
+        let mut to_fetch: FxHashSet<OutPoint> = FxHashSet::default();
 
-        let mut to_fetch = HashSet::with_capacity(outpoints.len());
-        for outpoint in outpoints.iter() {
-            if !self.update.txouts.contains_key(outpoint)
-                && !self.read_cache.contains_tx_out(outpoint)
-            {
-                to_fetch.insert(outpoint.clone());
+        for tx in txs {
+            for txin in &tx.input {
+                let outpoint = txin.previous_output;
+
+                // Skip coinbase/null outpoints – they do not have a corresponding TxOut.
+                if outpoint.vout == u32::MAX {
+                    continue;
+                }
+
+                if !self.update.txouts.contains_key(&outpoint)
+                    && !self.read_cache.contains_tx_out(&outpoint)
+                {
+                    to_fetch.insert(outpoint);
+                }
             }
         }
 
-        if !to_fetch.is_empty() {
-            let tx_outs = self
-                .db
-                .read()
-                .get_tx_outs(&to_fetch.iter().cloned().collect(), None)?;
+        if to_fetch.is_empty() {
+            return Ok(());
+        }
 
-            for (op, entry) in tx_outs {
-                // Store in read cache for future fast reads
-                self.read_cache.insert_tx_out(op.clone(), entry.clone());
-                // do NOT insert into update.txouts because these are immutable reads
-            }
+        let tx_outs = self
+            .db
+            .read()
+            .get_tx_outs(&to_fetch.iter().cloned().collect::<Vec<_>>(), None)?;
+
+        for (op, entry) in tx_outs {
+            // Store in read cache for future fast reads (immutable reads only)
+            self.read_cache.insert_tx_out(op.clone(), entry.clone());
         }
 
         Ok(())
     }
 
     pub fn get_tx_out(&mut self, outpoint: &OutPoint) -> Result<TxOutEntry> {
+        // 1. Check current in-memory update.
         if let Some(tx_out) = self.update.txouts.get(outpoint) {
             return Ok(tx_out.clone());
         }
 
+        // 2. Check pending batches.
+        if let Some(tx_out) = self.find_in_pending(|b| b.txouts.get(outpoint).cloned()) {
+            return Ok(tx_out);
+        }
+
+        // 3. Check read cache.
         if let Some(tx_out) = self.read_cache.get_tx_out(outpoint) {
             return Ok(tx_out);
         }
 
+        // 4. Fallback to DB.
         let tx_out = self.db.read().get_tx_out(outpoint, None)?;
         // populate read cache for next time
         self.read_cache
@@ -252,16 +316,21 @@ impl UpdaterCache {
         let mut results = HashMap::with_capacity(outpoints.len());
         let mut to_fetch = HashSet::with_capacity(outpoints.len());
 
-        for outpoint in outpoints.iter() {
+        for outpoint in outpoints {
             if let Some(tx_out) = self.update.txouts.get(outpoint) {
-                results.insert(outpoint.clone(), tx_out.clone());
+                results.insert(*outpoint, tx_out.clone());
+                continue;
+            }
+
+            if let Some(tx_out) = self.find_in_pending(|b| b.txouts.get(outpoint).cloned()) {
+                results.insert(*outpoint, tx_out);
                 continue;
             }
 
             if let Some(tx_out) = self.read_cache.get_tx_out(outpoint) {
-                results.insert(outpoint.clone(), tx_out);
+                results.insert(*outpoint, tx_out);
             } else {
-                to_fetch.insert(outpoint.clone());
+                to_fetch.insert(*outpoint);
             }
         }
 
@@ -269,7 +338,7 @@ impl UpdaterCache {
             let tx_outs = self
                 .db
                 .read()
-                .get_tx_outs(&to_fetch.iter().cloned().collect(), None)?;
+                .get_tx_outs(&to_fetch.iter().cloned().collect::<Vec<_>>(), None)?;
 
             for (op, entry) in &tx_outs {
                 self.read_cache.insert_tx_out(op.clone(), entry.clone());
@@ -288,6 +357,20 @@ impl UpdaterCache {
 
     pub fn does_tx_exist(&self, txid: Txid) -> Result<bool> {
         if self.update.tx_state_changes.contains_key(&txid) {
+            return Ok(true);
+        }
+
+        // Check pending batches.
+        if self
+            .find_in_pending::<(), _>(|b| {
+                if b.tx_state_changes.contains_key(&txid) {
+                    Some(())
+                } else {
+                    None
+                }
+            })
+            .is_some()
+        {
             return Ok(true);
         }
 
@@ -330,14 +413,22 @@ impl UpdaterCache {
     }
 
     pub fn get_rune(&mut self, rune_id: &RuneId) -> Result<RuneEntry> {
+        // 1. Current update.
         if let Some(rune) = self.update.runes.get(rune_id) {
             return Ok(rune.clone());
         }
 
+        // 2. Pending batches.
+        if let Some(rune) = self.find_in_pending(|b| b.runes.get(rune_id).cloned()) {
+            return Ok(rune);
+        }
+
+        // 3. Read cache.
         if let Some(rune) = self.read_cache.get_rune(rune_id) {
             return Ok(rune);
         }
 
+        // 4. DB.
         let rune = self.db.read().get_rune(rune_id)?;
         self.read_cache.insert_rune(*rune_id, rune.clone());
         Ok(rune)
@@ -349,14 +440,22 @@ impl UpdaterCache {
     }
 
     pub fn get_rune_id(&mut self, rune: &Rune) -> Result<RuneId> {
+        // 1. Current update.
         if let Some(rune_id) = self.update.rune_ids.get(&rune.0) {
             return Ok(rune_id.clone());
         }
 
+        // 2. Pending batches.
+        if let Some(rune_id) = self.find_in_pending(|b| b.rune_ids.get(&rune.0).cloned()) {
+            return Ok(rune_id);
+        }
+
+        // 3. Read cache.
         if let Some(rune_id) = self.read_cache.get_rune_id(&rune.0) {
             return Ok(rune_id);
         }
 
+        // 4. DB.
         let rune_id = self.db.read().get_rune_id(rune)?;
         self.read_cache.insert_rune_id(rune.0, rune_id.clone());
         Ok(rune_id)
@@ -385,7 +484,7 @@ impl UpdaterCache {
 
     pub fn set_script_pubkey_entries(
         &mut self,
-        script_pubkey_entry: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)>,
+        script_pubkey_entry: FxHashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)>,
     ) -> () {
         self.update.script_pubkeys = script_pubkey_entry;
     }
@@ -395,20 +494,44 @@ impl UpdaterCache {
         outpoints: &Vec<OutPoint>,
         optimistic: bool,
     ) -> Result<HashMap<OutPoint, ScriptBuf>> {
-        return Ok(self.db.read().get_outpoints_to_script_pubkey(
-            &outpoints,
-            Some(self.settings.mempool),
-            optimistic,
-        )?);
+        let mut results = HashMap::with_capacity(outpoints.len());
+        let mut to_fetch: Vec<OutPoint> = Vec::with_capacity(outpoints.len());
+
+        for op in outpoints {
+            if let Some(spk) = self.update.script_pubkeys_outpoints.get(op) {
+                results.insert(*op, spk.clone());
+                continue;
+            }
+
+            // Check any pending batches.
+            if let Some(spk) = self.find_in_pending(|b| b.script_pubkeys_outpoints.get(op).cloned())
+            {
+                results.insert(*op, spk);
+                continue;
+            }
+
+            to_fetch.push(*op);
+        }
+
+        if !to_fetch.is_empty() {
+            let fetched = self.db.read().get_outpoints_to_script_pubkey(
+                &to_fetch,
+                Some(self.settings.mempool),
+                optimistic,
+            )?;
+            results.extend(fetched);
+        }
+
+        Ok(results)
     }
 
-    pub fn batch_set_outpoints_to_script_pubkey(&mut self, items: HashMap<OutPoint, ScriptBuf>) {
+    pub fn batch_set_outpoints_to_script_pubkey(&mut self, items: FxHashMap<OutPoint, ScriptBuf>) {
         self.update.script_pubkeys_outpoints = items;
     }
 
     pub fn batch_set_spent_outpoints_in_mempool(
         &mut self,
-        outpoints: HashMap<OutPoint, SpenderReference>,
+        outpoints: FxHashMap<OutPoint, SpenderReference>,
     ) {
         self.update.spent_outpoints_in_mempool.extend(outpoints);
     }
@@ -422,26 +545,69 @@ impl UpdaterCache {
     }
 
     pub fn flush(&mut self, at_tip: bool) -> Result<()> {
+        // Spawn writer if needed
+        self.ensure_writer();
+
         let db = self.db.write();
 
         if !self.settings.mempool && at_tip {
             self.prepare_to_delete(self.settings.max_recoverable_reorg_depth)?;
         }
 
-        if !self.update.is_empty() {
-            let start = Instant::now();
-            db.batch_update(&self.update, self.settings.mempool)?;
-            trace!("Flushed update: {} in {:?}", self.update, start.elapsed());
+        if !self.settings.mempool {
+            // Async path
+            if !self.update.is_empty() {
+                if let Some(tx) = &self.bg_tx {
+                    // Move current update into Arc and start a fresh empty one.
+                    let new_update = BatchUpdate::new(
+                        self.update.rune_count,
+                        self.update.block_count,
+                        self.update.purged_blocks_count,
+                    );
+                    let batch_arc = Arc::new(std::mem::replace(&mut self.update, new_update));
+                    self.pending_batches.push(batch_arc.clone());
+                    tx.send(batch_arc).expect("writer thread dropped");
+                } else {
+                    let start = Instant::now();
+                    db.batch_update(&self.update, false)?;
+                    info!("Flushed update: {} in {:?}", self.update, start.elapsed());
+                    self.update.clear();
+                }
+            }
+        } else {
+            if !self.update.is_empty() {
+                let start = Instant::now();
+                db.batch_update(&self.update, true)?;
+                info!("Flushed update: {} in {:?}", self.update, start.elapsed());
+            }
         }
 
         if !self.delete.is_empty() {
             let start = Instant::now();
             db.batch_delete(&self.delete)?;
-            trace!("Flushed delete: {} in {:?}", self.delete, start.elapsed());
+            info!("Flushed delete: {} in {:?}", self.delete, start.elapsed());
         }
 
-        // Clear the cache
-        self.update.clear();
+        // Manage clearing policy
+        if self.settings.mempool {
+            self.update.clear();
+        } else {
+            // If this flush is final (at_tip) wait until background writes finished
+            if at_tip {
+                while !self.pending_batches.is_empty() {
+                    self.cleanup_completed_batches();
+                    thread::sleep(Duration::from_millis(50));
+                }
+                self.update.clear();
+            } else {
+                // If no pending writes, safe to clear now
+                if self.pending_batches.is_empty() {
+                    self.update.clear();
+                }
+            }
+        }
+
+        // Always clear delete batch
         self.delete.clear();
         self.first_block_height = self.update.block_count;
         self.last_block_height = None;
@@ -482,20 +648,12 @@ impl UpdaterCache {
 
     fn prepare_to_delete(&mut self, max_recoverable_reorg_depth: u64) -> Result<()> {
         if let Some(last_block_height) = self.last_block_height {
-            let mut from_block_height_to_purge = self
-                .first_block_height
-                .checked_sub(max_recoverable_reorg_depth + 1)
-                .unwrap_or(0);
+            let from_block_height_to_purge = self.update.purged_blocks_count;
 
             let to_block_height_to_purge =
                 last_block_height.checked_sub(max_recoverable_reorg_depth);
 
             if let Some(to_block_height_to_purge) = to_block_height_to_purge {
-                from_block_height_to_purge = cmp::max(
-                    from_block_height_to_purge,
-                    self.update.purged_blocks_count + 1,
-                );
-
                 info!(
                     "Purging blocks from {} to {}",
                     from_block_height_to_purge, to_block_height_to_purge,
@@ -518,6 +676,10 @@ impl UpdaterCache {
         for txid in txids {
             if let Some(tx_state_changes) = self.update.tx_state_changes.get(txid) {
                 total_tx_state_changes.insert(txid.clone(), tx_state_changes.clone());
+            } else if let Some(tx_state_changes) =
+                self.find_in_pending(|b| b.tx_state_changes.get(txid).cloned())
+            {
+                total_tx_state_changes.insert(txid.clone(), tx_state_changes);
             } else {
                 to_fetch.insert(txid.clone());
             }
@@ -577,11 +739,86 @@ impl UpdaterCache {
 
                 self.delete.tx_state_changes.insert(txid);
             }
-
-            // Update purged count
-            self.update.purged_blocks_count = height;
         }
 
+        // Update purged count
+        self.update.purged_blocks_count = to;
+
         Ok(())
+    }
+
+    fn ensure_writer(&mut self) {
+        if self.bg_tx.is_some() || self.settings.mempool {
+            return;
+        }
+
+        let (tx, rx) = bounded::<Arc<BatchUpdate>>(self.settings.max_async_batches);
+        let db = self.db.clone();
+
+        let handle = thread::Builder::new()
+            .name("rocksdb-writer".into())
+            .spawn(move || {
+                while let Ok(batch) = rx.recv() {
+                    let store = db.write();
+                    // Safety: Only background thread writes via batch_update.
+                    if let Err(e) = store.batch_update(&batch, false) {
+                        tracing::error!("Background RocksDB write failed: {:?}", e);
+                    }
+                }
+            })
+            .expect("failed to spawn rocksdb-writer thread");
+
+        self.bg_tx = Some(tx);
+        self.writer_handle = Some(handle);
+    }
+
+    fn cleanup_completed_batches(&mut self) {
+        self.pending_batches.retain(|b| Arc::strong_count(b) > 1);
+    }
+
+    // Reserve capacity in frequently-written structures to avoid repeated
+    // re-allocations during large blocks. These are cheap no-ops if the map
+    // already has enough free slots.
+    pub fn reserve_txouts(&mut self, additional: usize) {
+        self.update.txouts.reserve(additional);
+    }
+
+    pub fn reserve_tx_state_changes(&mut self, additional: usize) {
+        self.update.tx_state_changes.reserve(additional);
+    }
+
+    /// Search a value inside the currently pending (still in–flight) batch updates.
+    /// The provided closure will be executed on each `BatchUpdate` starting from the
+    /// most-recent one (the last pushed into `pending_batches`). The first `Some` value
+    /// returned will be forwarded. This is a generic utility that avoids repeating the
+    /// same lookup logic for every data type we need to read while a background write
+    /// is ongoing.
+    fn find_in_pending<T, F>(&self, finder: F) -> Option<T>
+    where
+        F: Fn(&BatchUpdate) -> Option<T>,
+    {
+        // Iterate newest → oldest to make sure we prefer the most recently flushed batch.
+        for batch in self.pending_batches.iter().rev() {
+            if let Some(val) = finder(batch.as_ref()) {
+                return Some(val);
+            }
+        }
+        None
+    }
+}
+
+impl Drop for UpdaterCache {
+    fn drop(&mut self) {
+        // Close the sender side of the channel first so the background
+        // thread can finish processing and exit its loop.
+        self.bg_tx.take();
+
+        // Wait for the background writer thread to finish to guarantee that
+        // all pending updates have been flushed before shutting down.
+        if let Some(handle) = self.writer_handle.take() {
+            if let Err(err) = handle.join() {
+                tracing::error!("Failed to join rocksdb-writer thread: {:?}", err);
+            }
+        }
     }
 }

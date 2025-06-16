@@ -17,7 +17,7 @@ use {
         json::{GetBlockchainInfoResult, GetMempoolEntryResult},
         Client, RpcApi,
     },
-    block_fetcher::fetch_blocks_from,
+    block_fetcher::{fetch_blocks_from, FetchConfig},
     cache::{UpdaterCache, UpdaterCacheSettings},
     indicatif::{ProgressBar, ProgressStyle},
     mempool::MempoolError,
@@ -38,7 +38,7 @@ use {
     thiserror::Error,
     titan_types::{Block, Event, MempoolEntry},
     tokio::sync::mpsc::{error::SendError, Sender},
-    tracing::{debug, error, info},
+    tracing::{debug, error, info, warn},
     transaction_parser::TransactionParser,
     transaction_updater::TransactionUpdater,
 };
@@ -206,11 +206,17 @@ impl Updater {
                 self.bitcoin_rpc_pool.clone(),
                 current_block_count,
                 chain_info.blocks + 1,
+                FetchConfig::default(),
             )?;
 
             let rpc_client = self.bitcoin_rpc_pool.get()?;
 
             while let Ok(block) = rx.recv() {
+                let _timer = self
+                    .latency
+                    .with_label_values(&["full_block_indexing"])
+                    .start_timer();
+
                 if self.shutdown_flag.load(Ordering::SeqCst) {
                     info!("Updater received shutdown signal, stopping...");
                     break;
@@ -261,6 +267,11 @@ impl Updater {
                         address_updater.batch_update_script_pubkey(&mut cache)?;
                     }
 
+                    let _timer = self
+                        .latency
+                        .with_label_values(&["flush_cache"])
+                        .start_timer();
+
                     cache.add_address_events(self.settings.chain);
                     cache.flush(false)?;
                     cache.send_events(&self.sender)?;
@@ -293,6 +304,7 @@ impl Updater {
                 .latency
                 .with_label_values(&["batch_update_script_pubkeys_for_block"])
                 .start_timer();
+
             address_updater.batch_update_script_pubkey(&mut cache)?;
         }
 
@@ -541,6 +553,14 @@ impl Updater {
         cache: &mut UpdaterCache,
         address_updater: &mut AddressUpdater,
     ) -> Result<Block> {
+        // Fast-path: reserve space in the hottest HashMaps for this block so we
+        // avoid repeated reallocations when pushing thousands of entries.
+        let tx_count = bitcoin_block.txdata.len();
+        let outputs: usize = bitcoin_block.txdata.iter().map(|tx| tx.output.len()).sum();
+
+        cache.reserve_tx_state_changes(tx_count);
+        cache.reserve_txouts(outputs);
+
         let _timer = self
             .latency
             .with_label_values(&["index_block"])

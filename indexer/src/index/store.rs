@@ -87,7 +87,7 @@ pub trait Store {
     ) -> Result<TxOutEntry, StoreError>;
     fn get_tx_outs(
         &self,
-        outpoints: &Vec<OutPoint>,
+        outpoints: &[OutPoint],
         mempool: Option<bool>,
     ) -> Result<HashMap<OutPoint, TxOutEntry>, StoreError>;
     fn get_tx_outs_with_mempool_spent_update(
@@ -331,7 +331,7 @@ impl Store for RocksDB {
 
     fn get_tx_outs(
         &self,
-        outpoints: &Vec<OutPoint>,
+        outpoints: &[OutPoint],
         mempool: Option<bool>,
     ) -> Result<HashMap<OutPoint, TxOutEntry>, StoreError> {
         Ok(self.get_tx_outs(outpoints, mempool)?)
