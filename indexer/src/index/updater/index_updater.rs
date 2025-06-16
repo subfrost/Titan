@@ -301,7 +301,16 @@ impl Updater {
         cache.send_events(&self.sender)?;
 
         if !self.shutdown_flag.load(Ordering::SeqCst) {
-            self.is_at_tip.store(true, Ordering::Release);
+            // Check if this is the first time we are at tip.
+            let was_at_tip = self.is_at_tip.swap(true, Ordering::AcqRel);
+
+            if !was_at_tip {
+                // First time reaching tip – switch RocksDB back to online mode.
+                let db = self.db.write();
+                if let Err(e) = db.finish_bulk_load() {
+                    warn!("Failed to switch database to online mode: {:?}", e);
+                }
+            }
         }
 
         Ok(())

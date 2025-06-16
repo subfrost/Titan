@@ -156,15 +156,21 @@ impl RocksDB {
         db_opts.set_keep_log_file_num(10);
         db_opts.set_recycle_log_file_num(5);
 
+        // Enable bulk-load mode during initial sync: disables auto-compactions and uses larger memtables
+        db_opts.prepare_for_bulk_load();
+
+        // Defer WAL fsyncs – we flush WAL manually at close
+        db_opts.set_manual_wal_flush(true);
+        db_opts.set_max_total_wal_size(1 * 1024 * 1024 * 1024); // 1 GB WAL budget
+
+        // Grow write buffers so we can absorb larger batches in memory
+        db_opts.set_write_buffer_size(512 * 1024 * 1024); // 512 MB per memtable
+        db_opts.set_max_write_buffer_number(8);
+
         // Compression & compaction
         db_opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
         db_opts.set_bottommost_compression_type(rocksdb::DBCompressionType::Zstd);
         db_opts.set_periodic_compaction_seconds(86400); // Run compaction every 24 hours
-
-        // Larger, multi-level write buffers for higher throughput
-        db_opts.set_write_buffer_size(128 * 1024 * 1024); // 128 MB per memtable
-        db_opts.set_max_write_buffer_number(4);
-        db_opts.set_min_write_buffer_number_to_merge(2);
 
         // Parallel background jobs / pipelined WAL
         let cpus = std::thread::available_parallelism()
@@ -233,6 +239,33 @@ impl RocksDB {
             write_opts,
         };
         Ok(rocks_db)
+    }
+
+    /// Switch RocksDB from bulk-load mode (disabled compactions, huge memtables, manual WAL
+    /// flush) back to normal online mode.  Meant to be called exactly once – right after the
+    /// indexer has reached the chain tip.
+    pub fn switch_to_online_mode(&self) -> DBResult<()> {
+        // 1. Re-enable automatic compactions and set sane L0 triggers
+        self.db.set_options(&[
+            ("disable_auto_compactions", "false"),
+            ("level0_file_num_compaction_trigger", "4"),
+            ("level0_slowdown_writes_trigger", "8"),
+            ("level0_stop_writes_trigger", "12"),
+        ])?;
+
+        // 2. Restore WAL handling (turn off manual flush)
+        self.db.set_options(&[("manual_wal_flush", "false")])?;
+
+        // 3. Shrink write buffers back to regular values so flushes are cheaper
+        self.db.set_options(&[
+            ("write_buffer_size", &(128 * 1024 * 1024).to_string()),
+            ("max_write_buffer_number", "4"),
+            ("min_write_buffer_number_to_merge", "2"),
+        ])?;
+
+        // Force a flush so that everything written in bulk-load mode lands on disk.
+        self.flush()?;
+        Ok(())
     }
 
     fn cf_handle(&self, name: &str) -> DBResult<Arc<BoundColumnFamily>> {

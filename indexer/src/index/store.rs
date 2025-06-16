@@ -170,6 +170,11 @@ pub trait Store {
     fn batch_update(&self, update: &BatchUpdate, mempool: bool) -> Result<(), StoreError>;
     fn batch_delete(&self, delete: &BatchDelete) -> Result<(), StoreError>;
     fn batch_rollback(&self, rollback: &BatchRollback, mempool: bool) -> Result<(), StoreError>;
+
+    /// Called once the indexer reaches tip so the underlying database can
+    /// switch from bulk-load settings to normal online mode. Default
+    /// implementation is a no-op.
+    fn finish_bulk_load(&self) -> Result<(), StoreError>;
 }
 
 impl Store for RocksDB {
@@ -617,5 +622,9 @@ impl Store for RocksDB {
 
     fn batch_rollback(&self, rollback: &BatchRollback, mempool: bool) -> Result<(), StoreError> {
         Ok(self.batch_rollback(rollback, mempool)?)
+    }
+
+    fn finish_bulk_load(&self) -> Result<(), StoreError> {
+        self.switch_to_online_mode().map_err(StoreError::DB)
     }
 }
