@@ -19,7 +19,7 @@ use {
     },
     bitcoin::{
         constants::SUBSIDY_HALVING_INTERVAL, hex::HexToArrayError, Block as BitcoinBlock,
-        Transaction, Txid,
+        Transaction,
     },
     bitcoincore_rpc::{
         json::{GetBlockchainInfoResult, GetMempoolEntryResult},

@@ -304,14 +304,14 @@ impl Index {
             .db
             .get_tx_outs_with_mempool_spent_update(&outpoints, None)?;
 
-        if outpoints.len() != outpoints_to_tx_out.len() {
-            error!(
-                "Address {} has {} outpoints but {} txouts",
-                address,
-                outpoints.len(),
-                outpoints_to_tx_out.len()
-            );
-        }
+        // if outpoints.len() != outpoints_to_tx_out.len() {
+        //     error!(
+        //         "Address {} has {} outpoints but {} txouts",
+        //         address,
+        //         outpoints.len(),
+        //         outpoints_to_tx_out.len()
+        //     );
+        // }
 
         let outpoint_txns: Vec<SerializedTxid> = outpoints
             .iter()

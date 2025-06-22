@@ -288,12 +288,16 @@ impl BlockCache {
     }
 
     fn update_script_pubkeys(&mut self) -> Result<()> {
-        let mut spk_map: HashMap<ScriptBuf, (Vec<SerializedOutPoint>, Vec<SerializedOutPoint>)> =
-            HashMap::default();
-
+        // TODO: We're not taking into account past outpoitns that are not in this interval.
+        // This will cause us to miss deleting some outpoints for certain script pubkeys.
+        
         for (outpoint, script_pubkey) in self.update.script_pubkeys_outpoints.iter() {
-            let entry: &mut (Vec<SerializedOutPoint>, Vec<SerializedOutPoint>) =
-                spk_map.entry(script_pubkey.clone()).or_default();
+            let entry: &mut (Vec<SerializedOutPoint>, Vec<SerializedOutPoint>) = self
+                .update
+                .script_pubkeys
+                .entry(script_pubkey.clone())
+                .or_default();
+
             let tx_out = self.update.txouts.get(outpoint);
 
             if let Some(tx_out) = tx_out {
@@ -306,8 +310,6 @@ impl BlockCache {
                 panic!("tx_out not found for outpoint: {}", outpoint);
             }
         }
-
-        self.update.script_pubkeys = spk_map;
 
         Ok(())
     }
@@ -418,6 +420,7 @@ impl TransactionStore for BlockCache {
         tx_out.spent = SpentStatus::Spent(spent);
         self.update.txouts.insert(outpoint, tx_out);
         self.outpoints.pop(&outpoint);
+
         Ok(())
     }
 
