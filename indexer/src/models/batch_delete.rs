@@ -1,14 +1,14 @@
 use {
-    bitcoin::{OutPoint, Txid},
     std::{collections::HashSet, fmt::Display},
+    titan_types::{SerializedOutPoint, SerializedTxid},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct BatchDelete {
-    pub tx_outs: HashSet<OutPoint>,
-    pub script_pubkeys_outpoints: HashSet<OutPoint>,
-    pub spent_outpoints_in_mempool: HashSet<OutPoint>,
-    pub tx_state_changes: HashSet<Txid>,
+    pub tx_outs: HashSet<SerializedOutPoint>,
+    pub script_pubkeys_outpoints: HashSet<SerializedOutPoint>,
+    pub spent_outpoints_in_mempool: HashSet<SerializedOutPoint>,
+    pub tx_state_changes: HashSet<SerializedTxid>,
 }
 
 impl BatchDelete {

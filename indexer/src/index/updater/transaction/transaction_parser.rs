@@ -1,5 +1,5 @@
 use {
-    super::cache::UpdaterCache,
+    super::TransactionStore,
     crate::{
         bitcoin_rpc::BitcoinCoreRpcResultExt,
         index::{Chain, StoreError},
@@ -9,9 +9,9 @@ use {
     bitcoin::{consensus::encode, OutPoint, Transaction},
     bitcoincore_rpc::{Client, RpcApi},
     ordinals::{Artifact, Edict, Height, Rune, RuneId, Runestone},
-    std::collections::HashMap,
+    rustc_hash::FxHashMap as HashMap,
     thiserror::Error,
-    titan_types::{RuneAmount, SpentStatus, TxOutEntry},
+    titan_types::{RuneAmount, SerializedOutPoint, SpentStatus, TxOutEntry},
 };
 
 #[derive(Debug, Error)]
@@ -26,7 +26,7 @@ pub enum TransactionParserError {
 
 type Result<T> = std::result::Result<T, TransactionParserError>;
 
-pub(super) struct TransactionParser<'client> {
+pub struct TransactionParser<'client> {
     pub(super) client: &'client Client,
     pub(super) height: u64,
     pub(super) minimum_rune: Rune,
@@ -35,12 +35,7 @@ pub(super) struct TransactionParser<'client> {
 }
 
 impl<'client> TransactionParser<'client> {
-    pub(super) fn new(
-        client: &'client Client,
-        chain: Chain,
-        height: u64,
-        mempool: bool,
-    ) -> Result<Self> {
+    pub fn new(client: &'client Client, chain: Chain, height: u64, mempool: bool) -> Result<Self> {
         let minimum_rune = Rune::minimum_at_height(chain.into(), Height(height as u32));
 
         let min_rune_height = chain.first_rune_height() as u64;
@@ -55,21 +50,21 @@ impl<'client> TransactionParser<'client> {
         })
     }
 
-    pub(super) fn parse(
+    pub fn parse(
         &mut self,
-        cache: &mut UpdaterCache,
+        store: &mut dyn TransactionStore,
         tx_index: u32,
         tx: &Transaction,
     ) -> Result<TransactionStateChange> {
         let (allocated, risky_allocated, minted, etched, burned) = if self.should_index_runes {
-            self.parse_runes(cache, tx_index, tx)?
+            self.parse_runes(store, tx_index, tx)?
         } else {
             (
-                vec![HashMap::new(); tx.output.len()],
-                vec![HashMap::new(); tx.output.len()],
+                vec![HashMap::default(); tx.output.len()],
+                vec![HashMap::default(); tx.output.len()],
                 None,
                 None,
-                HashMap::new(),
+                HashMap::default(),
             )
         };
 
@@ -117,10 +112,7 @@ impl<'client> TransactionParser<'client> {
             inputs: tx
                 .input
                 .iter()
-                .map(|txin| OutPoint {
-                    txid: txin.previous_output.txid,
-                    vout: txin.previous_output.vout,
-                })
+                .map(|txin| SerializedOutPoint::from(txin.previous_output))
                 .collect(),
             outputs: tx_outs,
             etched,
@@ -133,7 +125,7 @@ impl<'client> TransactionParser<'client> {
 
     fn parse_runes(
         &mut self,
-        cache: &mut UpdaterCache,
+        store: &mut dyn TransactionStore,
         tx_index: u32,
         tx: &Transaction,
     ) -> Result<(
@@ -144,18 +136,18 @@ impl<'client> TransactionParser<'client> {
         HashMap<RuneId, Lot>,      // burned runes
     )> {
         let artifact = Runestone::decipher(tx);
-        let (mut unallocated, mut risky_unallocated) = self.unallocated(cache, tx)?;
+        let (mut unallocated, mut risky_unallocated) = self.unallocated(store, tx)?;
 
         // Create per-output allocation maps
-        let mut allocated: Vec<HashMap<RuneId, Lot>> = vec![HashMap::new(); tx.output.len()];
-        let mut allocated_risky: Vec<HashMap<RuneId, Lot>> = vec![HashMap::new(); tx.output.len()];
+        let mut allocated: Vec<HashMap<RuneId, Lot>> = vec![HashMap::default(); tx.output.len()];
+        let mut allocated_risky: Vec<HashMap<RuneId, Lot>> = vec![HashMap::default(); tx.output.len()];
         let mut minted: Option<RuneAmount> = None;
         let mut etched: Option<(RuneId, Rune)> = None;
 
         // If there is a mintable rune, add its amount into the unallocated maps.
         if let Some(artifact) = &artifact {
             if let Some(id) = artifact.mint() {
-                if let Some(amount) = self.mint(cache, id)? {
+                if let Some(amount) = self.mint(store, id)? {
                     if self.mempool {
                         *risky_unallocated.entry(id).or_default() += amount;
                     } else {
@@ -169,7 +161,7 @@ impl<'client> TransactionParser<'client> {
                 }
             }
 
-            etched = self.etched(cache, tx_index, tx, artifact)?;
+            etched = self.etched(store, tx_index, tx, artifact)?;
 
             if let Artifact::Runestone(runestone) = artifact {
                 if let Some((id, ..)) = etched {
@@ -215,7 +207,7 @@ impl<'client> TransactionParser<'client> {
             }
         }
 
-        let mut burned: HashMap<RuneId, Lot> = HashMap::new();
+        let mut burned: HashMap<RuneId, Lot> = HashMap::default();
 
         if let Some(Artifact::Cenotaph(_)) = artifact {
             for (id, balance) in unallocated {
@@ -339,7 +331,7 @@ impl<'client> TransactionParser<'client> {
 
     fn etched(
         &mut self,
-        cache: &mut UpdaterCache,
+        store: &mut dyn TransactionStore,
         tx_index: u32,
         tx: &Transaction,
         artifact: &Artifact,
@@ -363,8 +355,8 @@ impl<'client> TransactionParser<'client> {
         };
 
         let rune = if let Some(rune) = rune {
-            let rune_id = cache.get_rune_id(&rune);
-            match rune_id {
+            let exists = store.does_rune_exist(&rune);
+            match exists {
                 Ok(_) => return Ok(None),
                 Err(e) => {
                     if !e.is_not_found() {
@@ -375,7 +367,7 @@ impl<'client> TransactionParser<'client> {
 
             if rune < self.minimum_rune
                 || rune.is_reserved()
-                || !self.tx_commits_to_rune(cache, tx, rune)?
+                || !self.tx_commits_to_rune(store, tx, rune)?
             {
                 return Ok(None);
             }
@@ -392,8 +384,8 @@ impl<'client> TransactionParser<'client> {
         Ok(Some((rune_id, rune)))
     }
 
-    fn mint(&mut self, cache: &mut UpdaterCache, id: RuneId) -> Result<Option<Lot>> {
-        let rune_entry = match cache.get_rune(&id) {
+    fn mint(&mut self, store: &mut dyn TransactionStore, id: RuneId) -> Result<Option<Lot>> {
+        let rune_entry = match store.get_rune(&id) {
             Ok(rune_entry) => rune_entry,
             Err(err) => {
                 if err.is_not_found() {
@@ -413,7 +405,7 @@ impl<'client> TransactionParser<'client> {
 
     fn tx_commits_to_rune(
         &self,
-        cache: &mut UpdaterCache,
+        store: &dyn TransactionStore,
         tx: &Transaction,
         rune: Rune,
     ) -> Result<bool> {
@@ -441,7 +433,7 @@ impl<'client> TransactionParser<'client> {
                     continue;
                 }
 
-                match self.validate_commit_transaction_with_cache(cache, input.previous_output) {
+                match self.validate_commit_transaction_with_cache(store, input.previous_output) {
                     Ok(true) => return Ok(true),
                     Ok(false) => continue,
                     Err(e) => {
@@ -460,10 +452,10 @@ impl<'client> TransactionParser<'client> {
 
     fn validate_commit_transaction_with_cache(
         &self,
-        cache: &mut UpdaterCache,
+        store: &dyn TransactionStore,
         outpoint: OutPoint,
     ) -> Result<bool> {
-        let transaction = cache.get_transaction(outpoint.txid)?;
+        let transaction = store.get_transaction(&outpoint.txid.into())?;
 
         let taproot = transaction.output[outpoint.vout.into_usize()]
             .script_pubkey
@@ -473,7 +465,7 @@ impl<'client> TransactionParser<'client> {
             return Ok(false);
         }
 
-        let block_id = cache.get_transaction_confirming_block(outpoint.txid)?;
+        let block_id = store.get_transaction_confirming_block(&outpoint.txid.into())?;
 
         let confirmations = self.height.checked_sub(block_id.height).unwrap() + 1;
 
@@ -516,17 +508,16 @@ impl<'client> TransactionParser<'client> {
 
     fn unallocated(
         &self,
-        cache: &mut UpdaterCache,
+        store: &mut dyn TransactionStore,
         tx: &Transaction,
     ) -> Result<(HashMap<RuneId, Lot>, HashMap<RuneId, Lot>)> {
-        let estimated_inputs = tx.input.len();
-        let mut unallocated = HashMap::with_capacity(estimated_inputs);
-        let mut risky_unallocated = HashMap::with_capacity(estimated_inputs);
+        let mut unallocated = HashMap::default();
+        let mut risky_unallocated = HashMap::default();
 
         // 1) Collect all outpoints:
         let mut outpoints = Vec::with_capacity(tx.input.len());
         for input in &tx.input {
-            outpoints.push(input.previous_output.into());
+            outpoints.push(SerializedOutPoint::from(input.previous_output));
         }
 
         if tx.is_coinbase() {
@@ -534,7 +525,7 @@ impl<'client> TransactionParser<'client> {
         }
 
         // 2) Do a single multi-get in the cache:
-        let tx_out_map = cache.get_tx_outs(&outpoints)?;
+        let tx_out_map = store.get_tx_outs(&outpoints)?;
 
         // 3) Accumulate unallocated:
         for (_, tx_out) in tx_out_map {

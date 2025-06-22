@@ -11,7 +11,7 @@ use {
         BatchDelete, BatchRollback, BatchUpdate, BlockId, Inscription, RuneEntry,
         TransactionStateChange, TxRuneIndexRef,
     },
-    bitcoin::{consensus, hashes::Hash, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
+    bitcoin::{consensus, hashes::Hash, BlockHash, ScriptBuf, Transaction},
     borsh::BorshDeserialize,
     mapper::DBResultMapper,
     ordinals::RuneId,
@@ -19,26 +19,25 @@ use {
         BlockBasedOptions, BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, Direction,
         IteratorMode, MultiThreaded, Options, WriteBatch, WriteOptions,
     },
-    rustc_hash::FxHashMap,
+    rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet},
     std::{
-        collections::{HashMap, HashSet, VecDeque},
+        collections::VecDeque,
         sync::{Arc, RwLock},
+        time::Instant,
     },
     titan_types::{
-        Block, InscriptionId, MempoolEntry, Pagination, PaginationResponse, SpenderReference,
-        Subscription, TxOutEntry,
+        Block, InscriptionId, MempoolEntry, Pagination, PaginationResponse, SerializedOutPoint,
+        SerializedTxid, SpenderReference, Subscription, TxOutEntry,
     },
-    util::{
-        inscription_id_to_bytes, outpoint_to_bytes, rune_id_to_bytes, txid_from_bytes,
-        txid_to_bytes,
-    },
+    tracing::info,
+    util::rune_id_to_bytes,
     uuid::Uuid,
     wrapper::RuneIdWrapper,
 };
 
 pub struct RocksDB {
     db: DBWithThreadMode<MultiThreaded>,
-    mempool_cache: RwLock<HashMap<Txid, MempoolEntry>>,
+    mempool_cache: RwLock<HashMap<SerializedTxid, MempoolEntry>>,
     write_opts: WriteOptions,
 }
 
@@ -254,10 +253,7 @@ impl RocksDB {
             ("level0_stop_writes_trigger", "12"),
         ])?;
 
-        // 2. Restore WAL handling (turn off manual flush)
-        self.db.set_options(&[("manual_wal_flush", "false")])?;
-
-        // 3. Shrink write buffers back to regular values so flushes are cheaper
+        // 2. Shrink write buffers back to regular values so flushes are cheaper
         self.db.set_options(&[
             ("write_buffer_size", &(128 * 1024 * 1024).to_string()),
             ("max_write_buffer_number", "4"),
@@ -373,6 +369,49 @@ impl RocksDB {
             .ok_or(RocksDBError::NotFound(format!("block not found: {}", hash)))?)
     }
 
+    pub fn get_block_hashes_by_height(
+        &self,
+        from_height: u64,
+        to_height: u64,
+    ) -> DBResult<Vec<BlockHash>> {
+        let cf_handle = self.cf_handle(BLOCK_HEIGHT_TO_HASH_CF)?;
+        let keys: Vec<_> = (from_height..to_height)
+            .map(|height| (&cf_handle, height.to_le_bytes()))
+            .collect();
+
+        let values = self.db.multi_get_cf(keys);
+
+        let mut result = Vec::new();
+        for (i, value) in values.iter().enumerate() {
+            if let Ok(Some(value)) = value {
+                result.push(BlockHash::from_slice(&value[..]).unwrap());
+            }
+        }
+
+        Ok(result)
+    }
+
+    pub fn get_blocks_by_hashes(
+        &self,
+        hashes: &Vec<BlockHash>,
+    ) -> DBResult<HashMap<BlockHash, Block>> {
+        let cf_handle = self.cf_handle(BLOCKS_CF)?;
+        let keys: Vec<_> = hashes
+            .iter()
+            .map(|hash| (&cf_handle, hash.as_raw_hash().to_byte_array()))
+            .collect();
+
+        let values = self.db.multi_get_cf(keys);
+        let mut result = HashMap::default();
+        for (i, value) in values.iter().enumerate() {
+            if let Ok(Some(value)) = value {
+                result.insert(hashes[i], Block::load(value.to_vec()));
+            }
+        }
+
+        Ok(result)
+    }
+
     pub fn delete_block(&self, hash: &BlockHash) -> DBResult<()> {
         let cf_handle = self.cf_handle(BLOCKS_CF)?;
         self.db
@@ -400,7 +439,7 @@ impl RocksDB {
 
         let values = self.db.multi_get_cf(keys);
 
-        let mut result = HashMap::new();
+        let mut result = HashMap::default();
         for (i, value) in values.iter().enumerate() {
             if let Ok(Some(value)) = value {
                 result.insert(rune_ids[i], RuneEntry::load(value.clone()));
@@ -432,7 +471,7 @@ impl RocksDB {
 
         let values = self.db.multi_get_cf(keys);
 
-        let mut result = HashMap::new();
+        let mut result = HashMap::default();
         for (i, value) in values.iter().enumerate() {
             if let Ok(Some(value)) = value {
                 result.insert(numbers[i], RuneIdWrapper::load(value.clone()).0);
@@ -442,7 +481,7 @@ impl RocksDB {
         Ok(result)
     }
 
-    pub fn get_tx_out(&self, outpoint: &OutPoint, mempool: bool) -> DBResult<TxOutEntry> {
+    pub fn get_tx_out(&self, outpoint: &SerializedOutPoint, mempool: bool) -> DBResult<TxOutEntry> {
         let cf_handle = if mempool {
             self.cf_handle(OUTPOINTS_MEMPOOL_CF)?
         } else {
@@ -450,7 +489,7 @@ impl RocksDB {
         };
 
         Ok(self
-            .get_option_vec_data(&cf_handle, outpoint_to_bytes(outpoint))
+            .get_option_vec_data(&cf_handle, outpoint.as_ref())
             .mapped()?
             .ok_or(RocksDBError::NotFound(format!(
                 "outpoint not found: {}",
@@ -458,17 +497,40 @@ impl RocksDB {
             )))?)
     }
 
-    pub fn get_tx_outs(
+    pub fn get_all_tx_outs(
         &self,
-        outpoints: &[OutPoint],
+        mempool: bool,
+    ) -> DBResult<HashMap<SerializedOutPoint, TxOutEntry>> {
+        let cf_handle = if mempool {
+            self.cf_handle(OUTPOINTS_MEMPOOL_CF)?
+        } else {
+            self.cf_handle(OUTPOINTS_CF)?
+        };
+
+        let iter = self.db.iterator_cf(&cf_handle, IteratorMode::Start);
+
+        let mut result = HashMap::default();
+        for item in iter {
+            let (key, value) = item?;
+            if let Ok(outpoint) = SerializedOutPoint::try_from(key) {
+                result.insert(outpoint, TxOutEntry::load(value.to_vec()));
+            }
+        }
+
+        Ok(result)
+    }
+
+    pub fn get_tx_outs<T: AsRef<[u8]> + Clone + Eq + std::hash::Hash>(
+        &self,
+        outpoints: &[T],
         mempool: Option<bool>,
-    ) -> DBResult<HashMap<OutPoint, TxOutEntry>> {
+    ) -> DBResult<HashMap<T, TxOutEntry>> {
         if let Some(mempool) = mempool {
             Ok(self.get_tx_outs_with_mempool(outpoints, mempool)?)
         } else {
             let mut ledger_outpoints = self.get_tx_outs_with_mempool(outpoints, false)?;
 
-            let remaining: Vec<OutPoint> = outpoints
+            let remaining: Vec<T> = outpoints
                 .iter()
                 .filter_map(|outpoint| {
                     (!ledger_outpoints.contains_key(outpoint)).then_some(outpoint.clone())
@@ -483,28 +545,25 @@ impl RocksDB {
         }
     }
 
-    fn get_tx_outs_with_mempool(
+    fn get_tx_outs_with_mempool<T: AsRef<[u8]> + Clone + Eq + std::hash::Hash>(
         &self,
-        outpoints: &[OutPoint],
+        outpoints: &[T],
         mempool: bool,
-    ) -> DBResult<HashMap<OutPoint, TxOutEntry>> {
+    ) -> DBResult<HashMap<T, TxOutEntry>> {
         let cf_handle = if mempool {
             self.cf_handle(OUTPOINTS_MEMPOOL_CF)?
         } else {
             self.cf_handle(OUTPOINTS_CF)?
         };
 
-        let keys: Vec<_> = outpoints
-            .iter()
-            .map(|o| (&cf_handle, outpoint_to_bytes(o)))
-            .collect();
+        let keys: Vec<_> = outpoints.iter().map(|o| (&cf_handle, o.as_ref())).collect();
 
         let values = self.db.multi_get_cf(keys);
 
-        let mut result = HashMap::new();
+        let mut result = HashMap::default();
         for (i, value) in values.iter().enumerate() {
             if let Ok(Some(value)) = value {
-                result.insert(outpoints[i], TxOutEntry::load(value.clone()));
+                result.insert(outpoints[i].clone(), TxOutEntry::load(value.clone()));
             }
         }
 
@@ -513,7 +572,7 @@ impl RocksDB {
 
     pub fn get_tx_state_changes(
         &self,
-        tx_id: &Txid,
+        tx_id: &SerializedTxid,
         mempool: bool,
     ) -> DBResult<TransactionStateChange> {
         let cf_handle = if mempool {
@@ -523,7 +582,7 @@ impl RocksDB {
         };
 
         Ok(self
-            .get_option_vec_data(&cf_handle, txid_to_bytes(tx_id))
+            .get_option_vec_data(&cf_handle, tx_id.as_ref())
             .mapped()?
             .ok_or(RocksDBError::NotFound(format!(
                 "transaction state change not found: {}",
@@ -533,23 +592,20 @@ impl RocksDB {
 
     pub fn get_txs_state_changes(
         &self,
-        txids: &Vec<Txid>,
+        txids: &[SerializedTxid],
         mempool: bool,
-    ) -> DBResult<HashMap<Txid, TransactionStateChange>> {
+    ) -> DBResult<HashMap<SerializedTxid, TransactionStateChange>> {
         let cf_handle = if mempool {
             self.cf_handle(TRANSACTIONS_STATE_CHANGE_MEMPOOL_CF)?
         } else {
             self.cf_handle(TRANSACTIONS_STATE_CHANGE_CF)?
         };
 
-        let keys: Vec<_> = txids
-            .iter()
-            .map(|id| (&cf_handle, txid_to_bytes(id)))
-            .collect();
+        let keys: Vec<_> = txids.iter().map(|id| (&cf_handle, id.as_ref())).collect();
 
         let values = self.db.multi_get_cf(keys);
 
-        let mut result = HashMap::new();
+        let mut result = HashMap::default();
         for (i, value) in values.iter().enumerate() {
             if let Ok(Some(value)) = value {
                 result.insert(txids[i], TransactionStateChange::load(value.clone()));
@@ -583,7 +639,7 @@ impl RocksDB {
     pub fn get_inscription(&self, id: &InscriptionId) -> DBResult<Inscription> {
         let cf_handle = self.cf_handle(INSCRIPTIONS_CF)?;
         let inscription: Inscription = self
-            .get_option_vec_data(&cf_handle, inscription_id_to_bytes(id))
+            .get_option_vec_data(&cf_handle, id.as_bytes())
             .mapped()?
             .ok_or(RocksDBError::NotFound(format!(
                 "inscription not found: {}",
@@ -598,7 +654,7 @@ impl RocksDB {
         rune_id: &RuneId,
         pagination: Option<Pagination>,
         mempool: bool,
-    ) -> DBResult<PaginationResponse<Txid>> {
+    ) -> DBResult<PaginationResponse<SerializedTxid>> {
         let cf_handle = if mempool {
             self.cf_handle(RUNE_TRANSACTIONS_MEMPOOL_CF)?
         } else {
@@ -684,9 +740,8 @@ impl RocksDB {
                 continue;
             }
 
-            // Convert valuecf to Txid
-            let txid: Txid =
-                txid_from_bytes(&value_bytes).map_err(|_| RocksDBError::InvalidTxid)?;
+            // Convert valuecf to SerializedTxid
+            let txid = SerializedTxid::try_from(value_bytes).unwrap();
 
             results.push(txid);
 
@@ -707,7 +762,7 @@ impl RocksDB {
     /// Batch-add multiple rune transactions.
     ///
     /// # Arguments
-    /// * `rune_tx_map` - A map where the key is a `RuneId` and the value is a list of `Txid`
+    /// * `rune_tx_map` - A map where the key is a `RuneId` and the value is a list of `SerializedTxid`
     ///   to be added for that rune.
     /// * `mempool` - Boolean flag for using mempool column families.
     ///
@@ -718,7 +773,7 @@ impl RocksDB {
     /// and then updates both the primary rune transactions and the secondary tx-index in one batch.
     pub fn add_rune_transactions_batch(
         &self,
-        rune_tx_map: &FxHashMap<RuneId, Vec<Txid>>,
+        rune_tx_map: &HashMap<RuneId, Vec<SerializedTxid>>,
         mempool: bool,
     ) -> DBResult<()> {
         // Get the appropriate column families for primary and secondary indexes.
@@ -739,7 +794,7 @@ impl RocksDB {
 
         // Accumulator for secondary index updates:
         // For each txid, we collect the new TxRuneIndexRef entries.
-        let mut sec_index_acc: HashMap<Txid, Vec<TxRuneIndexRef>> = HashMap::new();
+        let mut sec_index_acc: HashMap<SerializedTxid, Vec<TxRuneIndexRef>> = HashMap::default();
 
         // Process each rune and its list of txids.
         for (rune_id, txids) in rune_tx_map {
@@ -764,11 +819,11 @@ impl RocksDB {
 
                 // Create the primary key: "rune:<rune_id>:<new_index_in_le>"
                 let tx_key = rune_transaction_key(rune_id, current_index);
-                batch.put_cf(&primary_cf, tx_key, txid_to_bytes(txid));
+                batch.put_cf(&primary_cf, tx_key, txid.as_ref());
 
                 // Instead of fetching the existing secondary index, simply accumulate the new index.
                 sec_index_acc
-                    .entry(txid.clone())
+                    .entry(*txid)
                     .or_default()
                     .push(TxRuneIndexRef {
                         rune_id: rune_id_to_bytes(rune_id),
@@ -782,7 +837,7 @@ impl RocksDB {
 
         // Now update the secondary index for each txid in one go.
         for (txid, new_refs) in sec_index_acc.into_iter() {
-            batch.put_cf(&secondary_cf, txid_to_bytes(&txid), new_refs.store());
+            batch.put_cf(&secondary_cf, txid.as_ref(), new_refs.store());
         }
 
         // Write all batched operations atomically.
@@ -792,9 +847,9 @@ impl RocksDB {
 
     fn get_txs_index_refs(
         &self,
-        txids: &Vec<Txid>,
+        txids: &[SerializedTxid],
         mempool: bool,
-    ) -> DBResult<HashMap<Txid, Vec<TxRuneIndexRef>>> {
+    ) -> DBResult<HashMap<SerializedTxid, Vec<TxRuneIndexRef>>> {
         let cf_handle = if mempool {
             self.cf_handle(TRANSACTION_RUNE_INDEX_MEMPOOL_CF)?
         } else {
@@ -803,12 +858,12 @@ impl RocksDB {
 
         let keys: Vec<_> = txids
             .iter()
-            .map(|txid| (&cf_handle, txid_to_bytes(txid)))
+            .map(|txid| (&cf_handle, txid.as_ref()))
             .collect();
 
         let values = self.db.multi_get_cf(keys);
 
-        let mut result = HashMap::new();
+        let mut result = HashMap::default();
         for (i, value) in values.iter().enumerate() {
             if let Ok(Some(value)) = value {
                 result.insert(
@@ -822,7 +877,11 @@ impl RocksDB {
     }
 
     /// Remove `txid` from *all* rune lists
-    pub fn delete_rune_transactions(&self, txids: &Vec<Txid>, mempool: bool) -> DBResult<()> {
+    pub fn delete_rune_transactions(
+        &self,
+        txids: &[SerializedTxid],
+        mempool: bool,
+    ) -> DBResult<()> {
         let idx_refs = self.get_txs_index_refs(txids, mempool)?;
 
         if idx_refs.is_empty() {
@@ -853,14 +912,14 @@ impl RocksDB {
                 batch.delete_cf(&primary_cf, key);
             }
 
-            batch.delete_cf(&secondary_cf, txid_to_bytes(&txid));
+            batch.delete_cf(&secondary_cf, txid.as_ref());
         }
 
         self.db.write_opt(batch, &self.write_opts)?;
         Ok(())
     }
 
-    pub fn get_mempool_txids(&self) -> DBResult<HashMap<Txid, MempoolEntry>> {
+    pub fn get_mempool_txids(&self) -> DBResult<HashMap<SerializedTxid, MempoolEntry>> {
         Ok(self
             .mempool_cache
             .read()
@@ -868,7 +927,7 @@ impl RocksDB {
             .clone())
     }
 
-    pub fn is_tx_in_mempool(&self, txid: &Txid) -> DBResult<bool> {
+    pub fn is_tx_in_mempool(&self, txid: &SerializedTxid) -> DBResult<bool> {
         let exists = self
             .mempool_cache
             .read()
@@ -878,10 +937,10 @@ impl RocksDB {
         Ok(exists)
     }
 
-    pub fn get_mempool_entry(&self, txid: &Txid) -> DBResult<MempoolEntry> {
+    pub fn get_mempool_entry(&self, txid: &SerializedTxid) -> DBResult<MempoolEntry> {
         let cf_handle = self.cf_handle(MEMPOOL_CF)?;
         Ok(self
-            .get_option_vec_data(&cf_handle, txid_to_bytes(txid))
+            .get_option_vec_data(&cf_handle, txid.as_ref())
             .mapped()?
             .ok_or(RocksDBError::NotFound(format!(
                 "mempool entry not found: {}",
@@ -891,17 +950,17 @@ impl RocksDB {
 
     pub fn get_mempool_entries(
         &self,
-        txids: &Vec<Txid>,
-    ) -> DBResult<HashMap<Txid, Option<MempoolEntry>>> {
+        txids: &[SerializedTxid],
+    ) -> DBResult<HashMap<SerializedTxid, Option<MempoolEntry>>> {
         let cf_handle = self.cf_handle(MEMPOOL_CF)?;
         let keys: Vec<_> = txids
             .iter()
-            .map(|txid| (&cf_handle, txid_to_bytes(txid)))
+            .map(|txid| (&cf_handle, txid.as_ref()))
             .collect();
 
         let results = self.db.multi_get_cf(keys);
 
-        let mut mempool_entries = HashMap::with_capacity(txids.len());
+        let mut mempool_entries = HashMap::default();
         for (i, result) in results.iter().enumerate() {
             match result {
                 Ok(Some(bytes)) => {
@@ -920,11 +979,11 @@ impl RocksDB {
 
     pub fn get_mempool_entries_with_ancestors(
         &self,
-        txids: &Vec<Txid>,
-    ) -> DBResult<HashMap<Txid, MempoolEntry>> {
-        let mut result: HashMap<Txid, MempoolEntry> = HashMap::new();
-        let mut queue: VecDeque<Txid> = VecDeque::new();
-        let mut visited: HashSet<Txid> = HashSet::new();
+        txids: &[SerializedTxid],
+    ) -> DBResult<HashMap<SerializedTxid, MempoolEntry>> {
+        let mut result: HashMap<SerializedTxid, MempoolEntry> = HashMap::default();
+        let mut queue: VecDeque<SerializedTxid> = VecDeque::new();
+        let mut visited: HashSet<SerializedTxid> = HashSet::default();
 
         // Initialize the queue with all provided txids
         for txid in txids {
@@ -932,7 +991,7 @@ impl RocksDB {
         }
 
         while !queue.is_empty() {
-            let mut batch_txids: Vec<Txid> = Vec::new();
+            let mut batch_txids: Vec<SerializedTxid> = Vec::new();
             while let Some(current_txid) = queue.pop_front() {
                 if visited.contains(&current_txid) {
                     continue;
@@ -968,7 +1027,8 @@ impl RocksDB {
     }
 
     pub fn _validate_mempool_cache(&self) -> DBResult<()> {
-        let db_txids: HashMap<Txid, MempoolEntry> = Self::read_all_mempool_txids(&self.db)?;
+        let db_txids: HashMap<SerializedTxid, MempoolEntry> =
+            Self::read_all_mempool_txids(&self.db)?;
 
         *self
             .mempool_cache
@@ -979,8 +1039,8 @@ impl RocksDB {
 
     fn read_all_mempool_txids(
         db: &DBWithThreadMode<MultiThreaded>,
-    ) -> DBResult<HashMap<Txid, MempoolEntry>> {
-        let mut db_txids: HashMap<Txid, MempoolEntry> = HashMap::with_capacity(5000);
+    ) -> DBResult<HashMap<SerializedTxid, MempoolEntry>> {
+        let mut db_txids: HashMap<SerializedTxid, MempoolEntry> = HashMap::default();
 
         let cf_handle: Arc<BoundColumnFamily<'_>> = db
             .cf_handle(MEMPOOL_CF)
@@ -989,7 +1049,7 @@ impl RocksDB {
         let iter = db.iterator_cf(&cf_handle, IteratorMode::Start);
         for item in iter {
             let (key, value) = item?;
-            if let Ok(txid) = consensus::deserialize(&key) {
+            if let Ok(txid) = SerializedTxid::try_from(key) {
                 db_txids.insert(txid, MempoolEntry::load(value.to_vec()));
             }
         }
@@ -1001,7 +1061,7 @@ impl RocksDB {
         &self,
         script_pubkey: &ScriptBuf,
         mempool: bool,
-    ) -> DBResult<Vec<OutPoint>> {
+    ) -> DBResult<Vec<SerializedOutPoint>> {
         let cf_handle = if mempool {
             self.cf_handle(SCRIPT_PUBKEYS_MEMPOOL_CF)?
         } else {
@@ -1032,10 +1092,10 @@ impl RocksDB {
 
     pub fn get_outpoints_to_script_pubkey(
         &self,
-        outpoints: &Vec<OutPoint>,
+        outpoints: &[SerializedOutPoint],
         mempool: bool,
         optimistic: bool,
-    ) -> DBResult<HashMap<OutPoint, ScriptBuf>> {
+    ) -> DBResult<HashMap<SerializedOutPoint, ScriptBuf>> {
         let cf_handle = if mempool {
             self.cf_handle(OUTPOINT_TO_SCRIPT_PUBKEY_MEMPOOL_CF)?
         } else {
@@ -1044,13 +1104,13 @@ impl RocksDB {
 
         let keys: Vec<_> = outpoints
             .iter()
-            .map(|outpoint| (&cf_handle, outpoint_to_bytes(outpoint)))
+            .map(|outpoint| (&cf_handle, outpoint.as_ref()))
             .collect();
 
         let results = self.db.multi_get_cf(keys);
 
         // Process results and collect into HashMap
-        let mut script_pubkeys = HashMap::with_capacity(results.len());
+        let mut script_pubkeys = HashMap::default();
 
         for (i, result) in results.iter().enumerate() {
             match result {
@@ -1076,14 +1136,14 @@ impl RocksDB {
 
     pub fn get_spent_outpoints_in_mempool(
         &self,
-        outpoints: &Vec<OutPoint>,
-    ) -> DBResult<HashMap<OutPoint, Option<SpenderReference>>> {
+        outpoints: &[SerializedOutPoint],
+    ) -> DBResult<HashMap<SerializedOutPoint, Option<SpenderReference>>> {
         let cf_handle = self.cf_handle(SPENT_OUTPOINTS_MEMPOOL_CF)?;
-        let mut spent_outpoints = HashMap::new();
+        let mut spent_outpoints = HashMap::default();
 
         let keys: Vec<_> = outpoints
             .iter()
-            .map(|outpoint| (&cf_handle, outpoint_to_bytes(outpoint)))
+            .map(|outpoint| (&cf_handle, outpoint.as_ref()))
             .collect();
 
         let results = self.db.multi_get_cf(keys);
@@ -1092,12 +1152,12 @@ impl RocksDB {
             match result {
                 Ok(Some(bytes)) => {
                     spent_outpoints.insert(
-                        outpoints[i].clone(),
+                        outpoints[i],
                         Some(SpenderReference::load(bytes.clone())),
                     );
                 }
                 Ok(None) => {
-                    spent_outpoints.insert(outpoints[i].clone(), None);
+                    spent_outpoints.insert(outpoints[i], None);
                 }
                 Err(e) => return Err(e.clone().into()),
             }
@@ -1106,14 +1166,14 @@ impl RocksDB {
         Ok(spent_outpoints)
     }
 
-    pub fn get_transaction_raw(&self, txid: &Txid, mempool: bool) -> DBResult<Vec<u8>> {
+    pub fn get_transaction_raw(&self, txid: &SerializedTxid, mempool: bool) -> DBResult<Vec<u8>> {
         let cf_handle = if mempool {
             self.cf_handle(TRANSACTIONS_MEMPOOL_CF)?
         } else {
             self.cf_handle(TRANSACTIONS_CF)?
         };
 
-        self.get_option_vec_data(&cf_handle, txid_to_bytes(txid))
+        self.get_option_vec_data(&cf_handle, txid.as_ref())
             .transpose()
             .ok_or(RocksDBError::NotFound(format!(
                 "transaction not found: {}",
@@ -1121,7 +1181,7 @@ impl RocksDB {
             )))?
     }
 
-    pub fn get_transaction(&self, txid: &Txid, mempool: bool) -> DBResult<Transaction> {
+    pub fn get_transaction(&self, txid: &SerializedTxid, mempool: bool) -> DBResult<Transaction> {
         let cf_handle = if mempool {
             self.cf_handle(TRANSACTIONS_MEMPOOL_CF)?
         } else {
@@ -1129,7 +1189,7 @@ impl RocksDB {
         };
 
         let transaction = self
-            .get_option_vec_data(&cf_handle, txid_to_bytes(txid))
+            .get_option_vec_data(&cf_handle, txid.as_ref())
             .mapped()?
             .ok_or(RocksDBError::NotFound(format!(
                 "transaction not found: {}",
@@ -1142,11 +1202,11 @@ impl RocksDB {
     pub fn partition_transactions_by_existence<'a, I>(
         &self,
         txids: I,
-    ) -> DBResult<(Vec<Txid>, Vec<Txid>)>
+    ) -> DBResult<(Vec<SerializedTxid>, Vec<SerializedTxid>)>
     where
-        I: IntoIterator<Item = &'a Txid>,
+        I: IntoIterator<Item = &'a SerializedTxid>,
     {
-        let (mut exists, mut not_exists): (Vec<Txid>, Vec<Txid>) = {
+        let (mut exists, mut not_exists): (Vec<SerializedTxid>, Vec<SerializedTxid>) = {
             let mempool = self
                 .mempool_cache
                 .read()
@@ -1162,7 +1222,7 @@ impl RocksDB {
         let cf_handle = self.cf_handle(TRANSACTIONS_CF)?;
         let keys: Vec<_> = not_exists
             .iter()
-            .map(|txid| (&cf_handle, txid_to_bytes(txid)))
+            .map(|txid| (&cf_handle, txid.as_ref()))
             .collect();
 
         let results = self.db.multi_get_cf(keys);
@@ -1186,10 +1246,10 @@ impl RocksDB {
         Ok((exists, not_exists))
     }
 
-    pub fn get_transaction_confirming_block(&self, txid: &Txid) -> DBResult<BlockId> {
+    pub fn get_transaction_confirming_block(&self, txid: &SerializedTxid) -> DBResult<BlockId> {
         let cf_handle = self.cf_handle(TRANSACTION_CONFIRMING_BLOCK_CF)?;
         Ok(self
-            .get_option_vec_data(&cf_handle, txid_to_bytes(txid))
+            .get_option_vec_data(&cf_handle, txid.as_ref())
             .mapped()?
             .ok_or(RocksDBError::NotFound(format!(
                 "transaction confirming block not found: {}",
@@ -1199,16 +1259,16 @@ impl RocksDB {
 
     pub fn get_transaction_confirming_blocks(
         &self,
-        txids: &Vec<Txid>,
-    ) -> DBResult<HashMap<Txid, Option<BlockId>>> {
+        txids: &[SerializedTxid],
+    ) -> DBResult<HashMap<SerializedTxid, Option<BlockId>>> {
         let cf_handle = self.cf_handle(TRANSACTION_CONFIRMING_BLOCK_CF)?;
         let keys: Vec<_> = txids
             .iter()
-            .map(|txid| (&cf_handle, txid_to_bytes(txid)))
+            .map(|txid| (&cf_handle, txid.as_ref()))
             .collect();
         let results = self.db.multi_get_cf(keys);
 
-        let mut confirming_blocks = HashMap::with_capacity(txids.len());
+        let mut confirming_blocks = HashMap::default();
         for (i, result) in results.iter().enumerate() {
             match result {
                 Ok(Some(bytes)) => {
@@ -1234,7 +1294,7 @@ impl RocksDB {
                 batch.put_cf(
                     &cf_handle,
                     block_hash.as_raw_hash().to_byte_array(),
-                    block.as_ref().store_ref(),
+                    block.store_ref(),
                 );
             }
         }
@@ -1260,7 +1320,7 @@ impl RocksDB {
             };
 
             for (outpoint, txout) in update.txouts.iter() {
-                batch.put_cf(&cf_handle, outpoint_to_bytes(&outpoint), txout.store_ref());
+                batch.put_cf(&cf_handle, outpoint, txout.store_ref());
             }
         }
 
@@ -1273,11 +1333,7 @@ impl RocksDB {
             };
 
             for (txid, tx_state_change) in update.tx_state_changes.iter() {
-                batch.put_cf(
-                    &cf_handle,
-                    txid_to_bytes(&txid),
-                    tx_state_change.store_ref(),
-                );
+                batch.put_cf(&cf_handle, txid.as_ref(), tx_state_change.store_ref());
             }
         }
 
@@ -1321,7 +1377,7 @@ impl RocksDB {
             for (inscription_id, inscription) in update.inscriptions.iter() {
                 batch.put_cf(
                     &cf_handle,
-                    inscription_id_to_bytes(&inscription_id),
+                    inscription_id.as_bytes(),
                     inscription.store_ref(),
                 );
             }
@@ -1335,7 +1391,7 @@ impl RocksDB {
                 .write()
                 .map_err(|_| RocksDBError::LockPoisoned)?;
             for (txid, mempool_entry) in update.mempool_txs.iter() {
-                batch.put_cf(&cf_handle, txid_to_bytes(&txid), mempool_entry.store_ref());
+                batch.put_cf(&cf_handle, txid.as_ref(), mempool_entry.store_ref());
 
                 mempool_cache.insert(txid.clone(), mempool_entry.clone());
             }
@@ -1406,11 +1462,7 @@ impl RocksDB {
             };
 
             for (outpoint, script_pubkey) in update.script_pubkeys_outpoints.iter() {
-                batch.put_cf(
-                    &cf_handle,
-                    outpoint_to_bytes(&outpoint),
-                    script_pubkey.clone(),
-                );
+                batch.put_cf(&cf_handle, outpoint, script_pubkey);
             }
         }
 
@@ -1419,11 +1471,7 @@ impl RocksDB {
             let cf_handle: Arc<BoundColumnFamily<'_>> =
                 self.cf_handle(SPENT_OUTPOINTS_MEMPOOL_CF)?;
             for (outpoint, spender_reference) in update.spent_outpoints_in_mempool.iter() {
-                batch.put_cf(
-                    &cf_handle,
-                    outpoint_to_bytes(&outpoint),
-                    spender_reference.store_ref(),
-                );
+                batch.put_cf(&cf_handle, outpoint.as_ref(), spender_reference.store_ref());
             }
         }
 
@@ -1436,11 +1484,7 @@ impl RocksDB {
             };
 
             for (txid, transaction) in update.transactions.iter() {
-                batch.put_cf(
-                    &cf_handle,
-                    txid_to_bytes(&txid),
-                    consensus::serialize(transaction.as_ref()),
-                );
+                batch.put_cf(&cf_handle, txid.as_ref(), consensus::serialize(transaction));
             }
         }
 
@@ -1450,7 +1494,7 @@ impl RocksDB {
                 self.cf_handle(TRANSACTION_CONFIRMING_BLOCK_CF)?;
 
             for (txid, block_id) in update.transaction_confirming_block.iter() {
-                batch.put_cf(&cf_handle, txid_to_bytes(&txid), block_id.store_ref());
+                batch.put_cf(&cf_handle, txid.as_ref(), block_id.store_ref());
             }
         }
 
@@ -1474,8 +1518,8 @@ impl RocksDB {
             let cf_handle_mempool = self.cf_handle(OUTPOINTS_MEMPOOL_CF)?;
 
             for txout in delete.tx_outs.iter() {
-                batch.delete_cf(&cf_handle, outpoint_to_bytes(&txout));
-                batch.delete_cf(&cf_handle_mempool, outpoint_to_bytes(&txout));
+                batch.delete_cf(&cf_handle, txout);
+                batch.delete_cf(&cf_handle_mempool, txout);
             }
         }
 
@@ -1485,8 +1529,8 @@ impl RocksDB {
             let cf_handle_mempool = self.cf_handle(TRANSACTIONS_STATE_CHANGE_MEMPOOL_CF)?;
 
             for txid in delete.tx_state_changes.iter() {
-                batch.delete_cf(&cf_handle, txid_to_bytes(&txid));
-                batch.delete_cf(&cf_handle_mempool, txid_to_bytes(&txid));
+                batch.delete_cf(&cf_handle, txid.as_ref());
+                batch.delete_cf(&cf_handle_mempool, txid.as_ref());
             }
         }
 
@@ -1496,8 +1540,8 @@ impl RocksDB {
             let cf_handle_mempool = self.cf_handle(OUTPOINT_TO_SCRIPT_PUBKEY_MEMPOOL_CF)?;
 
             for outpoint in delete.script_pubkeys_outpoints.iter() {
-                batch.delete_cf(&cf_handle, outpoint_to_bytes(&outpoint));
-                batch.delete_cf(&cf_handle_mempool, outpoint_to_bytes(&outpoint));
+                batch.delete_cf(&cf_handle, outpoint);
+                batch.delete_cf(&cf_handle_mempool, outpoint);
             }
         }
 
@@ -1506,7 +1550,7 @@ impl RocksDB {
             let cf_handle: Arc<BoundColumnFamily<'_>> =
                 self.cf_handle(SPENT_OUTPOINTS_MEMPOOL_CF)?;
             for outpoint in delete.spent_outpoints_in_mempool.iter() {
-                batch.delete_cf(&cf_handle, outpoint_to_bytes(&outpoint));
+                batch.delete_cf(&cf_handle, outpoint);
             }
         }
 
@@ -1548,7 +1592,7 @@ impl RocksDB {
             };
 
             for (outpoint, txout) in rollback.txouts.iter() {
-                batch.put_cf(&cf_handle, outpoint_to_bytes(&outpoint), txout.store_ref());
+                batch.put_cf(&cf_handle, outpoint, txout.store_ref());
             }
         }
 
@@ -1587,7 +1631,7 @@ impl RocksDB {
             };
 
             for outpoint in rollback.outpoints_to_delete.iter() {
-                batch.delete_cf(&cf_handle, outpoint_to_bytes(outpoint));
+                batch.delete_cf(&cf_handle, outpoint);
             }
         }
 
@@ -1600,7 +1644,7 @@ impl RocksDB {
             };
 
             for outpoint in rollback.outpoints_to_delete.iter() {
-                batch.delete_cf(&cf_handle, outpoint_to_bytes(outpoint));
+                batch.delete_cf(&cf_handle, outpoint);
             }
         }
 
@@ -1609,7 +1653,7 @@ impl RocksDB {
             let cf_handle = self.cf_handle(SPENT_OUTPOINTS_MEMPOOL_CF)?;
 
             for outpoint in rollback.prev_outpoints_to_delete.iter() {
-                batch.delete_cf(&cf_handle, outpoint_to_bytes(outpoint));
+                batch.delete_cf(&cf_handle, outpoint);
             }
         }
 
@@ -1641,7 +1685,7 @@ impl RocksDB {
         {
             let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(INSCRIPTIONS_CF)?;
             for inscription_id in rollback.inscriptions_to_delete.iter() {
-                batch.delete_cf(&cf_handle, inscription_id_to_bytes(inscription_id));
+                batch.delete_cf(&cf_handle, inscription_id.as_bytes());
             }
         }
 
@@ -1671,7 +1715,7 @@ impl RocksDB {
             };
 
             for txid in rollback.txs_to_delete.iter() {
-                batch.delete_cf(&cf_handle, txid_to_bytes(txid));
+                batch.delete_cf(&cf_handle, txid.as_ref());
             }
         }
 
@@ -1684,7 +1728,7 @@ impl RocksDB {
             };
 
             for txid in rollback.txs_to_delete.iter() {
-                batch.delete_cf(&cf_handle, txid_to_bytes(txid));
+                batch.delete_cf(&cf_handle, txid.as_ref());
             }
         }
 
@@ -1693,7 +1737,7 @@ impl RocksDB {
             let cf_handle: Arc<BoundColumnFamily<'_>> =
                 self.cf_handle(TRANSACTION_CONFIRMING_BLOCK_CF)?;
             for txid in rollback.txs_to_delete.iter() {
-                batch.delete_cf(&cf_handle, txid_to_bytes(txid));
+                batch.delete_cf(&cf_handle, txid.as_ref());
             }
         }
 
@@ -1706,7 +1750,7 @@ impl RocksDB {
                 .map_err(|_| RocksDBError::LockPoisoned)?;
 
             for txid in rollback.txs_to_delete.iter() {
-                batch.delete_cf(&cf_handle, txid_to_bytes(txid));
+                batch.delete_cf(&cf_handle, txid.as_ref());
 
                 // Update cache
                 mempool_cache.remove(txid);
@@ -1745,7 +1789,7 @@ impl RocksDB {
         // Now we have to fill the gaps in the rune numbers.
         let start = rune_numbers_deleted[0] + 1;
         let mut to_substract = 1;
-        let mut rune_numbers_to_update = HashMap::new();
+        let mut rune_numbers_to_update = HashMap::default();
         for i in start..total_runes {
             if rune_numbers_deleted.contains(&i) {
                 to_substract += 1;

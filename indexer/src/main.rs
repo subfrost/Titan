@@ -202,37 +202,37 @@ async fn graceful_shutdown(
     index_handle: std::thread::JoinHandle<()>,
     http_server_jh: task::JoinHandle<io::Result<()>>,
 ) {
-    // 1) Signal the subscription tasks to stop
-    if let Some(result) = spawn_subscription_result {
-        shutdown_and_wait_subscription_tasks(result).await;
-    }
-
-    // 2) Tell the Index to shut down
+    // 1) Tell the Index to shut down
     index.shutdown();
 
-    // 3) Reset the panic hook to drop the RocksDB reference
+    // 2) Reset the panic hook to drop the RocksDB reference
     panic::set_hook(Box::new(|panic_info| {
         // Restore the default hook
         eprintln!("Panic occurred: {:?}", panic_info);
     }));
 
-    // 4) Graceful HTTP shutdown (axum_server)
+    // 3) Graceful HTTP shutdown (axum_server)
     handle.graceful_shutdown(Some(std::time::Duration::from_secs(2)));
 
-    // 5) Join the indexer background thread (blocking)
+    // 4) Join the indexer background thread (blocking)
     if let Err(e) = index_handle.join() {
         error!("Failed to join indexer thread: {:?}", e);
     }
 
-    // 6) Await the Axum server
+    // 5) Await the Axum server
     match http_server_jh.await {
         Ok(Ok(_)) => info!("Axum server finished cleanly."),
         Ok(Err(e)) => error!("Server error: {:?}", e),
         Err(e) => error!("Failed to join Axum server task: {:?}", e),
     };
 
-    // 7) Drop the index so RocksDB references can possibly be unwrapped
+    // 6) Drop the index so RocksDB references can possibly be unwrapped
     drop(index);
+
+    // 7) Signal the subscription tasks to stop
+    if let Some(result) = spawn_subscription_result {
+        shutdown_and_wait_subscription_tasks(result).await;
+    }
 
     // 8) Attempt to close RocksDB
     match Arc::try_unwrap(db_arc) {

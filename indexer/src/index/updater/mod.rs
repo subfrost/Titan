@@ -1,18 +1,13 @@
 pub use {
     index_updater::{ReorgError, Updater, UpdaterError},
-    transaction_parser::TransactionParserError,
-    transaction_updater::TransactionUpdaterError,
+    transaction::{TransactionParserError, TransactionUpdaterError},
 };
 
-mod address;
-mod block_fetcher;
 mod cache;
+mod events;
+mod fetcher;
 mod index_updater;
-mod mempool;
-mod read_cache;
 mod rollback;
-mod rollback_cache;
 mod store_lock;
-mod transaction_parser;
+mod transaction;
 mod transaction_update;
-mod transaction_updater;

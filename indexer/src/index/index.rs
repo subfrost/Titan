@@ -11,10 +11,10 @@ use {
         index::updater::{ReorgError, UpdaterError},
         models::{block_id_to_transaction_status, Inscription, RuneEntry},
     },
-    bitcoin::{Address, BlockHash, OutPoint, Transaction as BitcoinTransaction, Txid},
+    bitcoin::{Address, BlockHash, Transaction as BitcoinTransaction},
     ordinals::{Rune, RuneId},
+    rustc_hash::FxHashMap as HashMap,
     std::{
-        collections::HashMap,
         sync::{
             atomic::{AtomicBool, Ordering},
             Arc,
@@ -24,7 +24,8 @@ use {
     },
     titan_types::{
         AddressData, AddressTxOut, Block, Event, InscriptionId, MempoolEntry, Pagination,
-        PaginationResponse, RuneAmount, Transaction, TransactionStatus, TxOutEntry,
+        PaginationResponse, RuneAmount, SerializedOutPoint, SerializedTxid, Transaction,
+        TransactionStatus, TxOutEntry,
     },
     tokio::{runtime::Runtime, sync::mpsc::Sender},
     tracing::{error, info, warn},
@@ -164,6 +165,11 @@ impl Index {
                 }
             }
 
+            if self.shutdown_flag.load(Ordering::SeqCst) {
+                info!("Indexer received shutdown signal, stopping...");
+                break;
+            }
+
             match self.updater.index_mempool() {
                 Ok(_) => (),
                 Err(UpdaterError::BitcoinRpc(e)) => {
@@ -216,39 +222,42 @@ impl Index {
         Ok(self.db.get_block_by_hash(hash)?)
     }
 
-    pub fn get_mempool_txids(&self) -> Result<Vec<Txid>> {
+    pub fn get_mempool_txids(&self) -> Result<Vec<SerializedTxid>> {
         Ok(self.db.get_mempool_txids()?.keys().cloned().collect())
     }
 
-    pub fn get_mempool_entry(&self, txid: &Txid) -> Result<MempoolEntry> {
+    pub fn get_mempool_entry(&self, txid: &SerializedTxid) -> Result<MempoolEntry> {
         Ok(self.db.get_mempool_entry(txid)?)
     }
 
     pub fn get_mempool_entries(
         &self,
-        txids: &Vec<Txid>,
-    ) -> Result<HashMap<Txid, Option<MempoolEntry>>> {
+        txids: &[SerializedTxid],
+    ) -> Result<HashMap<SerializedTxid, Option<MempoolEntry>>> {
         Ok(self.db.get_mempool_entries(txids)?)
     }
 
-    pub fn get_all_mempool_entries(&self) -> Result<HashMap<Txid, MempoolEntry>> {
+    pub fn get_all_mempool_entries(&self) -> Result<HashMap<SerializedTxid, MempoolEntry>> {
         Ok(self.db.get_mempool_txids()?)
     }
 
     pub fn get_mempool_entries_with_ancestors(
         &self,
-        txids: &Vec<Txid>,
-    ) -> Result<HashMap<Txid, MempoolEntry>> {
+        txids: &[SerializedTxid],
+    ) -> Result<HashMap<SerializedTxid, MempoolEntry>> {
         Ok(self.db.get_mempool_entries_with_ancestors(txids)?)
     }
 
-    pub fn get_tx_out(&self, outpoint: &OutPoint) -> Result<TxOutEntry> {
+    pub fn get_tx_out(&self, outpoint: &SerializedOutPoint) -> Result<TxOutEntry> {
         Ok(self
             .db
             .get_tx_out_with_mempool_spent_update(outpoint, None)?)
     }
 
-    pub fn get_tx_outs(&self, outpoints: &Vec<OutPoint>) -> Result<HashMap<OutPoint, TxOutEntry>> {
+    pub fn get_tx_outs(
+        &self,
+        outpoints: &[SerializedOutPoint],
+    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>> {
         Ok(self
             .db
             .get_tx_outs_with_mempool_spent_update(outpoints, None)?)
@@ -282,7 +291,7 @@ impl Index {
         rune_id: &RuneId,
         pagination: Option<Pagination>,
         mempool: Option<bool>,
-    ) -> Result<PaginationResponse<Txid>> {
+    ) -> Result<PaginationResponse<SerializedTxid>> {
         Ok(self
             .db
             .get_last_rune_transactions(rune_id, pagination, mempool)?)
@@ -291,7 +300,7 @@ impl Index {
     pub fn get_script_pubkey_outpoints(&self, address: &Address) -> Result<AddressData> {
         let script_pubkey = address.script_pubkey();
         let outpoints = self.db.get_script_pubkey_outpoints(&script_pubkey, None)?;
-        let outpoints_to_tx_out: HashMap<OutPoint, TxOutEntry> = self
+        let outpoints_to_tx_out = self
             .db
             .get_tx_outs_with_mempool_spent_update(&outpoints, None)?;
 
@@ -304,10 +313,14 @@ impl Index {
             );
         }
 
-        let outpoint_txns: Vec<Txid> = outpoints.iter().map(|outpoint| outpoint.txid).collect();
+        let outpoint_txns: Vec<SerializedTxid> = outpoints
+            .iter()
+            .map(|outpoint| outpoint.to_serialized_txid())
+            .collect();
+
         let txns_confirming_block = self.db.get_transaction_confirming_blocks(&outpoint_txns)?;
 
-        let mut runes = HashMap::new();
+        let mut runes = HashMap::default();
         let mut value = 0;
         let mut outputs = Vec::new();
         for (outpoint, tx_out) in outpoints_to_tx_out {
@@ -332,7 +345,7 @@ impl Index {
                 tx_out,
                 block_id_to_transaction_status(
                     txns_confirming_block
-                        .get(&outpoint.txid)
+                        .get(&outpoint.to_serialized_txid())
                         .and_then(|x| x.as_ref()),
                 ),
             ));
@@ -354,15 +367,15 @@ impl Index {
         self.settings.index_bitcoin_transactions
     }
 
-    pub fn get_transaction_raw(&self, txid: &Txid) -> Result<Vec<u8>> {
+    pub fn get_transaction_raw(&self, txid: &SerializedTxid) -> Result<Vec<u8>> {
         Ok(self.db.get_transaction_raw(txid, None)?)
     }
 
-    pub fn get_transaction(&self, txid: &Txid) -> Result<Transaction> {
+    pub fn get_transaction(&self, txid: &SerializedTxid) -> Result<Transaction> {
         Ok(self.db.get_transaction(txid, None)?)
     }
 
-    pub fn get_transaction_status(&self, txid: &Txid) -> Result<TransactionStatus> {
+    pub fn get_transaction_status(&self, txid: &SerializedTxid) -> Result<TransactionStatus> {
         let result = self.db.get_transaction_confirming_block(txid);
         match result {
             Ok(block_id) => Ok(block_id.into_transaction_status()),
@@ -379,8 +392,8 @@ impl Index {
 
     pub fn get_transactions_statuses(
         &self,
-        txids: &Vec<Txid>,
-    ) -> Result<HashMap<Txid, Option<TransactionStatus>>> {
+        txids: &Vec<SerializedTxid>,
+    ) -> Result<HashMap<SerializedTxid, Option<TransactionStatus>>> {
         let (exist, _) = self.db.partition_transactions_by_existence(txids)?;
         let result = self.db.get_transaction_confirming_blocks(&exist)?;
 
@@ -397,11 +410,11 @@ impl Index {
             .collect())
     }
 
-    pub fn pre_index_new_submitted_transaction(&self, txid: &Txid) -> Result<()> {
+    pub fn pre_index_new_submitted_transaction(&self, txid: &SerializedTxid) -> Result<()> {
         Ok(self.updater.pre_index_new_submitted_transaction(txid)?)
     }
 
-    pub fn remove_pre_index_new_submitted_transaction(&self, txid: &Txid) -> Result<()> {
+    pub fn remove_pre_index_new_submitted_transaction(&self, txid: &SerializedTxid) -> Result<()> {
         Ok(self
             .updater
             .remove_pre_index_new_submitted_transaction(txid)?)
@@ -409,7 +422,7 @@ impl Index {
 
     pub fn index_new_submitted_transaction(
         &self,
-        txid: &Txid,
+        txid: &SerializedTxid,
         tx: &BitcoinTransaction,
         mempool_entry: MempoolEntry,
     ) {

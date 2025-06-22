@@ -3,10 +3,11 @@ use {
         index::{store::Store, StoreError},
         models::{BatchRollback, RuneEntry},
     },
-    bitcoin::{OutPoint, ScriptBuf, Txid},
+    bitcoin::ScriptBuf,
     ordinals::{Rune, RuneId},
-    std::{collections::HashMap, sync::Arc},
-    titan_types::{InscriptionId, TxOutEntry},
+    rustc_hash::FxHashMap as HashMap,
+    std::sync::Arc,
+    titan_types::{InscriptionId, SerializedOutPoint, SerializedTxid, TxOutEntry},
     tracing::info,
 };
 
@@ -14,10 +15,10 @@ type Result<T> = std::result::Result<T, StoreError>;
 
 #[derive(Default)]
 pub struct TempCache {
-    txouts: HashMap<OutPoint, TxOutEntry>,
+    txouts: HashMap<SerializedOutPoint, TxOutEntry>,
 }
 
-pub(super) struct RollbackCache<'a> {
+pub struct RollbackCache<'a> {
     db: &'a Arc<dyn Store + Send + Sync>,
     update: BatchRollback,
     temp_cache: TempCache,
@@ -36,7 +37,7 @@ impl<'a> RollbackCache<'a> {
         })
     }
 
-    pub fn precache_tx_outs(&mut self, outpoints: &Vec<OutPoint>) -> Result<()> {
+    pub fn precache_tx_outs(&mut self, outpoints: &[SerializedOutPoint]) -> Result<()> {
         let tx_outs = self.db.get_tx_outs(outpoints, Some(self.mempool))?;
         self.temp_cache.txouts.extend(tx_outs);
         Ok(())
@@ -48,7 +49,7 @@ impl<'a> RollbackCache<'a> {
         Ok(())
     }
 
-    pub fn get_tx_out(&mut self, outpoint: &OutPoint) -> Result<TxOutEntry> {
+    pub fn get_tx_out(&mut self, outpoint: &SerializedOutPoint) -> Result<TxOutEntry> {
         Ok(self
             .temp_cache
             .txouts
@@ -57,7 +58,7 @@ impl<'a> RollbackCache<'a> {
             .clone())
     }
 
-    pub fn set_tx_out(&mut self, outpoint: OutPoint, tx_out: TxOutEntry) {
+    pub fn set_tx_out(&mut self, outpoint: SerializedOutPoint, tx_out: TxOutEntry) {
         self.update.txouts.insert(outpoint, tx_out);
     }
 
@@ -73,11 +74,11 @@ impl<'a> RollbackCache<'a> {
         self.update.rune_entry.insert(rune_id, rune_entry);
     }
 
-    pub fn add_tx_to_delete(&mut self, txid: Txid) {
+    pub fn add_tx_to_delete(&mut self, txid: SerializedTxid) {
         self.update.txs_to_delete.push(txid);
     }
 
-    pub fn add_outpoint_to_delete(&mut self, outpoint: OutPoint) {
+    pub fn add_outpoint_to_delete(&mut self, outpoint: SerializedOutPoint) {
         self.update.outpoints_to_delete.push(outpoint);
     }
 
@@ -103,9 +104,9 @@ impl<'a> RollbackCache<'a> {
 
     pub fn get_outpoints_to_script_pubkey(
         &self,
-        outpoints: &Vec<OutPoint>,
+        outpoints: &[SerializedOutPoint],
         optimistic: bool,
-    ) -> Result<HashMap<OutPoint, ScriptBuf>> {
+    ) -> Result<HashMap<SerializedOutPoint, ScriptBuf>> {
         let script_pubkeys =
             self.db
                 .get_outpoints_to_script_pubkey(outpoints, Some(self.mempool), optimistic)?;
@@ -114,12 +115,12 @@ impl<'a> RollbackCache<'a> {
 
     pub fn set_script_pubkey_entries(
         &mut self,
-        script_pubkey_entry: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)>,
+        script_pubkey_entry: HashMap<ScriptBuf, (Vec<SerializedOutPoint>, Vec<SerializedOutPoint>)>,
     ) {
         self.update.script_pubkey_entry = script_pubkey_entry;
     }
 
-    pub fn add_prev_outpoint_to_delete(&mut self, outpoints: &Vec<OutPoint>) {
+    pub fn add_prev_outpoint_to_delete(&mut self, outpoints: &[SerializedOutPoint]) {
         self.update
             .prev_outpoints_to_delete
             .extend(outpoints.clone());

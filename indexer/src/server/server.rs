@@ -18,10 +18,12 @@ use {
         Router,
     },
     axum_server::Handle,
-    bitcoin::{address::NetworkUnchecked, Address, BlockHash, OutPoint, Txid},
+    bitcoin::{address::NetworkUnchecked, Address, BlockHash},
     http::{header, StatusCode},
     std::{io, net::ToSocketAddrs, sync::Arc},
-    titan_types::{query, InscriptionId, Pagination, Subscription},
+    titan_types::{
+        query, InscriptionId, Pagination, SerializedOutPoint, SerializedTxid, Subscription,
+    },
     tokio::task,
     tower_http::{
         compression::CompressionLayer,
@@ -184,7 +186,7 @@ impl Server {
     async fn transaction(
         Extension(index): Extension<Arc<Index>>,
         Extension(bitcoin_rpc_pool): Extension<RpcClientPool>,
-        Path(txid): Path<Txid>,
+        Path(txid): Path<SerializedTxid>,
     ) -> ServerResult {
         task::block_in_place(|| {
             let transaction = api::transaction(index, bitcoin_rpc_pool.get()?, &txid)?;
@@ -195,7 +197,7 @@ impl Server {
     async fn transaction_raw(
         Extension(index): Extension<Arc<Index>>,
         Extension(bitcoin_rpc_pool): Extension<RpcClientPool>,
-        Path(txid): Path<Txid>,
+        Path(txid): Path<SerializedTxid>,
     ) -> ServerResult {
         task::block_in_place(|| {
             let raw_tx = api::bitcoin_transaction_raw(index, bitcoin_rpc_pool.get()?, &txid)?;
@@ -212,7 +214,7 @@ impl Server {
     async fn transaction_hex(
         Extension(index): Extension<Arc<Index>>,
         Extension(bitcoin_rpc_pool): Extension<RpcClientPool>,
-        Path(txid): Path<Txid>,
+        Path(txid): Path<SerializedTxid>,
     ) -> ServerResult {
         task::block_in_place(|| {
             let hex_string = api::bitcoin_transaction_hex(index, bitcoin_rpc_pool.get()?, &txid)?;
@@ -228,7 +230,7 @@ impl Server {
 
     async fn transaction_status(
         Extension(index): Extension<Arc<Index>>,
-        Path(txid): Path<Txid>,
+        Path(txid): Path<SerializedTxid>,
     ) -> ServerResult {
         task::block_in_place(|| Ok(Json(api::transaction_status(index, &txid)?).into_response()))
     }
@@ -236,7 +238,7 @@ impl Server {
     async fn transaction_statuses(
         Extension(index): Extension<Arc<Index>>,
         Query(blockhash): Query<Option<BlockHash>>,
-        txids: Json<Vec<Txid>>,
+        txids: Json<Vec<SerializedTxid>>,
     ) -> ServerResult {
         task::block_in_place(|| {
             let result = api::transaction_statuses(index, &txids, &blockhash)?;
@@ -252,7 +254,7 @@ impl Server {
 
     async fn output(
         Extension(index): Extension<Arc<Index>>,
-        Path(outpoint): Path<OutPoint>,
+        Path(DeserializeFromStr(outpoint)): Path<DeserializeFromStr<SerializedOutPoint>>,
     ) -> ServerResult {
         task::block_in_place(|| Ok(Json(api::output(index, &outpoint)?).into_response()))
     }
@@ -306,14 +308,14 @@ impl Server {
 
     async fn mempool_tx(
         Extension(index): Extension<Arc<Index>>,
-        Path(txid): Path<Txid>,
+        Path(txid): Path<SerializedTxid>,
     ) -> ServerResult {
         task::block_in_place(|| Ok(Json(api::mempool_tx(index, &txid)?).into_response()))
     }
 
     async fn mempool_entries(
         Extension(index): Extension<Arc<Index>>,
-        Json(txids): Json<Vec<Txid>>,
+        Json(txids): Json<Vec<SerializedTxid>>,
     ) -> ServerResult {
         task::block_in_place(|| Ok(Json(api::mempool_entries(index, &txids)?).into_response()))
     }
@@ -324,7 +326,7 @@ impl Server {
 
     async fn mempool_entries_with_ancestors(
         Extension(index): Extension<Arc<Index>>,
-        Json(txids): Json<Vec<Txid>>,
+        Json(txids): Json<Vec<SerializedTxid>>,
     ) -> ServerResult {
         task::block_in_place(|| {
             Ok(Json(api::mempool_entries_with_ancestors(index, &txids)?).into_response())

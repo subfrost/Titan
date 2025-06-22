@@ -1,5 +1,5 @@
 use {
-    bitcoin::{hashes::Hash, Txid},
+    crate::SerializedTxid,
     bitcoincore_rpc::json::GetMempoolEntryResult,
     borsh::{BorshDeserialize, BorshSerialize},
     serde::{Deserialize, Serialize},
@@ -24,9 +24,9 @@ pub struct MempoolEntry {
     pub ancestor_count: u64,
     pub ancestor_size: u64,
     pub fees: MempoolEntryFee,
-    pub depends: Vec<Txid>,
+    pub depends: Vec<SerializedTxid>,
     #[serde(rename = "spentby")]
-    pub spent_by: Vec<Txid>,
+    pub spent_by: Vec<SerializedTxid>,
 }
 
 impl From<&GetMempoolEntryResult> for MempoolEntry {
@@ -43,8 +43,8 @@ impl From<&GetMempoolEntryResult> for MempoolEntry {
                 descendant: value.fees.descendant.to_sat(),
                 ancestor: value.fees.ancestor.to_sat(),
             },
-            depends: value.depends.clone(),
-            spent_by: value.spent_by.clone(),
+            depends: value.depends.iter().map(|txid| txid.into()).collect(),
+            spent_by: value.spent_by.iter().map(|txid| txid.into()).collect(),
         }
     }
 }
@@ -66,14 +66,14 @@ impl BorshSerialize for MempoolEntry {
         BorshSerialize::serialize(&self.ancestor_size, writer)?;
         BorshSerialize::serialize(&self.fees, writer)?;
 
-        BorshSerialize::serialize(&self.depends.len(), writer)?;
+        BorshSerialize::serialize(&(self.depends.len() as u64), writer)?;
         for txid in &self.depends {
-            BorshSerialize::serialize(&txid.as_raw_hash().to_byte_array(), writer)?;
+            BorshSerialize::serialize(&txid, writer)?;
         }
 
-        BorshSerialize::serialize(&self.spent_by.len(), writer)?;
+        BorshSerialize::serialize(&(self.spent_by.len() as u64), writer)?;
         for txid in &self.spent_by {
-            BorshSerialize::serialize(&txid.as_raw_hash().to_byte_array(), writer)?;
+            BorshSerialize::serialize(&txid, writer)?;
         }
         Ok(())
     }
@@ -99,16 +99,14 @@ impl BorshDeserialize for MempoolEntry {
         let depends_len = u64::deserialize_reader(reader)?;
         let mut depends = Vec::new();
         for _ in 0..depends_len {
-            let txid_bytes = <[u8; 32]>::deserialize_reader(reader)?;
-            let txid = bitcoin::Txid::from_byte_array(txid_bytes);
+            let txid = SerializedTxid::deserialize_reader(reader)?;
             depends.push(txid);
         }
 
         let spent_by_len = u64::deserialize_reader(reader)?;
         let mut spent_by = Vec::new();
         for _ in 0..spent_by_len {
-            let txid_bytes = <[u8; 32]>::deserialize_reader(reader)?;
-            let txid = bitcoin::Txid::from_byte_array(txid_bytes);
+            let txid = SerializedTxid::deserialize_reader(reader)?;
             spent_by.push(txid);
         }
 
@@ -123,5 +121,261 @@ impl BorshDeserialize for MempoolEntry {
             depends,
             spent_by,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use borsh::{BorshDeserialize, BorshSerialize};
+
+    fn create_test_mempool_entry() -> MempoolEntry {
+        MempoolEntry {
+            vsize: 250,
+            weight: Some(1000),
+            descendant_count: 5,
+            descendant_size: 1500,
+            ancestor_count: 3,
+            ancestor_size: 800,
+            fees: MempoolEntryFee {
+                base: 5000,
+                descendant: 7500,
+                ancestor: 4200,
+            },
+            depends: vec![
+                SerializedTxid::from([1u8; 32]),
+                SerializedTxid::from([2u8; 32]),
+            ],
+            spent_by: vec![
+                SerializedTxid::from([3u8; 32]),
+            ],
+        }
+    }
+
+    fn create_minimal_mempool_entry() -> MempoolEntry {
+        MempoolEntry {
+            vsize: 100,
+            weight: None,
+            descendant_count: 0,
+            descendant_size: 0,
+            ancestor_count: 0,
+            ancestor_size: 0,
+            fees: MempoolEntryFee {
+                base: 1000,
+                descendant: 1000,
+                ancestor: 1000,
+            },
+            depends: vec![],
+            spent_by: vec![],
+        }
+    }
+
+    fn serialize_entry(entry: &MempoolEntry) -> std::io::Result<Vec<u8>> {
+        let mut buffer = Vec::new();
+        BorshSerialize::serialize(entry, &mut buffer)?;
+        Ok(buffer)
+    }
+
+    fn deserialize_entry(data: &[u8]) -> std::io::Result<MempoolEntry> {
+        MempoolEntry::deserialize_reader(&mut data.as_ref())
+    }
+
+    fn serialize_fee(fee: &MempoolEntryFee) -> std::io::Result<Vec<u8>> {
+        let mut buffer = Vec::new();
+        BorshSerialize::serialize(fee, &mut buffer)?;
+        Ok(buffer)
+    }
+
+    fn deserialize_fee(data: &[u8]) -> std::io::Result<MempoolEntryFee> {
+        MempoolEntryFee::deserialize_reader(&mut data.as_ref())
+    }
+
+    #[test]
+    fn test_mempool_entry_serialization_deserialization_round_trip() {
+        let original = create_test_mempool_entry();
+        
+        // Serialize
+        let serialized = serialize_entry(&original).expect("Serialization should succeed");
+        
+        // Deserialize
+        let deserialized = deserialize_entry(&serialized)
+            .expect("Deserialization should succeed");
+        
+        // Assert equality
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_mempool_entry_minimal_serialization_deserialization() {
+        let original = create_minimal_mempool_entry();
+        
+        // Serialize
+        let serialized = serialize_entry(&original).expect("Serialization should succeed");
+        
+        // Deserialize
+        let deserialized = deserialize_entry(&serialized)
+            .expect("Deserialization should succeed");
+        
+        // Assert equality
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_mempool_entry_with_none_weight() {
+        let mut entry = create_test_mempool_entry();
+        entry.weight = None;
+        
+        let serialized = serialize_entry(&entry).expect("Serialization should succeed");
+        let deserialized = deserialize_entry(&serialized)
+            .expect("Deserialization should succeed");
+        
+        assert_eq!(entry, deserialized);
+        assert_eq!(deserialized.weight, None);
+    }
+
+    #[test]
+    fn test_mempool_entry_with_some_weight() {
+        let mut entry = create_test_mempool_entry();
+        entry.weight = Some(42000);
+        
+        let serialized = serialize_entry(&entry).expect("Serialization should succeed");
+        let deserialized = deserialize_entry(&serialized)
+            .expect("Deserialization should succeed");
+        
+        assert_eq!(entry, deserialized);
+        assert_eq!(deserialized.weight, Some(42000));
+    }
+
+    #[test]
+    fn test_mempool_entry_empty_vectors() {
+        let mut entry = create_test_mempool_entry();
+        entry.depends = vec![];
+        entry.spent_by = vec![];
+        
+        let serialized = serialize_entry(&entry).expect("Serialization should succeed");
+        let deserialized = deserialize_entry(&serialized)
+            .expect("Deserialization should succeed");
+        
+        assert_eq!(entry, deserialized);
+        assert!(deserialized.depends.is_empty());
+        assert!(deserialized.spent_by.is_empty());
+    }
+
+    #[test]
+    fn test_mempool_entry_large_vectors() {
+        let mut entry = create_test_mempool_entry();
+        
+        // Create larger vectors
+        entry.depends = (0..10).map(|i| SerializedTxid::from([i as u8; 32])).collect();
+        entry.spent_by = (10..15).map(|i| SerializedTxid::from([i as u8; 32])).collect();
+        
+        let serialized = serialize_entry(&entry).expect("Serialization should succeed");
+        let deserialized = deserialize_entry(&serialized)
+            .expect("Deserialization should succeed");
+        
+        assert_eq!(entry, deserialized);
+        assert_eq!(deserialized.depends.len(), 10);
+        assert_eq!(deserialized.spent_by.len(), 5);
+    }
+
+    #[test]
+    fn test_mempool_entry_fee_serialization() {
+        let fee = MempoolEntryFee {
+            base: u64::MAX,
+            descendant: 0,
+            ancestor: 12345,
+        };
+        
+        let serialized = serialize_fee(&fee).expect("Fee serialization should succeed");
+        let deserialized = deserialize_fee(&serialized)
+            .expect("Fee deserialization should succeed");
+        
+        assert_eq!(fee, deserialized);
+    }
+
+    #[test]
+    fn test_mempool_entry_extreme_values() {
+        let entry = MempoolEntry {
+            vsize: u64::MAX,
+            weight: Some(u64::MAX),
+            descendant_count: u64::MAX,
+            descendant_size: u64::MAX,
+            ancestor_count: u64::MAX,
+            ancestor_size: u64::MAX,
+            fees: MempoolEntryFee {
+                base: u64::MAX,
+                descendant: u64::MAX,
+                ancestor: u64::MAX,
+            },
+            depends: vec![SerializedTxid::all_zeros()],
+            spent_by: vec![SerializedTxid::from([255u8; 32])],
+        };
+        
+        let serialized = serialize_entry(&entry).expect("Serialization should succeed");
+        let deserialized = deserialize_entry(&serialized)
+            .expect("Deserialization should succeed");
+        
+        assert_eq!(entry, deserialized);
+    }
+
+    #[test]
+    fn test_mempool_entry_zero_values() {
+        let entry = MempoolEntry {
+            vsize: 0,
+            weight: Some(0),
+            descendant_count: 0,
+            descendant_size: 0,
+            ancestor_count: 0,
+            ancestor_size: 0,
+            fees: MempoolEntryFee {
+                base: 0,
+                descendant: 0,
+                ancestor: 0,
+            },
+            depends: vec![],
+            spent_by: vec![],
+        };
+        
+        let serialized = serialize_entry(&entry).expect("Serialization should succeed");
+        let deserialized = deserialize_entry(&serialized)
+            .expect("Deserialization should succeed");
+        
+        assert_eq!(entry, deserialized);
+    }
+
+    #[test]
+    fn test_serialized_data_consistency() {
+        let entry1 = create_test_mempool_entry();
+        let entry2 = create_test_mempool_entry();
+        
+        let serialized1 = serialize_entry(&entry1).expect("Serialization should succeed");
+        let serialized2 = serialize_entry(&entry2).expect("Serialization should succeed");
+        
+        // Same data should produce same serialized bytes
+        assert_eq!(serialized1, serialized2);
+    }
+
+    #[test]
+    fn test_serialization_size_efficiency() {
+        let minimal = create_minimal_mempool_entry();
+        let full = create_test_mempool_entry();
+        
+        let minimal_size = serialize_entry(&minimal).unwrap().len();
+        let full_size = serialize_entry(&full).unwrap().len();
+        
+        // Full entry should be larger than minimal (basic sanity check)
+        assert!(full_size > minimal_size);
+        
+        // Print sizes for debugging (will only show when test runs with --nocapture)
+        println!("Minimal entry serialized size: {} bytes", minimal_size);
+        println!("Full entry serialized size: {} bytes", full_size);
+    }
+
+    #[test]
+    fn test_invalid_deserialization_handling() {
+        // Test with incomplete data
+        let incomplete_data = vec![1, 2, 3]; // Too short to be valid
+        let result = deserialize_entry(&incomplete_data);
+        assert!(result.is_err(), "Should fail to deserialize incomplete data");
     }
 }

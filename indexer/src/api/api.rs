@@ -8,14 +8,15 @@ use {
         index::{Index, IndexError},
         subscription::{self, WebhookSubscriptionManager},
     },
-    bitcoin::{consensus, Address, BlockHash, OutPoint, Txid},
+    bitcoin::{consensus, Address, BlockHash},
     bitcoincore_rpc::RpcApi,
     http::HeaderMap,
-    std::{collections::HashMap, sync::Arc},
+    std::sync::Arc,
+    rustc_hash::FxHashMap as HashMap,
     titan_types::{
         query, AddressData, Block, BlockTip, InscriptionId, MempoolEntry, Pagination,
-        PaginationResponse, RuneResponse, Status, Subscription, Transaction, TransactionStatus,
-        TxOutEntry,
+        PaginationResponse, RuneResponse, SerializedOutPoint, SerializedTxid, Status, Subscription,
+        Transaction, TransactionStatus, TxOutEntry,
     },
     tracing::error,
     uuid::Uuid,
@@ -75,10 +76,14 @@ pub fn block_hash_by_height(index: Arc<Index>, height: u64) -> Result<String> {
 pub fn block_txids(index: Arc<Index>, block: &query::Block) -> Result<Vec<String>> {
     let hash = to_hash(block, &index)?;
     let block = index.get_block_by_hash(&hash)?;
-    Ok(block.tx_ids)
+    Ok(block
+        .tx_ids
+        .into_iter()
+        .map(|txid| txid.to_string())
+        .collect())
 }
 
-pub fn output(index: Arc<Index>, outpoint: &OutPoint) -> Result<TxOutEntry> {
+pub fn output(index: Arc<Index>, outpoint: &SerializedOutPoint) -> Result<TxOutEntry> {
     Ok(index.get_tx_out(outpoint)?)
 }
 
@@ -125,22 +130,27 @@ pub fn last_rune_transactions(
     index: Arc<Index>,
     rune_query: &query::Rune,
     pagination: Option<Pagination>,
-) -> Result<PaginationResponse<Txid>> {
+) -> Result<PaginationResponse<SerializedTxid>> {
     let rune_id = to_rune_id(rune_query, &index)?;
     let transactions = index.get_last_rune_transactions(&rune_id, pagination, None)?;
     Ok(transactions)
 }
 
-pub fn broadcast_transaction(index: Arc<Index>, client: PooledClient, hex: &str) -> Result<Txid> {
+pub fn broadcast_transaction(
+    index: Arc<Index>,
+    client: PooledClient,
+    hex: &str,
+) -> Result<SerializedTxid> {
     let transaction: bitcoin::Transaction = consensus::deserialize(&hex::decode(hex)?)?;
     let txid = transaction.compute_txid();
+    let serialized_txid = txid.into();
 
-    index.pre_index_new_submitted_transaction(&txid)?;
+    index.pre_index_new_submitted_transaction(&serialized_txid)?;
 
     let new_txid = match client.send_raw_transaction(hex) {
         Ok(txid) => txid,
         Err(e) => {
-            index.remove_pre_index_new_submitted_transaction(&txid)?;
+            index.remove_pre_index_new_submitted_transaction(&serialized_txid)?;
             return Err(ApiError::RpcError(e));
         }
     };
@@ -150,23 +160,24 @@ pub fn broadcast_transaction(index: Arc<Index>, client: PooledClient, hex: &str)
     let mempool_entry = client.get_mempool_entry(&new_txid)?;
 
     index.index_new_submitted_transaction(
-        &new_txid,
+        &serialized_txid,
         &transaction,
         MempoolEntry::from(&mempool_entry),
     );
-    Ok(new_txid)
+
+    Ok(serialized_txid)
 }
 
 pub fn bitcoin_transaction_raw(
     index: Arc<Index>,
     client: PooledClient,
-    txid: &Txid,
+    txid: &SerializedTxid,
 ) -> Result<Vec<u8>> {
     if index.is_indexing_bitcoin_transactions() {
         Ok(index.get_transaction_raw(txid)?)
     } else {
         Ok(consensus::serialize(
-            &client.get_raw_transaction(txid, None)?,
+            &client.get_raw_transaction(&txid.into(), None)?,
         ))
     }
 }
@@ -174,28 +185,30 @@ pub fn bitcoin_transaction_raw(
 pub fn bitcoin_transaction_hex(
     index: Arc<Index>,
     client: PooledClient,
-    txid: &Txid,
+    txid: &SerializedTxid,
 ) -> Result<String> {
     let transaction = bitcoin_transaction_raw(index, client, txid)?;
     Ok(hex::encode(transaction))
 }
 
-pub fn transaction(index: Arc<Index>, client: PooledClient, txid: &Txid) -> Result<Transaction> {
+pub fn transaction(
+    index: Arc<Index>,
+    client: PooledClient,
+    txid: &SerializedTxid,
+) -> Result<Transaction> {
     let transaction = if index.is_indexing_bitcoin_transactions() {
         index.get_transaction(txid)?
     } else {
         let status = index.get_transaction_status(txid)?;
-        let mut transaction = Transaction::from((client.get_raw_transaction(txid, None)?, status));
+        let mut transaction =
+            Transaction::from((client.get_raw_transaction(&txid.into(), None)?, status));
 
         let outpoints = transaction
             .output
             .iter()
             .enumerate()
-            .map(|(vout, _)| OutPoint {
-                txid: txid.clone(),
-                vout: vout as u32,
-            })
-            .collect();
+            .map(|(vout, _)| SerializedOutPoint::from_txid_vout(txid, vout as u32))
+            .collect::<Vec<_>>();
 
         let tx_outs = index.get_tx_outs(&outpoints)?;
 
@@ -215,15 +228,15 @@ pub fn transaction(index: Arc<Index>, client: PooledClient, txid: &Txid) -> Resu
     Ok(transaction)
 }
 
-pub fn transaction_status(index: Arc<Index>, txid: &Txid) -> Result<TransactionStatus> {
+pub fn transaction_status(index: Arc<Index>, txid: &SerializedTxid) -> Result<TransactionStatus> {
     Ok(index.get_transaction_status(txid)?)
 }
 
 pub fn transaction_statuses(
     index: Arc<Index>,
-    txids: &Vec<Txid>,
+    txids: &Vec<SerializedTxid>,
     blockhash: &Option<BlockHash>,
-) -> Result<HashMap<Txid, Option<TransactionStatus>>> {
+) -> Result<HashMap<SerializedTxid, Option<TransactionStatus>>> {
     if let Some(blockhash) = blockhash {
         let latest_block_hash = index.get_block_hash(index.get_block_count()? - 1)?;
         if *blockhash != latest_block_hash {
@@ -236,29 +249,29 @@ pub fn transaction_statuses(
     Ok(index.get_transactions_statuses(txids)?)
 }
 
-pub fn mempool_txids(index: Arc<Index>) -> Result<Vec<Txid>> {
+pub fn mempool_txids(index: Arc<Index>) -> Result<Vec<SerializedTxid>> {
     Ok(index.get_mempool_txids()?)
 }
 
-pub fn mempool_tx(index: Arc<Index>, txid: &Txid) -> Result<MempoolEntry> {
+pub fn mempool_tx(index: Arc<Index>, txid: &SerializedTxid) -> Result<MempoolEntry> {
     Ok(index.get_mempool_entry(txid)?)
 }
 
 pub fn mempool_entries(
     index: Arc<Index>,
-    txids: &Vec<Txid>,
-) -> Result<HashMap<Txid, Option<MempoolEntry>>> {
+    txids: &Vec<SerializedTxid>,
+) -> Result<HashMap<SerializedTxid, Option<MempoolEntry>>> {
     Ok(index.get_mempool_entries(txids)?)
 }
 
-pub fn mempool_entries_all(index: Arc<Index>) -> Result<HashMap<Txid, MempoolEntry>> {
+pub fn mempool_entries_all(index: Arc<Index>) -> Result<HashMap<SerializedTxid, MempoolEntry>> {
     Ok(index.get_all_mempool_entries()?)
 }
 
 pub fn mempool_entries_with_ancestors(
     index: Arc<Index>,
-    txids: &Vec<Txid>,
-) -> Result<HashMap<Txid, MempoolEntry>> {
+    txids: &Vec<SerializedTxid>,
+) -> Result<HashMap<SerializedTxid, MempoolEntry>> {
     Ok(index.get_mempool_entries_with_ancestors(txids)?)
 }
 

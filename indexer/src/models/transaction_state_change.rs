@@ -1,19 +1,18 @@
 use {
     super::Lot,
-    bitcoin::{hashes::Hash, OutPoint},
     borsh::{BorshDeserialize, BorshSerialize},
     ordinals::{Rune, RuneId},
+    rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet},
     std::{
-        collections::{HashMap, HashSet},
         fmt::Display,
         io::{Read, Result, Write},
     },
-    titan_types::{RuneAmount, TxOutEntry},
+    titan_types::{RuneAmount, SerializedOutPoint, TxOutEntry},
 };
 
 #[derive(Debug, Clone)]
 pub struct TransactionStateChange {
-    pub inputs: Vec<OutPoint>,
+    pub inputs: Vec<SerializedOutPoint>,
     pub outputs: Vec<TxOutEntry>,
     pub etched: Option<(RuneId, Rune)>,
     pub minted: Option<RuneAmount>,
@@ -26,12 +25,7 @@ impl BorshSerialize for TransactionStateChange {
         // 1) inputs (Vec<OutPoint>) - manually serialize each OutPoint's components
         (self.inputs.len() as u64).serialize(writer)?;
         for outpoint in &self.inputs {
-            outpoint
-                .txid
-                .as_raw_hash()
-                .as_byte_array()
-                .serialize(writer)?;
-            outpoint.vout.serialize(writer)?;
+            outpoint.serialize(writer)?;
         }
 
         // 2) outputs (Vec<TxOutEntry>) - also already derive BorshSerialize
@@ -87,12 +81,8 @@ impl BorshDeserialize for TransactionStateChange {
         let input_len = u64::deserialize_reader(reader)?;
         let mut inputs = Vec::with_capacity(input_len as usize);
         for _ in 0..input_len {
-            let txid_bytes = <[u8; 32]>::deserialize_reader(reader)?;
-            let vout = u32::deserialize_reader(reader)?;
-            inputs.push(OutPoint {
-                txid: bitcoin::Txid::from_byte_array(txid_bytes),
-                vout,
-            });
+            let outpoint = SerializedOutPoint::deserialize_reader(reader)?;
+            inputs.push(outpoint);
         }
 
         // 2) outputs
@@ -119,7 +109,7 @@ impl BorshDeserialize for TransactionStateChange {
 
         // 5) burned
         let burned_len = u64::deserialize_reader(reader)?;
-        let mut burned = HashMap::with_capacity(burned_len as usize);
+        let mut burned = HashMap::default();
         for _ in 0..burned_len {
             let block = u64::deserialize_reader(reader)?;
             let tx = u32::deserialize_reader(reader)?;
@@ -161,7 +151,7 @@ impl TransactionStateChange {
 
     pub fn rune_ids(&self) -> Vec<RuneId> {
         // Unique rune ids
-        let mut rune_ids = HashSet::new();
+        let mut rune_ids = HashSet::default();
 
         // Add burned rune ids
         self.burned.keys().for_each(|rune_id| {

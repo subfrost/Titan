@@ -1,19 +1,20 @@
-use bitcoin::Txid;
-use std::collections::HashSet;
+use rustc_hash::{FxHashSet as HashSet};
+
+use titan_types::SerializedTxid;
 
 #[derive(Debug, Default, Clone)]
 pub struct TransactionUpdate {
     /// The set of transactions that entered (were added to) the mempool in this update
-    mempool_added: HashSet<Txid>,
+    mempool_added: HashSet<SerializedTxid>,
 
     /// The set of transactions that left (were removed from) the mempool in this update
-    mempool_removed: HashSet<Txid>,
+    mempool_removed: HashSet<SerializedTxid>,
 
     /// The set of transactions that were added to (mined in) the current best chain
-    block_added: HashSet<Txid>,
+    block_added: HashSet<SerializedTxid>,
 
     /// The set of transactions that were removed from the best chain (reorged out)
-    block_removed: HashSet<Txid>,
+    block_removed: HashSet<SerializedTxid>,
 }
 
 /// This struct is returned by `categorize()` to hold
@@ -22,38 +23,38 @@ pub struct TransactionUpdate {
 pub struct CategorizedTxs {
     /// Transactions that were *both* in mempool_removed **and** in block_added.
     /// Typically these were mined out of the mempool in the new block.
-    pub mined_from_mempool: HashSet<Txid>,
+    pub mined_from_mempool: HashSet<SerializedTxid>,
 
     /// Transactions that were *both* block_removed **and** mempool_added.
     /// Typically these were reorged out, but showed up again in mempool.
-    pub reorged_back_to_mempool: HashSet<Txid>,
+    pub reorged_back_to_mempool: HashSet<SerializedTxid>,
 
     /// Transactions that were *only* in mempool_added (and not block_removed, etc.).
     /// These are newly seen in the mempool for the first time.
-    pub new_in_mempool_only: HashSet<Txid>,
+    pub new_in_mempool_only: HashSet<SerializedTxid>,
 
     /// Transactions that were *only* in block_added (and not mempool_removed),
     /// i.e. we never saw them in mempool first.
-    pub new_block_only: HashSet<Txid>,
+    pub new_block_only: HashSet<SerializedTxid>,
 
     /// Transactions that were in block_removed but *not* re-mined
     /// and *not* re‐added to mempool.  
     /// (They have effectively “disappeared” from the best chain, and are not in mempool.)
-    pub reorged_out_entirely: HashSet<Txid>,
+    pub reorged_out_entirely: HashSet<SerializedTxid>,
 
     /// Transactions that were mempool_removed but *not* found in block_added,
     /// so presumably RBF or evicted (or conflicted, or pruned).
-    pub mempool_rbf_or_evicted: HashSet<Txid>,
+    pub mempool_rbf_or_evicted: HashSet<SerializedTxid>,
 
     /// Transactions that appear in *both* `block_removed` and `block_added`.
     /// That can happen in a reorg where a transaction was removed with the old block
     /// but is also included in the new chain tip block. (Hence it never hits the mempool.)
-    pub reorged_out_and_remined: HashSet<Txid>,
+    pub reorged_out_and_remined: HashSet<SerializedTxid>,
 }
 
 pub struct TransactionChangeSet {
-    pub removed: HashSet<Txid>,
-    pub added: HashSet<Txid>,
+    pub removed: HashSet<SerializedTxid>,
+    pub added: HashSet<SerializedTxid>,
 }
 
 impl TransactionUpdate {
@@ -77,11 +78,11 @@ impl TransactionUpdate {
         self.block_added.len() > 10_000
     }
 
-    pub fn add_block_tx(&mut self, txid: Txid) {
+    pub fn add_block_tx(&mut self, txid: SerializedTxid) {
         self.block_added.insert(txid);
     }
 
-    pub fn remove_block_tx(&mut self, txid: Txid) {
+    pub fn remove_block_tx(&mut self, txid: SerializedTxid) {
         self.block_removed.insert(txid);
     }
 
@@ -91,10 +92,10 @@ impl TransactionUpdate {
     }
 
     pub fn reset(&mut self) {
-        self.mempool_added = HashSet::new();
-        self.mempool_removed = HashSet::new();
-        self.block_added = HashSet::new();
-        self.block_removed = HashSet::new();
+        self.mempool_added = HashSet::default();
+        self.mempool_removed = HashSet::default();
+        self.block_added = HashSet::default();
+        self.block_removed = HashSet::default();
     }
 
     /// Categorize transactions into buckets describing what happened to them

@@ -6,13 +6,13 @@ use {
             TransactionStateChange,
         },
     },
-    bitcoin::{consensus, hex::HexToArrayError, BlockHash, OutPoint, ScriptBuf, Txid},
+    bitcoin::{consensus, hex::HexToArrayError, BlockHash, ScriptBuf},
     ordinals::{Rune, RuneId},
-    std::collections::{HashMap, HashSet},
+    rustc_hash::FxHashMap as HashMap,
     thiserror::Error,
     titan_types::{
-        Block, InscriptionId, MempoolEntry, Pagination, PaginationResponse, SpenderReference,
-        SpentStatus, Transaction, TransactionStatus, TxOutEntry,
+        Block, InscriptionId, MempoolEntry, Pagination, PaginationResponse, SerializedOutPoint,
+        SerializedTxid, SpenderReference, SpentStatus, Transaction, TransactionStatus, TxOutEntry,
     },
 };
 
@@ -56,78 +56,101 @@ pub trait Store {
     fn get_purged_blocks_count(&self) -> Result<u64, StoreError>;
 
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, StoreError>;
+    fn get_block_hashes_by_height(
+        &self,
+        from_height: u64,
+        to_height: u64,
+    ) -> Result<Vec<BlockHash>, StoreError>;
+
     fn delete_block_hash(&self, height: u64) -> Result<(), StoreError>;
 
     fn get_block_by_hash(&self, hash: &BlockHash) -> Result<Block, StoreError>;
+    fn get_blocks_by_hashes(
+        &self,
+        hashes: &Vec<BlockHash>,
+    ) -> Result<HashMap<BlockHash, Block>, StoreError>;
+    fn get_blocks_by_heights(
+        &self,
+        from_height: u64,
+        to_height: u64,
+    ) -> Result<HashMap<u64, Block>, StoreError>;
+
     fn delete_block(&self, hash: &BlockHash) -> Result<(), StoreError>;
 
     // mempool
-    fn is_tx_in_mempool(&self, txid: &Txid) -> Result<bool, StoreError>;
-    fn get_mempool_txids(&self) -> Result<HashMap<Txid, MempoolEntry>, StoreError>;
-    fn get_mempool_entry(&self, txid: &Txid) -> Result<MempoolEntry, StoreError>;
+    fn is_tx_in_mempool(&self, txid: &SerializedTxid) -> Result<bool, StoreError>;
+    fn get_mempool_txids(&self) -> Result<HashMap<SerializedTxid, MempoolEntry>, StoreError>;
+    fn get_mempool_entry(&self, txid: &SerializedTxid) -> Result<MempoolEntry, StoreError>;
     fn get_mempool_entries(
         &self,
-        txids: &Vec<Txid>,
-    ) -> Result<HashMap<Txid, Option<MempoolEntry>>, StoreError>;
+        txids: &[SerializedTxid],
+    ) -> Result<HashMap<SerializedTxid, Option<MempoolEntry>>, StoreError>;
     fn get_mempool_entries_with_ancestors(
         &self,
-        txids: &Vec<Txid>,
-    ) -> Result<HashMap<Txid, MempoolEntry>, StoreError>;
+        txids: &[SerializedTxid],
+    ) -> Result<HashMap<SerializedTxid, MempoolEntry>, StoreError>;
 
     // outpoint
     fn get_tx_out(
         &self,
-        outpoint: &OutPoint,
+        outpoint: &SerializedOutPoint,
         mempool: Option<bool>,
     ) -> Result<TxOutEntry, StoreError>;
+    fn get_all_tx_outs(
+        &self,
+        mempool: bool,
+    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>, StoreError>;
     fn get_tx_out_with_mempool_spent_update(
         &self,
-        outpoint: &OutPoint,
+        outpoint: &SerializedOutPoint,
         mempool: Option<bool>,
     ) -> Result<TxOutEntry, StoreError>;
     fn get_tx_outs(
         &self,
-        outpoints: &[OutPoint],
+        outpoints: &[SerializedOutPoint],
         mempool: Option<bool>,
-    ) -> Result<HashMap<OutPoint, TxOutEntry>, StoreError>;
+    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>, StoreError>;
     fn get_tx_outs_with_mempool_spent_update(
         &self,
-        outpoints: &Vec<OutPoint>,
+        outpoints: &[SerializedOutPoint],
         mempool: Option<bool>,
-    ) -> Result<HashMap<OutPoint, TxOutEntry>, StoreError>;
+    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>, StoreError>;
 
     // transaction changes
     fn get_tx_state_changes(
         &self,
-        txid: &Txid,
+        txid: &SerializedTxid,
         mempool: Option<bool>,
     ) -> Result<TransactionStateChange, StoreError>;
     fn get_txs_state_changes(
         &self,
-        txids: &Vec<Txid>,
+        txids: &[SerializedTxid],
         mempool: bool,
-    ) -> Result<HashMap<Txid, TransactionStateChange>, StoreError>;
+    ) -> Result<HashMap<SerializedTxid, TransactionStateChange>, StoreError>;
 
     // bitcoin transactions
     fn get_transaction_raw(
         &self,
-        txid: &Txid,
+        txid: &SerializedTxid,
         mempool: Option<bool>,
     ) -> Result<Vec<u8>, StoreError>;
     fn get_transaction(
         &self,
-        txid: &Txid,
+        txid: &SerializedTxid,
         mempool: Option<bool>,
     ) -> Result<Transaction, StoreError>;
-    fn get_transaction_confirming_block(&self, txid: &Txid) -> Result<BlockId, StoreError>;
+    fn get_transaction_confirming_block(
+        &self,
+        txid: &SerializedTxid,
+    ) -> Result<BlockId, StoreError>;
     fn get_transaction_confirming_blocks(
         &self,
-        txids: &Vec<Txid>,
-    ) -> Result<HashMap<Txid, Option<BlockId>>, StoreError>;
+        txids: &[SerializedTxid],
+    ) -> Result<HashMap<SerializedTxid, Option<BlockId>>, StoreError>;
     fn partition_transactions_by_existence(
         &self,
-        txids: &Vec<Txid>,
-    ) -> Result<(Vec<Txid>, Vec<Txid>), StoreError>;
+        txids: &Vec<SerializedTxid>,
+    ) -> Result<(Vec<SerializedTxid>, Vec<SerializedTxid>), StoreError>;
 
     // rune transactions
     fn get_last_rune_transactions(
@@ -135,7 +158,7 @@ pub trait Store {
         rune_id: &RuneId,
         pagination: Option<Pagination>,
         mempool: Option<bool>,
-    ) -> Result<PaginationResponse<Txid>, StoreError>;
+    ) -> Result<PaginationResponse<SerializedTxid>, StoreError>;
 
     // runes
     fn get_runes_count(&self) -> Result<u64, StoreError>;
@@ -158,13 +181,13 @@ pub trait Store {
         &self,
         script_pubkey: &ScriptBuf,
         mempool: Option<bool>,
-    ) -> Result<Vec<OutPoint>, StoreError>;
+    ) -> Result<Vec<SerializedOutPoint>, StoreError>;
     fn get_outpoints_to_script_pubkey(
         &self,
-        outpoints: &Vec<OutPoint>,
+        outpoints: &[SerializedOutPoint],
         mempool: Option<bool>,
         optimistic: bool,
-    ) -> Result<HashMap<OutPoint, ScriptBuf>, StoreError>;
+    ) -> Result<HashMap<SerializedOutPoint, ScriptBuf>, StoreError>;
 
     // batch
     fn batch_update(&self, update: &BatchUpdate, mempool: bool) -> Result<(), StoreError>;
@@ -210,12 +233,43 @@ impl Store for RocksDB {
         Ok(self.get_block_hash(height)?)
     }
 
+    fn get_block_hashes_by_height(
+        &self,
+        from_height: u64,
+        to_height: u64,
+    ) -> Result<Vec<BlockHash>, StoreError> {
+        Ok(self.get_block_hashes_by_height(from_height, to_height)?)
+    }
+
     fn delete_block_hash(&self, height: u64) -> Result<(), StoreError> {
         Ok(self.delete_block_hash(height)?)
     }
 
     fn get_block_by_hash(&self, hash: &BlockHash) -> Result<Block, StoreError> {
         Ok(self.get_block_by_hash(&hash)?)
+    }
+
+    fn get_blocks_by_hashes(
+        &self,
+        hashes: &Vec<BlockHash>,
+    ) -> Result<HashMap<BlockHash, Block>, StoreError> {
+        Ok(self.get_blocks_by_hashes(hashes)?)
+    }
+
+    fn get_blocks_by_heights(
+        &self,
+        from_height: u64,
+        to_height: u64,
+    ) -> Result<HashMap<u64, Block>, StoreError> {
+        let block_hashes = self.get_block_hashes_by_height(from_height, to_height)?;
+        let blocks = self.get_blocks_by_hashes(&block_hashes)?;
+        let mut result = HashMap::default();
+        for (_, block) in blocks {
+            let height = block.height;
+            result.insert(height, block);
+        }
+
+        Ok(result)
     }
 
     fn delete_block(&self, hash: &BlockHash) -> Result<(), StoreError> {
@@ -253,35 +307,35 @@ impl Store for RocksDB {
         })
     }
 
-    fn get_mempool_txids(&self) -> Result<HashMap<Txid, MempoolEntry>, StoreError> {
+    fn get_mempool_txids(&self) -> Result<HashMap<SerializedTxid, MempoolEntry>, StoreError> {
         Ok(self.get_mempool_txids()?)
     }
 
-    fn is_tx_in_mempool(&self, txid: &Txid) -> Result<bool, StoreError> {
+    fn is_tx_in_mempool(&self, txid: &SerializedTxid) -> Result<bool, StoreError> {
         Ok(self.is_tx_in_mempool(txid)?)
     }
 
-    fn get_mempool_entry(&self, txid: &Txid) -> Result<MempoolEntry, StoreError> {
+    fn get_mempool_entry(&self, txid: &SerializedTxid) -> Result<MempoolEntry, StoreError> {
         Ok(self.get_mempool_entry(txid)?)
     }
 
     fn get_mempool_entries(
         &self,
-        txids: &Vec<Txid>,
-    ) -> Result<HashMap<Txid, Option<MempoolEntry>>, StoreError> {
+        txids: &[SerializedTxid],
+    ) -> Result<HashMap<SerializedTxid, Option<MempoolEntry>>, StoreError> {
         Ok(self.get_mempool_entries(txids)?)
     }
 
     fn get_mempool_entries_with_ancestors(
         &self,
-        txids: &Vec<Txid>,
-    ) -> Result<HashMap<Txid, MempoolEntry>, StoreError> {
+        txids: &[SerializedTxid],
+    ) -> Result<HashMap<SerializedTxid, MempoolEntry>, StoreError> {
         Ok(self.get_mempool_entries_with_ancestors(txids)?)
     }
 
     fn get_tx_out(
         &self,
-        outpoint: &OutPoint,
+        outpoint: &SerializedOutPoint,
         mempool: Option<bool>,
     ) -> Result<TxOutEntry, StoreError> {
         if let Some(mempool) = mempool {
@@ -297,9 +351,16 @@ impl Store for RocksDB {
         }
     }
 
+    fn get_all_tx_outs(
+        &self,
+        mempool: bool,
+    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>, StoreError> {
+        Ok(self.get_all_tx_outs(mempool)?)
+    }
+
     fn get_tx_out_with_mempool_spent_update(
         &self,
-        outpoint: &OutPoint,
+        outpoint: &SerializedOutPoint,
         mempool: Option<bool>,
     ) -> Result<TxOutEntry, StoreError> {
         let mut tx_out = if let Some(mempool) = mempool {
@@ -314,7 +375,7 @@ impl Store for RocksDB {
             }
         };
 
-        let spent_outpoints: HashMap<OutPoint, Option<SpenderReference>> =
+        let spent_outpoints: HashMap<SerializedOutPoint, Option<SpenderReference>> =
             self.get_spent_outpoints_in_mempool(&vec![*outpoint])?;
 
         let spent_in_mempool = spent_outpoints.get(outpoint);
@@ -331,19 +392,19 @@ impl Store for RocksDB {
 
     fn get_tx_outs(
         &self,
-        outpoints: &[OutPoint],
+        outpoints: &[SerializedOutPoint],
         mempool: Option<bool>,
-    ) -> Result<HashMap<OutPoint, TxOutEntry>, StoreError> {
+    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>, StoreError> {
         Ok(self.get_tx_outs(outpoints, mempool)?)
     }
 
     fn get_tx_outs_with_mempool_spent_update(
         &self,
-        outpoints: &Vec<OutPoint>,
+        outpoints: &[SerializedOutPoint],
         mempool: Option<bool>,
-    ) -> Result<HashMap<OutPoint, TxOutEntry>, StoreError> {
+    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>, StoreError> {
         let mut tx_outs = self.get_tx_outs(outpoints, mempool)?;
-        let spent_outpoints: HashMap<OutPoint, Option<SpenderReference>> =
+        let spent_outpoints: HashMap<SerializedOutPoint, Option<SpenderReference>> =
             self.get_spent_outpoints_in_mempool(outpoints)?;
 
         for (outpoint, output) in tx_outs.iter_mut() {
@@ -362,7 +423,7 @@ impl Store for RocksDB {
 
     fn get_tx_state_changes(
         &self,
-        txid: &Txid,
+        txid: &SerializedTxid,
         mempool: Option<bool>,
     ) -> Result<TransactionStateChange, StoreError> {
         if let Some(mempool) = mempool {
@@ -380,15 +441,15 @@ impl Store for RocksDB {
 
     fn get_txs_state_changes(
         &self,
-        txids: &Vec<Txid>,
+        txids: &[SerializedTxid],
         mempool: bool,
-    ) -> Result<HashMap<Txid, TransactionStateChange>, StoreError> {
+    ) -> Result<HashMap<SerializedTxid, TransactionStateChange>, StoreError> {
         Ok(self.get_txs_state_changes(txids, mempool)?)
     }
 
     fn get_transaction(
         &self,
-        txid: &Txid,
+        txid: &SerializedTxid,
         mempool: Option<bool>,
     ) -> Result<Transaction, StoreError> {
         let (mut tx, mempool) = if let Some(mempool) = mempool {
@@ -438,11 +499,8 @@ impl Store for RocksDB {
             .output
             .iter()
             .enumerate()
-            .map(|(vout, _)| OutPoint {
-                txid: txid.clone(),
-                vout: vout as u32,
-            })
-            .collect();
+            .map(|(vout, _)| SerializedOutPoint::from_txid_vout(txid, vout as u32))
+            .collect::<Vec<_>>();
 
         let tx_outs = self.get_tx_outs_with_mempool_spent_update(&outpoints, Some(mempool))?;
 
@@ -461,7 +519,7 @@ impl Store for RocksDB {
 
     fn get_transaction_raw(
         &self,
-        txid: &Txid,
+        txid: &SerializedTxid,
         mempool: Option<bool>,
     ) -> Result<Vec<u8>, StoreError> {
         if let Some(mempool) = mempool {
@@ -479,19 +537,22 @@ impl Store for RocksDB {
 
     fn partition_transactions_by_existence(
         &self,
-        txids: &Vec<Txid>,
-    ) -> Result<(Vec<Txid>, Vec<Txid>), StoreError> {
+        txids: &Vec<SerializedTxid>,
+    ) -> Result<(Vec<SerializedTxid>, Vec<SerializedTxid>), StoreError> {
         Ok(self.partition_transactions_by_existence(txids)?)
     }
 
-    fn get_transaction_confirming_block(&self, txid: &Txid) -> Result<BlockId, StoreError> {
+    fn get_transaction_confirming_block(
+        &self,
+        txid: &SerializedTxid,
+    ) -> Result<BlockId, StoreError> {
         Ok(self.get_transaction_confirming_block(txid)?)
     }
 
     fn get_transaction_confirming_blocks(
         &self,
-        txids: &Vec<Txid>,
-    ) -> Result<HashMap<Txid, Option<BlockId>>, StoreError> {
+        txids: &[SerializedTxid],
+    ) -> Result<HashMap<SerializedTxid, Option<BlockId>>, StoreError> {
         Ok(self.get_transaction_confirming_blocks(txids)?)
     }
 
@@ -516,7 +577,7 @@ impl Store for RocksDB {
         rune_id: &RuneId,
         pagination: Option<Pagination>,
         mempool: Option<bool>,
-    ) -> Result<PaginationResponse<Txid>, StoreError> {
+    ) -> Result<PaginationResponse<SerializedTxid>, StoreError> {
         if let Some(mempool) = mempool {
             Ok(self.get_last_rune_transactions(rune_id, pagination, mempool)?)
         } else {
@@ -558,7 +619,7 @@ impl Store for RocksDB {
         &self,
         script_pubkey: &ScriptBuf,
         mempool: Option<bool>,
-    ) -> Result<Vec<OutPoint>, StoreError> {
+    ) -> Result<Vec<SerializedOutPoint>, StoreError> {
         if let Some(mempool) = mempool {
             Ok(self.get_script_pubkey_outpoints(script_pubkey, mempool)?)
         } else {
@@ -584,10 +645,10 @@ impl Store for RocksDB {
 
     fn get_outpoints_to_script_pubkey(
         &self,
-        outpoints: &Vec<OutPoint>,
+        outpoints: &[SerializedOutPoint],
         mempool: Option<bool>,
         optimistic: bool,
-    ) -> Result<HashMap<OutPoint, ScriptBuf>, StoreError> {
+    ) -> Result<HashMap<SerializedOutPoint, ScriptBuf>, StoreError> {
         let script_pubkeys = if let Some(mempool) = mempool {
             self.get_outpoints_to_script_pubkey(outpoints, mempool, optimistic)?
         } else {
@@ -598,7 +659,7 @@ impl Store for RocksDB {
                 .iter()
                 .filter(|outpoint| !ledger_script_pubkeys.contains_key(outpoint))
                 .cloned()
-                .collect();
+                .collect::<Vec<_>>();
 
             let mempool_script_pubkeys =
                 self.get_outpoints_to_script_pubkey(&remaining_outpoints, true, optimistic)?;

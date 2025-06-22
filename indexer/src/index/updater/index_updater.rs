@@ -5,29 +5,34 @@ use {
     },
     crate::{
         bitcoin_rpc::{RpcClientError, RpcClientPool, RpcClientPoolError},
-        index::{metrics::Metrics, store::Store, Settings, StoreError},
+        index::{
+            metrics::Metrics,
+            store::Store,
+            updater::{
+                cache::{BlockCache, BlockCacheSettings, MempoolCache, MempoolCacheSettings},
+                events::Events,
+                transaction::{TransactionParser, TransactionUpdater},
+            },
+            Settings, StoreError,
+        },
         models::{BlockId, RuneEntry},
     },
-    address::AddressUpdater,
     bitcoin::{
-        constants::SUBSIDY_HALVING_INTERVAL, hashes::Hash, hex::HexToArrayError,
-        Block as BitcoinBlock, Transaction, Txid,
+        constants::SUBSIDY_HALVING_INTERVAL, hex::HexToArrayError, Block as BitcoinBlock,
+        Transaction, Txid,
     },
     bitcoincore_rpc::{
         json::{GetBlockchainInfoResult, GetMempoolEntryResult},
         Client, RpcApi,
     },
-    block_fetcher::{fetch_blocks_from, FetchConfig},
-    cache::{UpdaterCache, UpdaterCacheSettings},
+    fetcher::{block_fetcher::fetch_blocks_from, mempool_fetcher::MempoolError},
     indicatif::{ProgressBar, ProgressStyle},
-    mempool::MempoolError,
     ordinals::{Rune, RuneId, SpacedRune, Terms},
     prometheus::HistogramVec,
     rollback::{Rollback, RollbackError},
+    rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet},
     std::{
-        collections::{HashMap, HashSet},
         fmt::{self, Display, Formatter},
-        str::FromStr,
         sync::{
             atomic::{AtomicBool, Ordering},
             Arc, Mutex, RwLock,
@@ -36,11 +41,9 @@ use {
     },
     store_lock::StoreWithLock,
     thiserror::Error,
-    titan_types::{Block, Event, MempoolEntry},
+    titan_types::{Block, Event, MempoolEntry, SerializedTxid},
     tokio::sync::mpsc::{error::SendError, Sender},
     tracing::{debug, error, info, warn},
-    transaction_parser::TransactionParser,
-    transaction_updater::TransactionUpdater,
 };
 
 #[derive(Debug, Error)]
@@ -106,9 +109,9 @@ pub struct Updater {
     shutdown_flag: Arc<AtomicBool>,
 
     broadcast_lock: Mutex<()>,
-    pre_index_submitted_txs: RwLock<HashSet<Txid>>,
+    pre_index_submitted_txs: RwLock<HashSet<SerializedTxid>>,
 
-    zmq_received_txs: RwLock<HashMap<Txid, Transaction>>,
+    zmq_received_txs: RwLock<HashMap<SerializedTxid, Transaction>>,
 
     transaction_update: RwLock<TransactionUpdate>,
 
@@ -133,8 +136,8 @@ impl Updater {
             bitcoin_rpc_pool,
             is_at_tip: AtomicBool::new(false),
             broadcast_lock: Mutex::new(()),
-            pre_index_submitted_txs: RwLock::new(HashSet::new()),
-            zmq_received_txs: RwLock::new(HashMap::new()),
+            pre_index_submitted_txs: RwLock::new(HashSet::default()),
+            zmq_received_txs: RwLock::new(HashMap::default()),
             shutdown_flag,
             transaction_update: RwLock::new(TransactionUpdate::default()),
             sender,
@@ -151,7 +154,7 @@ impl Updater {
 
     fn is_chain_synced(
         &self,
-        cache: &mut UpdaterCache,
+        cache: &mut BlockCache,
         chain_info: &GetBlockchainInfoResult,
     ) -> Result<bool> {
         if cache.get_block_height_tip() != chain_info.blocks {
@@ -180,17 +183,14 @@ impl Updater {
 
         // Every 5000 blocks, commit the changes to the database
         let commit_interval = self.settings.commit_interval as usize;
-        let mut address_updater = AddressUpdater::new();
-        let mut cache = UpdaterCache::new(
-            self.db.clone(),
-            UpdaterCacheSettings::new(&self.settings, false),
-        )?;
+        let mut cache = BlockCache::new(self.db.clone(), BlockCacheSettings::new(&self.settings))?;
+        let mut events = Events::new();
 
         // Get RPC client and get block height
         let bitcoin_block_client = self.bitcoin_rpc_pool.get()?;
         let mut chain_info = bitcoin_block_client.get_blockchain_info()?;
 
-        let mut first_block = true;
+        let mut indexing_first_block = true;
 
         // Fetch new blocks if needed.
         while !self.is_chain_synced(&mut cache, &chain_info)? {
@@ -202,16 +202,18 @@ impl Updater {
 
             let current_block_count = cache.get_block_count();
 
-            let rx = fetch_blocks_from(
+            let (rx, block_fetch_stats) = fetch_blocks_from(
                 self.bitcoin_rpc_pool.clone(),
                 current_block_count,
                 chain_info.blocks + 1,
-                FetchConfig::default(),
             )?;
 
             let rpc_client = self.bitcoin_rpc_pool.get()?;
 
             while let Ok(block) = rx.recv() {
+                // We have consumed a block from the final channel, reflect that in the stats
+                block_fetch_stats.decrement_final();
+
                 let _timer = self
                     .latency
                     .with_label_values(&["full_block_indexing"])
@@ -222,7 +224,7 @@ impl Updater {
                     break;
                 }
 
-                if was_at_tip || first_block {
+                if was_at_tip || indexing_first_block {
                     match self.detect_reorg(
                         &block,
                         cache.get_block_count(),
@@ -233,7 +235,10 @@ impl Updater {
                         Err(ReorgError::Recoverable { height, depth }) => {
                             self.handle_reorg(height, depth)?;
                             if let Some(sender) = &self.sender {
-                                sender.blocking_send(Event::Reorg { height, depth })?;
+                                if let Err(e) = sender.blocking_send(Event::Reorg { height, depth })
+                                {
+                                    error!("Failed to send reorg event: {:?}", e);
+                                }
                             }
                             return Err(ReorgError::Recoverable { height, depth }.into());
                         }
@@ -248,10 +253,10 @@ impl Updater {
                     cache.get_block_count() as u64,
                     &rpc_client,
                     &mut cache,
-                    &mut address_updater,
+                    &mut events,
                 )?;
 
-                cache.add_event(Event::NewBlock {
+                events.add_event(Event::NewBlock {
                     block_height: cache.get_block_count(),
                     block_hash: block.header.block_hash(),
                 });
@@ -259,25 +264,25 @@ impl Updater {
                 cache.set_new_block(block);
 
                 if cache.should_flush(commit_interval) {
-                    if self.settings.index_addresses {
-                        let _timer = self
-                            .latency
-                            .with_label_values(&["batch_update_script_pubkeys_for_commit"])
-                            .start_timer();
-                        address_updater.batch_update_script_pubkey(&mut cache)?;
-                    }
+                    info!("Flushing cache");
 
                     let _timer = self
                         .latency
                         .with_label_values(&["flush_cache"])
                         .start_timer();
 
-                    cache.add_address_events(self.settings.chain);
-                    cache.flush(false)?;
-                    cache.send_events(&self.sender)?;
+                    cache.add_address_events(&mut events, self.settings.chain);
+                    cache.flush()?;
+
+                    // Ignore errors from sending events.
+                    if let Err(e) = events.send_events(&self.sender) {
+                        if !self.shutdown_flag.load(Ordering::SeqCst) {
+                            error!("Failed to send events: {:?}", e);
+                        }
+                    }
                 }
 
-                first_block = false;
+                indexing_first_block = false;
                 progress_bar.inc(1);
 
                 if chain_info.blocks - cache.get_block_height_tip()
@@ -298,19 +303,20 @@ impl Updater {
             progress_bar.finish_and_clear();
         }
 
-        // Flush the cache to the database
-        if self.settings.index_addresses {
-            let _timer = self
-                .latency
-                .with_label_values(&["batch_update_script_pubkeys_for_block"])
-                .start_timer();
+        if !indexing_first_block {
+            info!("Flushing cache");
 
-            address_updater.batch_update_script_pubkey(&mut cache)?;
+            if self.settings.index_addresses {
+                cache.add_address_events(&mut events, self.settings.chain);
+            }
+
+            cache.flush()?;
+            if let Err(e) = events.send_events(&self.sender) {
+                if !self.shutdown_flag.load(Ordering::SeqCst) {
+                    error!("Failed to send events: {:?}", e);
+                }
+            }
         }
-
-        cache.add_address_events(self.settings.chain);
-        cache.flush(true)?;
-        cache.send_events(&self.sender)?;
 
         if !self.shutdown_flag.load(Ordering::SeqCst) {
             // Check if this is the first time we are at tip.
@@ -338,48 +344,52 @@ impl Updater {
 
         // Get current mempool transactions
         let lock = self.broadcast_lock.lock().unwrap();
-        let current_mempool = client.get_raw_mempool_verbose()?;
+        let current_mempool = {
+            let current_mempool = client.get_raw_mempool_verbose()?;
+            current_mempool
+                .into_iter()
+                .map(|(txid, mempool_entry)| (txid.into(), mempool_entry))
+                .collect::<HashMap<SerializedTxid, GetMempoolEntryResult>>()
+        };
 
         // Get our previously indexed mempool transactions
         let stored_mempool = {
             let db = self.db.read();
             db.get_mempool_txids()?
         };
+
         drop(lock);
 
         // Find new transactions to index
-        let (new_txs, new_txs_with_mempool_entry): (Vec<Txid>, Vec<(Txid, MempoolEntry)>) =
-            current_mempool
-                .iter()
-                .filter(|(txid, _)| !stored_mempool.contains_key(*txid))
-                .map(|(txid, mempool_entry)| {
-                    (
-                        txid.clone(),
-                        (txid.clone(), MempoolEntry::from(mempool_entry)),
-                    )
-                })
-                .unzip();
+        let (new_txs, new_txs_with_mempool_entry): (
+            Vec<SerializedTxid>,
+            Vec<(SerializedTxid, MempoolEntry)>,
+        ) = current_mempool
+            .iter()
+            .filter(|(txid, _)| !stored_mempool.contains_key(&txid))
+            .map(|(txid, mempool_entry)| (*txid, (*txid, MempoolEntry::from(mempool_entry))))
+            .unzip();
 
         // Find transactions to remove (they're no longer in mempool)
-        let removed_txs: Vec<Txid> = stored_mempool
+        let removed_txs: Vec<SerializedTxid> = stored_mempool
             .keys()
-            .filter(|txid| !current_mempool.contains_key(*txid))
+            .filter(|txid| !current_mempool.contains_key(txid))
             .cloned()
             .collect();
 
         // Index new transactions
         let new_txs_len = new_txs.len();
 
-        let mut cache = UpdaterCache::new(
-            self.db.clone(),
-            UpdaterCacheSettings::new(&self.settings, true),
-        )?;
+        let mut cache =
+            MempoolCache::new(self.db.clone(), MempoolCacheSettings::new(&self.settings))?;
+
+        let mut events = Events::new();
 
         let updated_txids =
             self.update_mempool_entries(&mut cache, &stored_mempool, &current_mempool);
 
         self.send_mempool_events(
-            &mut cache,
+            &mut events,
             new_txs_with_mempool_entry,
             removed_txs.clone(),
             updated_txids,
@@ -388,32 +398,35 @@ impl Updater {
         if new_txs_len > 0 {
             let tx_map = self.choose_mempool_transactions_to_index(&new_txs)?;
 
-            let tx_order = mempool::sort_transaction_order(&current_mempool, &tx_map)?;
-
-            let mut address_updater = AddressUpdater::new();
+            let tx_order =
+                fetcher::mempool_fetcher::sort_transaction_order(&current_mempool, &tx_map)?;
 
             // Store mempool entries for new transactions
             for txid in &tx_order {
                 let tx = tx_map.get(txid).unwrap();
                 let mempool_entry = current_mempool.get(txid).unwrap();
+
                 self.index_tx(
                     txid,
                     tx,
-                    Some(MempoolEntry::from(mempool_entry)),
+                    MempoolEntry::from(mempool_entry),
                     &mut cache,
-                    Some(&mut address_updater),
+                    &mut events,
                 )?;
             }
 
             if self.settings.index_addresses {
-                address_updater.batch_update_script_pubkey(&mut cache)?;
+                cache.add_address_events(&mut events, self.settings.chain);
             }
-
-            cache.add_address_events(self.settings.chain);
         }
 
-        cache.flush(true)?;
-        cache.send_events(&self.sender)?;
+        cache.flush()?;
+
+        if let Err(e) = events.send_events(&self.sender) {
+            if !self.shutdown_flag.load(Ordering::SeqCst) {
+                error!("Failed to send events: {:?}", e);
+            }
+        }
 
         let removed_len = removed_txs.len();
         if removed_txs.len() > 0 {
@@ -445,10 +458,10 @@ impl Updater {
 
     fn update_mempool_entries(
         &self,
-        cache: &mut UpdaterCache,
-        stored_mempool: &HashMap<Txid, MempoolEntry>,
-        current_mempool: &HashMap<Txid, GetMempoolEntryResult>,
-    ) -> Vec<(Txid, MempoolEntry)> {
+        cache: &mut MempoolCache,
+        stored_mempool: &HashMap<SerializedTxid, MempoolEntry>,
+        current_mempool: &HashMap<SerializedTxid, GetMempoolEntryResult>,
+    ) -> Vec<(SerializedTxid, MempoolEntry)> {
         let mut updated_txids = Vec::new();
         for (stored_txid, stored_mempool_entry) in stored_mempool {
             if let Some(mempool_entry_result) = current_mempool.get(stored_txid) {
@@ -466,23 +479,23 @@ impl Updater {
 
     fn send_mempool_events(
         &self,
-        cache: &mut UpdaterCache,
-        new_txids: Vec<(Txid, MempoolEntry)>,
-        removed_txids: Vec<Txid>,
-        updated_txids: Vec<(Txid, MempoolEntry)>,
+        events: &mut Events,
+        new_txids: Vec<(SerializedTxid, MempoolEntry)>,
+        removed_txids: Vec<SerializedTxid>,
+        updated_txids: Vec<(SerializedTxid, MempoolEntry)>,
     ) -> Result<()> {
         if !new_txids.is_empty() {
-            cache.add_event(Event::MempoolTransactionsAdded { txids: new_txids });
+            events.add_event(Event::MempoolTransactionsAdded { txids: new_txids });
         }
 
         if !removed_txids.is_empty() {
-            cache.add_event(Event::MempoolTransactionsReplaced {
+            events.add_event(Event::MempoolTransactionsReplaced {
                 txids: removed_txids,
             });
         }
 
         if !updated_txids.is_empty() {
-            cache.add_event(Event::MempoolEntriesUpdated {
+            events.add_event(Event::MempoolEntriesUpdated {
                 txids: updated_txids,
             });
         }
@@ -492,8 +505,8 @@ impl Updater {
 
     fn choose_mempool_transactions_to_index(
         &self,
-        new_txs: &Vec<Txid>,
-    ) -> Result<HashMap<Txid, Transaction>> {
+        new_txs: &Vec<SerializedTxid>,
+    ) -> Result<HashMap<SerializedTxid, Transaction>> {
         // Filter out pre-indexed transactions
         let new_txs = {
             let pre_indexed_txs = self
@@ -521,7 +534,7 @@ impl Updater {
         };
 
         // Partition the new transactions into those that we already have and those that we need to fetch.
-        let (to_index, to_fetch): (Vec<Txid>, Vec<Txid>) = new_txs
+        let (to_index, to_fetch): (Vec<SerializedTxid>, Vec<SerializedTxid>) = new_txs
             .iter()
             .partition(|txid| zmq_txns.contains_key(*txid));
 
@@ -532,7 +545,7 @@ impl Updater {
 
         // Fetch the transactions that we need to index.
         if !to_fetch.is_empty() {
-            let fetched = mempool::fetch_transactions(
+            let fetched = fetcher::mempool_fetcher::fetch_transactions(
                 self.bitcoin_rpc_pool.clone(),
                 &to_fetch,
                 self.shutdown_flag.clone(),
@@ -550,23 +563,13 @@ impl Updater {
         bitcoin_block: BitcoinBlock,
         height: u64,
         rpc_client: &Client,
-        cache: &mut UpdaterCache,
-        address_updater: &mut AddressUpdater,
+        cache: &mut BlockCache,
+        events: &mut Events,
     ) -> Result<Block> {
-        // Fast-path: reserve space in the hottest HashMaps for this block so we
-        // avoid repeated reallocations when pushing thousands of entries.
-        let tx_count = bitcoin_block.txdata.len();
-        let outputs: usize = bitcoin_block.txdata.iter().map(|tx| tx.output.len()).sum();
-
-        cache.reserve_tx_state_changes(tx_count);
-        cache.reserve_txouts(outputs);
-
         let _timer = self
             .latency
             .with_label_values(&["index_block"])
             .start_timer();
-
-        cache.precache_tx_outs(&bitcoin_block.txdata)?;
 
         let mut transaction_parser =
             TransactionParser::new(&rpc_client, self.settings.chain, height, false)?;
@@ -579,8 +582,7 @@ impl Updater {
             .with_label_values(&["parse_block&index_block_txs"])
             .start_timer();
 
-        let mut transaction_updater =
-            TransactionUpdater::new(self.settings.clone().into(), Some(address_updater))?;
+        let mut transaction_updater = TransactionUpdater::new(self.settings.clone().into(), false)?;
 
         let mut block = Block::empty_block(height, bitcoin_block.header);
 
@@ -590,12 +592,13 @@ impl Updater {
             .map_err(|_| UpdaterError::Mutex)?;
 
         for (i, tx) in bitcoin_block.txdata.iter().enumerate() {
-            let txid = tx.compute_txid();
+            let txid = tx.compute_txid().into();
             match transaction_parser.parse(cache, u32::try_from(i).unwrap(), tx) {
                 Ok(result) => {
                     debug!("Indexing tx {} in block {}", txid, block_height);
                     transaction_updater.save(
                         cache,
+                        events,
                         block_header.time,
                         Some(BlockId {
                             hash: bitcoin_block.header.block_hash(),
@@ -604,9 +607,8 @@ impl Updater {
                         txid,
                         &bitcoin_block.txdata[i],
                         &result,
-                        None,
                     )?;
-                    block.tx_ids.push(txid.to_string());
+                    block.tx_ids.push(txid);
                     transaction_update.add_block_tx(txid);
                     if let Some((id, ..)) = result.etched {
                         block.etched_runes.push(id);
@@ -621,7 +623,7 @@ impl Updater {
         Ok(block)
     }
 
-    pub fn pre_index_new_submitted_transaction(&self, txid: &Txid) -> Result<()> {
+    pub fn pre_index_new_submitted_transaction(&self, txid: &SerializedTxid) -> Result<()> {
         let mut pre_index_submitted_txs = self
             .pre_index_submitted_txs
             .write()
@@ -630,7 +632,7 @@ impl Updater {
         Ok(())
     }
 
-    pub fn remove_pre_index_new_submitted_transaction(&self, txid: &Txid) -> Result<()> {
+    pub fn remove_pre_index_new_submitted_transaction(&self, txid: &SerializedTxid) -> Result<()> {
         let mut pre_index_submitted_txs = self
             .pre_index_submitted_txs
             .write()
@@ -641,44 +643,38 @@ impl Updater {
 
     pub fn index_new_submitted_tx(
         &self,
-        txid: &Txid,
+        txid: &SerializedTxid,
         tx: &Transaction,
         mempool_entry: MempoolEntry,
     ) -> Result<()> {
-        let mut cache = UpdaterCache::new(
-            self.db.clone(),
-            UpdaterCacheSettings::new(&self.settings, true),
-        )?;
-
-        let mut address_updater = AddressUpdater::new();
+        let mut cache =
+            MempoolCache::new(self.db.clone(), MempoolCacheSettings::new(&self.settings))?;
+        let mut events = Events::new();
 
         let _lock = self.broadcast_lock.lock().unwrap();
-        if self.index_tx(
-            txid,
-            tx,
-            Some(mempool_entry.clone()),
-            &mut cache,
-            Some(&mut address_updater),
-        )? {
-            cache.add_event(Event::TransactionSubmitted {
+        if self.index_tx(txid, tx, mempool_entry.clone(), &mut cache, &mut events)? {
+            events.add_event(Event::TransactionSubmitted {
                 txid: *txid,
                 entry: mempool_entry,
             });
 
             if self.settings.index_addresses {
-                address_updater.batch_update_script_pubkey(&mut cache)?;
+                cache.add_address_events(&mut events, self.settings.chain);
             }
 
-            cache.add_address_events(self.settings.chain);
-            cache.flush(true)?;
-            cache.send_events(&self.sender)?;
+            cache.flush()?;
+            if let Err(e) = events.send_events(&self.sender) {
+                if !self.shutdown_flag.load(Ordering::SeqCst) {
+                    error!("Failed to send events: {:?}", e);
+                }
+            }
         }
 
         self.remove_pre_index_new_submitted_transaction(&txid)?;
         Ok(())
     }
 
-    pub fn index_zmq_tx(&self, txid: Txid, tx: Transaction) -> Result<()> {
+    pub fn index_zmq_tx(&self, txid: SerializedTxid, tx: Transaction) -> Result<()> {
         self.zmq_received_txs
             .write()
             .map_err(|_| UpdaterError::Mutex)?
@@ -688,22 +684,14 @@ impl Updater {
 
     fn index_tx(
         &self,
-        txid: &Txid,
+        txid: &SerializedTxid,
         tx: &Transaction,
-        mempool_entry: Option<MempoolEntry>,
-        cache: &mut UpdaterCache,
-        address_updater: Option<&mut AddressUpdater>,
+        mempool_entry: MempoolEntry,
+        cache: &mut MempoolCache,
+        events: &mut Events,
     ) -> Result<bool> {
         if cache.does_tx_exist(*txid)? {
-            debug!(
-                "Skipping tx {} in {} because it already exists",
-                txid,
-                if cache.settings.mempool {
-                    "mempool"
-                } else {
-                    "block"
-                }
-            );
+            debug!("Skipping tx {} in mempool because it already exists", txid);
             return Ok(false);
         }
 
@@ -722,17 +710,15 @@ impl Updater {
         let result = transaction_parser.parse(cache, 0, tx)?;
         info!("Indexing tx {}", txid);
 
-        // Create a TransactionUpdater that references the optional address_updater
-        let mut transaction_updater =
-            TransactionUpdater::new(self.settings.clone().into(), address_updater)?;
+        let mut transaction_updater = TransactionUpdater::new(self.settings.clone().into(), true)?;
+        transaction_updater.save(cache, events, now as u32, None, *txid, tx, &result)?;
 
-        // The same "save" logic as before
-        transaction_updater.save(cache, now as u32, None, *txid, tx, &result, mempool_entry)?;
+        cache.set_mempool_tx(*txid, mempool_entry);
 
         Ok(true)
     }
 
-    fn remove_txs(&self, txids: &Vec<Txid>, mempool: bool) -> Result<()> {
+    fn remove_txs(&self, txids: &Vec<SerializedTxid>, mempool: bool) -> Result<()> {
         let db = self.db.write();
         let mut rollback_updater = Rollback::new(&db, self.settings.clone().into(), mempool)?;
         rollback_updater.revert_transactions(txids)?;
@@ -823,13 +809,7 @@ impl Updater {
 
         let mut rollback_updater = Rollback::new(&db, self.settings.clone().into(), false)?;
 
-        let txids = block
-            .tx_ids
-            .iter()
-            .map(|txid| Txid::from_str(txid).unwrap())
-            .collect::<Vec<_>>();
-
-        rollback_updater.revert_transactions(&txids)?;
+        rollback_updater.revert_transactions(&block.tx_ids)?;
 
         {
             let mut transaction_update = self
@@ -837,7 +817,7 @@ impl Updater {
                 .write()
                 .map_err(|_| UpdaterError::Mutex)?;
 
-            for txid in txids.iter().rev() {
+            for txid in block.tx_ids.iter().rev() {
                 transaction_update.remove_block_tx(*txid);
             }
         }
@@ -922,7 +902,7 @@ impl Updater {
         let rune = Rune(2055900680524219742);
 
         let id = RuneId { block: 1, tx: 0 };
-        let etching = Txid::all_zeros();
+        let etching = SerializedTxid::all_zeros();
 
         let rune = RuneEntry {
             block: id.block,

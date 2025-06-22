@@ -4,5 +4,5 @@ mod entry;
 mod error;
 mod mapper;
 mod rocks;
-mod util;
+pub mod util;
 mod wrapper;

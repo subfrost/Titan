@@ -7,7 +7,7 @@ use {
     std::io::{Read, Result, Write},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransactionStatus {
     pub confirmed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -67,7 +67,7 @@ impl From<(bitcoin::Transaction, TransactionStatus)> for Transaction {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TxOut {
     pub value: u64,
     pub script_pubkey: ScriptBuf,

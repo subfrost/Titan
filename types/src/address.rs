@@ -1,6 +1,8 @@
 use {
-    crate::{transaction::TransactionStatus, RuneAmount, SpentStatus, TxOutEntry},
-    bitcoin::{OutPoint, Txid},
+    crate::{
+        transaction::TransactionStatus, RuneAmount, SerializedOutPoint, SpentStatus, TxOutEntry,
+    },
+    bitcoin::Txid,
     serde::{Deserialize, Serialize},
 };
 
@@ -22,11 +24,13 @@ pub struct AddressTxOut {
     pub status: TransactionStatus,
 }
 
-impl From<(OutPoint, TxOutEntry, TransactionStatus)> for AddressTxOut {
-    fn from((outpoint, tx_out, status): (OutPoint, TxOutEntry, TransactionStatus)) -> Self {
+impl From<(SerializedOutPoint, TxOutEntry, TransactionStatus)> for AddressTxOut {
+    fn from(
+        (outpoint, tx_out, status): (SerializedOutPoint, TxOutEntry, TransactionStatus),
+    ) -> Self {
         Self {
-            txid: outpoint.txid,
-            vout: outpoint.vout,
+            txid: outpoint.to_txid(),
+            vout: outpoint.vout(),
             value: tx_out.value,
             runes: tx_out.runes,
             risky_runes: tx_out.risky_runes,

@@ -1,6 +1,6 @@
 use {
-    crate::MempoolEntry,
-    bitcoin::{BlockHash, OutPoint, Txid},
+    crate::{MempoolEntry, SerializedOutPoint, SerializedTxid},
+    bitcoin::BlockHash,
     borsh::{BorshDeserialize, BorshSerialize},
     ordinals::RuneId,
     serde::{Deserialize, Serialize},
@@ -116,49 +116,49 @@ pub enum Event {
     RuneEtched {
         location: Location,
         rune_id: RuneId,
-        txid: Txid,
+        txid: SerializedTxid,
     },
     RuneBurned {
         amount: u128,
         location: Location,
         rune_id: RuneId,
-        txid: Txid,
+        txid: SerializedTxid,
     },
     RuneMinted {
         amount: u128,
         location: Location,
         rune_id: RuneId,
-        txid: Txid,
+        txid: SerializedTxid,
     },
     RuneTransferred {
         amount: u128,
         location: Location,
-        outpoint: OutPoint,
+        outpoint: SerializedOutPoint,
         rune_id: RuneId,
-        txid: Txid,
+        txid: SerializedTxid,
     },
     AddressModified {
         address: String,
         location: Location,
     },
     TransactionSubmitted {
-        txid: Txid,
+        txid: SerializedTxid,
         entry: MempoolEntry,
     },
     TransactionsAdded {
-        txids: Vec<Txid>,
+        txids: Vec<SerializedTxid>,
     },
     TransactionsReplaced {
-        txids: Vec<Txid>,
+        txids: Vec<SerializedTxid>,
     },
     MempoolTransactionsAdded {
-        txids: Vec<(Txid, MempoolEntry)>,
+        txids: Vec<(SerializedTxid, MempoolEntry)>,
     },
     MempoolTransactionsReplaced {
-        txids: Vec<Txid>,
+        txids: Vec<SerializedTxid>,
     },
     MempoolEntriesUpdated {
-        txids: Vec<(Txid, MempoolEntry)>,
+        txids: Vec<(SerializedTxid, MempoolEntry)>,
     },
     NewBlock {
         block_hash: BlockHash,

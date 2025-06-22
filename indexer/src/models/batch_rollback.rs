@@ -1,35 +1,36 @@
 use {
     super::RuneEntry,
-    bitcoin::{OutPoint, ScriptBuf, Txid},
+    bitcoin::ScriptBuf,
     ordinals::{Rune, RuneId},
-    std::{collections::HashMap, fmt::Display},
-    titan_types::{InscriptionId, TxOutEntry},
+    rustc_hash::FxHashMap as HashMap,
+    std::fmt::Display,
+    titan_types::{InscriptionId, SerializedOutPoint, SerializedTxid, TxOutEntry},
 };
 
 pub struct BatchRollback {
     pub runes_count: u64,
 
     pub rune_entry: HashMap<RuneId, RuneEntry>,
-    pub txouts: HashMap<OutPoint, TxOutEntry>,
-    pub script_pubkey_entry: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)>,
+    pub txouts: HashMap<SerializedOutPoint, TxOutEntry>,
+    pub script_pubkey_entry: HashMap<ScriptBuf, (Vec<SerializedOutPoint>, Vec<SerializedOutPoint>)>,
 
-    pub outpoints_to_delete: Vec<OutPoint>,
-    pub prev_outpoints_to_delete: Vec<OutPoint>,
+    pub outpoints_to_delete: Vec<SerializedOutPoint>,
+    pub prev_outpoints_to_delete: Vec<SerializedOutPoint>,
     pub runes_to_delete: Vec<RuneId>,
     pub runes_ids_to_delete: Vec<Rune>,
     pub rune_numbers_to_delete: Vec<u64>,
     pub inscriptions_to_delete: Vec<InscriptionId>,
     pub delete_all_rune_transactions: Vec<RuneId>,
-    pub txs_to_delete: Vec<Txid>,
+    pub txs_to_delete: Vec<SerializedTxid>,
 }
 
 impl BatchRollback {
     pub fn new(runes_count: u64) -> Self {
         Self {
             runes_count,
-            rune_entry: HashMap::new(),
-            txouts: HashMap::new(),
-            script_pubkey_entry: HashMap::new(),
+            rune_entry: HashMap::default(),
+            txouts: HashMap::default(),
+            script_pubkey_entry: HashMap::default(),
             outpoints_to_delete: Vec::new(),
             prev_outpoints_to_delete: Vec::new(),
             runes_to_delete: Vec::new(),

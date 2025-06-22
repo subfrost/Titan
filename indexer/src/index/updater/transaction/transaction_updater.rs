@@ -1,16 +1,19 @@
 use {
-    super::{address::AddressUpdater, cache::UpdaterCache},
+    super::TransactionStore,
     crate::{
         index::{inscription::index_rune_icon, Settings, StoreError},
         models::{BlockId, RuneEntry, TransactionStateChange},
     },
-    bitcoin::{OutPoint, Transaction, Txid},
+    bitcoin::Transaction,
     ordinals::{Artifact, Etching, Rune, RuneId, Runestone, SpacedRune},
-    std::sync::Arc,
     thiserror::Error,
-    titan_types::{Event, MempoolEntry, SpenderReference, SpentStatus, TxOutEntry},
+    titan_types::{Event, SerializedOutPoint, SerializedTxid, SpenderReference, TxOutEntry},
     tokio::sync::mpsc::error::SendError,
 };
+
+pub trait TransactionEventMgr {
+    fn add_event(&mut self, event: Event);
+}
 
 #[derive(Debug, Error)]
 pub enum TransactionUpdaterError {
@@ -25,7 +28,7 @@ pub enum TransactionUpdaterError {
 type Result<T> = std::result::Result<T, TransactionUpdaterError>;
 
 #[derive(Debug)]
-pub(super) struct TransactionUpdaterSettings {
+pub struct TransactionUpdaterSettings {
     pub(super) index_addresses: bool,
     pub(super) index_bitcoin_transactions: bool,
 }
@@ -39,35 +42,30 @@ impl From<Settings> for TransactionUpdaterSettings {
     }
 }
 
-pub(super) struct TransactionUpdater<'a> {
-    pub(super) address_updater: Option<&'a mut AddressUpdater>,
+pub struct TransactionUpdater {
     pub(super) settings: TransactionUpdaterSettings,
+    pub(super) mempool: bool,
 }
 
-impl<'a> TransactionUpdater<'a> {
-    pub(super) fn new(
-        settings: TransactionUpdaterSettings,
-        address_updater: Option<&'a mut AddressUpdater>,
-    ) -> Result<Self> {
-        Ok(Self {
-            address_updater,
-            settings,
-        })
+impl TransactionUpdater {
+    pub fn new(settings: TransactionUpdaterSettings, mempool: bool) -> Result<Self> {
+        Ok(Self { settings, mempool })
     }
 
-    pub(super) fn save(
+    pub fn save(
         &mut self,
-        cache: &mut UpdaterCache,
+        store: &mut dyn TransactionStore,
+        events: &mut dyn TransactionEventMgr,
         block_time: u32,
         block_id: Option<BlockId>,
-        txid: Txid,
+        txid: SerializedTxid,
         transaction: &Transaction,
         transaction_state_change: &TransactionStateChange,
-        mempool_entry: Option<MempoolEntry>,
     ) -> Result<()> {
         if let Some((id, rune)) = transaction_state_change.etched {
             self.etched_rune(
-                cache,
+                store,
+                events,
                 block_time,
                 block_id.as_ref().map(|id| id.height),
                 txid,
@@ -80,7 +78,8 @@ impl<'a> TransactionUpdater<'a> {
         // Update burned rune
         for (rune_id, amount) in transaction_state_change.burned.iter() {
             self.burn_rune(
-                cache,
+                store,
+                events,
                 block_id.as_ref().map(|id| id.height),
                 txid,
                 rune_id,
@@ -91,7 +90,8 @@ impl<'a> TransactionUpdater<'a> {
         // Add minted rune if any.
         if let Some(minted) = transaction_state_change.minted.as_ref() {
             self.mint_rune(
-                cache,
+                store,
+                events,
                 block_id.as_ref().map(|id| id.height),
                 txid,
                 &minted.rune_id,
@@ -99,16 +99,18 @@ impl<'a> TransactionUpdater<'a> {
             )?;
         }
 
-        for (vin, tx_in) in transaction_state_change.inputs.iter().enumerate() {
-            // Spend inputs
-            self.update_spendable_input(
-                cache,
-                tx_in,
-                SpentStatus::Spent(SpenderReference {
-                    txid,
-                    vin: vin as u32,
-                }),
-            )?;
+        if !transaction.is_coinbase() {
+            for (vin, tx_in) in transaction_state_change.inputs.iter().enumerate() {
+                // Spend inputs
+                self.update_spendable_input(
+                    store,
+                    *tx_in,
+                    SpenderReference {
+                        txid,
+                        vin: vin as u32,
+                    },
+                )?;
+            }
         }
 
         // Create new outputs
@@ -118,15 +120,14 @@ impl<'a> TransactionUpdater<'a> {
             }
 
             // Create new outputs
-            let outpoint = OutPoint {
-                txid,
-                vout: vout as u32,
-            };
+            let outpoint = SerializedOutPoint::from_txid_vout(&txid, vout as u32);
 
-            cache.set_tx_out(outpoint, output.clone());
+            let script_pubkey = transaction.output[vout].script_pubkey.clone();
+
+            store.set_tx_out(outpoint, output.clone(), script_pubkey);
 
             self.transfer_rune(
-                cache,
+                events,
                 block_id.as_ref().map(|id| id.height),
                 txid,
                 outpoint,
@@ -135,80 +136,39 @@ impl<'a> TransactionUpdater<'a> {
         }
 
         // Save transaction state change
-        cache.set_tx_state_changes(txid, transaction_state_change.clone());
+        store.set_tx_state_changes(txid, transaction_state_change.clone());
 
         // Save rune transactions
         // Get all modified rune ids.
         let rune_ids = transaction_state_change.rune_ids();
 
         for rune_id in rune_ids {
-            cache.add_rune_transaction(rune_id, txid);
+            store.add_rune_transaction(rune_id, txid);
         }
 
         if self.settings.index_bitcoin_transactions {
-            let tx_arc = Arc::new(transaction.clone());
-            cache.set_transaction(txid, tx_arc);
+            store.set_transaction(txid, transaction.clone());
         }
 
-        if !cache.settings.mempool {
-            cache.set_transaction_confirming_block(txid, block_id.unwrap());
-        }
-
-        if self.settings.index_addresses {
-            self.update_script_pubkeys(txid, transaction);
-        }
-
-        if let Some(mempool_entry) = mempool_entry {
-            cache.set_mempool_tx(txid, mempool_entry);
+        if !self.mempool {
+            store.set_transaction_confirming_block(txid, block_id.unwrap());
         }
 
         Ok(())
     }
 
-    fn update_script_pubkeys(&mut self, txid: Txid, transaction: &Transaction) -> () {
-        if let Some(addr_updater) = self.address_updater.as_mut() {
-            // skip coinbase inputs
-            if !transaction.is_coinbase() {
-                for (vin, input) in transaction.input.iter().enumerate() {
-                    // Add the spent outpoint to the address_updater
-                    addr_updater.add_spent_outpoint(
-                        input.previous_output,
-                        SpenderReference {
-                            txid,
-                            vin: vin as u32,
-                        },
-                    );
-                }
-            }
-
-            // Add new outputs
-            for (vout, txout) in transaction.output.iter().enumerate() {
-                let outpoint = OutPoint {
-                    txid,
-                    vout: vout as u32,
-                };
-
-                addr_updater.add_new_outpoint(outpoint, txout.script_pubkey.clone());
-            }
-        }
-    }
-
     fn update_spendable_input(
         &mut self,
-        cache: &mut UpdaterCache,
-        outpoint: &OutPoint,
-        spent: SpentStatus,
+        store: &mut dyn TransactionStore,
+        outpoint: SerializedOutPoint,
+        spent: SpenderReference,
     ) -> Result<()> {
-        match cache.get_tx_out(outpoint) {
-            Ok(tx_out) => {
-                let mut tx_out = tx_out;
-                tx_out.spent = spent;
-                cache.set_tx_out(outpoint.clone(), tx_out);
-                Ok(())
-            }
+        match store.set_spent_tx_out(outpoint, spent) {
+            Ok(()) => Ok(()),
             Err(StoreError::NotFound(_)) => {
-                // We don't need to do anything.
-                Ok(())
+                return Err(TransactionUpdaterError::Store(StoreError::NotFound(
+                    format!("outpoint not found: {:?}", outpoint),
+                )));
             }
             Err(e) => {
                 return Err(TransactionUpdaterError::Store(e));
@@ -218,15 +178,16 @@ impl<'a> TransactionUpdater<'a> {
 
     fn burn_rune(
         &mut self,
-        cache: &mut UpdaterCache,
+        store: &mut dyn TransactionStore,
+        events: &mut dyn TransactionEventMgr,
         height: Option<u64>,
-        txid: Txid,
+        txid: SerializedTxid,
         rune_id: &RuneId,
         amount: u128,
     ) -> Result<()> {
-        self.update_burn_balance(cache, rune_id, amount as i128)?;
+        self.update_burn_balance(store, rune_id, amount as i128)?;
 
-        cache.add_event(Event::RuneBurned {
+        events.add_event(Event::RuneBurned {
             location: height.into(),
             txid,
             amount: amount as u128,
@@ -238,15 +199,16 @@ impl<'a> TransactionUpdater<'a> {
 
     fn mint_rune(
         &mut self,
-        cache: &mut UpdaterCache,
+        store: &mut dyn TransactionStore,
+        events: &mut dyn TransactionEventMgr,
         height: Option<u64>,
-        txid: Txid,
+        txid: SerializedTxid,
         rune_id: &RuneId,
         amount: u128,
     ) -> Result<()> {
-        self.increment_mint(cache, rune_id)?;
+        self.increment_mint(store, rune_id)?;
 
-        cache.add_event(Event::RuneMinted {
+        events.add_event(Event::RuneMinted {
             location: height.into(),
             txid,
             amount: amount as u128,
@@ -258,13 +220,13 @@ impl<'a> TransactionUpdater<'a> {
 
     fn update_burn_balance(
         &mut self,
-        cache: &mut UpdaterCache,
+        store: &mut dyn TransactionStore,
         rune_id: &RuneId,
         amount: i128,
     ) -> Result<()> {
-        let mut rune_entry = cache.get_rune(rune_id)?;
+        let mut rune_entry = store.get_rune(rune_id)?;
 
-        if cache.settings.mempool {
+        if self.mempool {
             let result = rune_entry
                 .pending_burns
                 .checked_add_signed(amount)
@@ -279,15 +241,15 @@ impl<'a> TransactionUpdater<'a> {
             rune_entry.burned = result;
         }
 
-        cache.set_rune(*rune_id, rune_entry);
+        store.set_rune(*rune_id, rune_entry);
 
         Ok(())
     }
 
-    fn increment_mint(&mut self, cache: &mut UpdaterCache, rune_id: &RuneId) -> Result<()> {
-        let mut rune_entry = cache.get_rune(rune_id)?;
+    fn increment_mint(&mut self, store: &mut dyn TransactionStore, rune_id: &RuneId) -> Result<()> {
+        let mut rune_entry = store.get_rune(rune_id)?;
 
-        if cache.settings.mempool {
+        if self.mempool {
             let result = rune_entry.pending_mints.saturating_add_signed(1);
             rune_entry.pending_mints = result;
         } else {
@@ -296,25 +258,26 @@ impl<'a> TransactionUpdater<'a> {
             rune_entry.mints = result;
         }
 
-        cache.set_rune(*rune_id, rune_entry);
+        store.set_rune(*rune_id, rune_entry);
 
         Ok(())
     }
 
     fn etched_rune(
         &mut self,
-        cache: &mut UpdaterCache,
+        store: &mut dyn TransactionStore,
+        events: &mut dyn TransactionEventMgr,
         block_time: u32,
         height: Option<u64>,
-        txid: Txid,
+        txid: SerializedTxid,
         transaction: &Transaction,
         id: &RuneId,
         rune: Rune,
     ) -> Result<()> {
         let artifact = Runestone::decipher(transaction).unwrap();
-        self.create_rune_entry(cache, block_time, txid, transaction, *id, rune, &artifact)?;
+        self.create_rune_entry(store, block_time, txid, transaction, *id, rune, &artifact)?;
 
-        cache.add_event(Event::RuneEtched {
+        events.add_event(Event::RuneEtched {
             location: height.into(),
             txid,
             rune_id: *id,
@@ -325,9 +288,9 @@ impl<'a> TransactionUpdater<'a> {
 
     fn create_rune_entry(
         &mut self,
-        cache: &mut UpdaterCache,
+        store: &mut dyn TransactionStore,
         block_time: u32,
-        txid: Txid,
+        txid: SerializedTxid,
         transaction: &Transaction,
         id: RuneId,
         rune: Rune,
@@ -336,7 +299,7 @@ impl<'a> TransactionUpdater<'a> {
         let inscription = index_rune_icon(transaction, txid);
 
         if let Some((id, inscription)) = inscription.as_ref() {
-            cache.set_inscription(id.clone(), inscription.clone());
+            store.set_inscription(id.clone(), inscription.clone());
         }
 
         let entry = match artifact {
@@ -347,7 +310,7 @@ impl<'a> TransactionUpdater<'a> {
                 etching: txid,
                 terms: None,
                 mints: 0,
-                number: cache.get_runes_count(),
+                number: store.get_runes_count(),
                 premine: 0,
                 spaced_rune: SpacedRune { rune, spacers: 0 },
                 symbol: None,
@@ -375,7 +338,7 @@ impl<'a> TransactionUpdater<'a> {
                     etching: txid,
                     terms,
                     mints: 0,
-                    number: cache.get_runes_count(),
+                    number: store.get_runes_count(),
                     premine: premine.unwrap_or_default(),
                     spaced_rune: SpacedRune {
                         rune,
@@ -391,24 +354,24 @@ impl<'a> TransactionUpdater<'a> {
             }
         };
 
-        cache.set_rune(id, entry);
-        cache.set_rune_id_number(cache.get_runes_count(), id);
-        cache.set_rune_id(rune, id);
-        cache.increment_runes_count();
+        store.set_rune(id, entry);
+        store.set_rune_id_number(store.get_runes_count(), id);
+        store.set_rune_id(rune, id);
+        store.increment_runes_count();
 
         Ok(())
     }
 
     fn transfer_rune(
         &mut self,
-        cache: &mut UpdaterCache,
+        events: &mut dyn TransactionEventMgr,
         height: Option<u64>,
-        txid: Txid,
-        outpoint: OutPoint,
+        txid: SerializedTxid,
+        outpoint: SerializedOutPoint,
         output: &TxOutEntry,
     ) {
         for rune_amount in output.runes.iter() {
-            cache.add_event(Event::RuneTransferred {
+            events.add_event(Event::RuneTransferred {
                 location: height.into(),
                 txid,
                 outpoint,

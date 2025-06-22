@@ -1,14 +1,10 @@
-use std::{
-    io::{Read, Result, Write},
-    str::FromStr,
-};
+use std::io::{Read, Result, Write};
 
-use bitcoin::Txid;
 use borsh::{BorshDeserialize, BorshSerialize};
 use ordinals::{Rune, RuneId, SpacedRune, Terms};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use titan_types::{InscriptionId, MintResponse, RuneResponse};
+use titan_types::{InscriptionId, MintResponse, RuneResponse, SerializedTxid};
 
 #[derive(Debug, PartialEq, Error)]
 pub enum MintError {
@@ -27,7 +23,7 @@ pub struct RuneEntry {
     pub block: u64,
     pub burned: u128,
     pub divisibility: u8,
-    pub etching: Txid,
+    pub etching: SerializedTxid,
     pub mints: u128,
     pub number: u64,
     pub premine: u128,
@@ -167,7 +163,7 @@ impl BorshSerialize for RuneEntry {
         BorshSerialize::serialize(&self.block, writer)?;
         BorshSerialize::serialize(&self.burned, writer)?;
         BorshSerialize::serialize(&self.divisibility, writer)?;
-        BorshSerialize::serialize(&self.etching.to_string(), writer)?;
+        BorshSerialize::serialize(&self.etching, writer)?;
         BorshSerialize::serialize(&self.mints, writer)?;
         BorshSerialize::serialize(&self.number, writer)?;
         BorshSerialize::serialize(&self.premine, writer)?;
@@ -301,8 +297,7 @@ impl BorshDeserialize for RuneEntry {
         let block = u64::deserialize_reader(reader)?;
         let burned = u128::deserialize_reader(reader)?;
         let divisibility = u8::deserialize_reader(reader)?;
-        let etching = Txid::from_str(&String::deserialize_reader(reader)?)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let etching = SerializedTxid::deserialize_reader(reader)?;
         let mints = u128::deserialize_reader(reader)?;
         let number = u64::deserialize_reader(reader)?;
         let premine = u128::deserialize_reader(reader)?;

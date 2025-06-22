@@ -1,11 +1,14 @@
 use {
     super::*,
     crate::models::Inscription,
-    bitcoin::{Transaction, Txid},
-    titan_types::InscriptionId,
+    bitcoin::Transaction,
+    titan_types::{InscriptionId, SerializedTxid},
 };
 
-pub fn index_rune_icon(tx: &Transaction, txid: Txid) -> Option<(InscriptionId, Inscription)> {
+pub fn index_rune_icon(
+    tx: &Transaction,
+    txid: SerializedTxid,
+) -> Option<(InscriptionId, Inscription)> {
     let envelopes = ParsedEnvelope::from_transaction(tx);
 
     // In Rune etching, we just want to index the first envelope.

@@ -1,7 +1,7 @@
 use std::{
-    collections::{HashMap, HashSet},
     sync::Arc,
 };
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use titan_types::{Event, EventType, TcpSubscriptionRequest};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -30,7 +30,7 @@ pub struct TcpSubscriptionManager {
 impl TcpSubscriptionManager {
     pub fn new() -> Self {
         Self {
-            subscriptions: RwLock::new(HashMap::new()),
+            subscriptions: RwLock::new(HashMap::default()),
         }
     }
 

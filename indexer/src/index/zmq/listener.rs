@@ -115,7 +115,7 @@ fn handle_raw_tx(
     tx_bytes: &[u8],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let tx = encode::deserialize::<Transaction>(tx_bytes)?;
-    let txid = tx.compute_txid();
+    let txid = tx.compute_txid().into();
 
     // If the updater is at tip, spawn a new thread to index the transaction.
     if updater.is_at_tip() {

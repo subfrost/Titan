@@ -1,45 +1,28 @@
 use {
-    bitcoin::{hashes::Hash, Txid},
+    crate::SerializedTxid,
     borsh::{BorshDeserialize, BorshSerialize},
     core::str,
     serde::{Deserialize, Serialize},
     std::{
         fmt::{self, Display, Formatter},
-        io::{self, Read, Write},
         str::FromStr,
     },
 };
 
-#[derive(Debug, Eq, PartialEq, Clone, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Eq, PartialEq, Clone, Hash, Serialize, Deserialize, BorshDeserialize, BorshSerialize,
+)]
 pub struct InscriptionId {
-    pub txid: Txid,
+    pub txid: SerializedTxid,
     pub index: u32,
 }
 
-impl BorshSerialize for InscriptionId {
-    fn serialize<W: Write>(&self, writer: &mut W) -> io::Result<()> {
-        // Serialize txid bytes (32 bytes)
-        BorshSerialize::serialize(&self.txid.as_raw_hash().to_byte_array(), writer)?;
-
-        // Serialize index
-        BorshSerialize::serialize(&self.index, writer)?;
-
-        Ok(())
-    }
-}
-
-impl BorshDeserialize for InscriptionId {
-    fn deserialize_reader<R: Read>(reader: &mut R) -> io::Result<Self> {
-        // Read 32 bytes for txid
-        let txid_bytes = <[u8; 32]>::deserialize_reader(reader)?;
-
-        // Deserialize index
-        let index = u32::deserialize_reader(reader)?;
-
-        Ok(Self {
-            txid: Txid::from_byte_array(txid_bytes),
-            index,
-        })
+impl InscriptionId {
+    pub fn as_bytes(&self) -> [u8; 36] {
+        let mut bytes = [0u8; 36];
+        bytes[..32].copy_from_slice(self.txid.as_bytes());
+        bytes[32..36].copy_from_slice(&self.index.to_le_bytes());
+        bytes
     }
 }
 
@@ -54,7 +37,7 @@ pub enum ParseError {
     Character(char),
     Length(usize),
     Separator(char),
-    Txid(bitcoin::hex::HexToArrayError),
+    Txid(hex::FromHexError),
     Index(std::num::ParseIntError),
 }
 
@@ -106,8 +89,6 @@ impl FromStr for InscriptionId {
 
 #[cfg(test)]
 mod tests {
-    use bitcoin::Txid;
-
     use super::*;
 
     fn inscription_id(n: u32) -> InscriptionId {
@@ -120,7 +101,7 @@ mod tests {
         format!("{}i{n}", hex.repeat(64)).parse().unwrap()
     }
 
-    fn txid(n: u32) -> Txid {
+    fn txid(n: u32) -> SerializedTxid {
         let hex = format!("{n:x}");
 
         if hex.is_empty() || hex.len() > 1 {

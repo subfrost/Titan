@@ -4,14 +4,12 @@ use {
         index::{store::Store, Settings, StoreError},
         models::TransactionStateChange,
     },
-    bitcoin::{OutPoint, ScriptBuf, Txid},
+    bitcoin::ScriptBuf,
     ordinals::RuneId,
-    std::{
-        collections::{HashMap, HashSet},
-        sync::Arc,
-    },
+    rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet},
+    std::sync::Arc,
     thiserror::Error,
-    titan_types::{InscriptionId, SpentStatus},
+    titan_types::{InscriptionId, SerializedOutPoint, SerializedTxid, SpentStatus},
     tracing::{info, trace, warn},
 };
 
@@ -37,14 +35,14 @@ impl From<Settings> for RollbackSettings {
     }
 }
 
-pub(super) struct Rollback<'a> {
+pub struct Rollback<'a> {
     store: &'a Arc<dyn Store + Send + Sync>,
     settings: RollbackSettings,
     cache: RollbackCache<'a>,
 }
 
 impl<'a> Rollback<'a> {
-    pub(super) fn new(
+    pub fn new(
         store: &'a Arc<dyn Store + Send + Sync>,
         settings: RollbackSettings,
         mempool: bool,
@@ -57,7 +55,7 @@ impl<'a> Rollback<'a> {
         })
     }
 
-    pub(super) fn revert_transactions(&mut self, txids: &Vec<Txid>) -> Result<()> {
+    pub fn revert_transactions(&mut self, txids: &Vec<SerializedTxid>) -> Result<()> {
         let txs_state_changes = self
             .store
             .get_txs_state_changes(txids, self.cache.mempool)?;
@@ -93,10 +91,10 @@ impl<'a> Rollback<'a> {
 
     fn precache_transactions(
         &mut self,
-        txs_state_changes: &HashMap<Txid, TransactionStateChange>,
+        txs_state_changes: &HashMap<SerializedTxid, TransactionStateChange>,
     ) -> Result<()> {
         let mut tx_outs = Vec::new();
-        let mut runes = HashSet::new();
+        let mut runes = HashSet::default();
 
         for (_, tx) in txs_state_changes.iter() {
             tx_outs.extend(tx.inputs.clone());
@@ -121,7 +119,7 @@ impl<'a> Rollback<'a> {
 
     fn revert_transaction(
         &mut self,
-        txid: &Txid,
+        txid: &SerializedTxid,
         transaction: &TransactionStateChange,
     ) -> Result<()> {
         // Make spendable the inputs again.
@@ -131,10 +129,7 @@ impl<'a> Rollback<'a> {
 
         // Remove tx_outs
         for (vout, _tx_out) in transaction.outputs.iter().enumerate() {
-            let outpoint = OutPoint {
-                txid: txid.clone(),
-                vout: vout as u32,
-            };
+            let outpoint = SerializedOutPoint::from_txid_vout(txid, vout as u32);
             self.cache.add_outpoint_to_delete(outpoint);
         }
 
@@ -182,7 +177,11 @@ impl<'a> Rollback<'a> {
         Ok(())
     }
 
-    fn update_spendable_input(&mut self, outpoint: &OutPoint, spent: SpentStatus) -> Result<()> {
+    fn update_spendable_input(
+        &mut self,
+        outpoint: &SerializedOutPoint,
+        spent: SpentStatus,
+    ) -> Result<()> {
         match self.cache.get_tx_out(outpoint) {
             Ok(tx_out) => {
                 let mut tx_out = tx_out;
@@ -246,16 +245,16 @@ impl<'a> Rollback<'a> {
 
     fn revert_transactions_script_pubkeys_modifications(
         &mut self,
-        tx_to_state_changes: &HashMap<Txid, TransactionStateChange>,
+        tx_to_state_changes: &HashMap<SerializedTxid, TransactionStateChange>,
     ) -> Result<()> {
         // Get outpoints.
         let outpoints = tx_to_state_changes
             .iter()
             .flat_map(|(txid, tx)| {
-                tx.outputs.iter().enumerate().map(|(vout, _)| OutPoint {
-                    txid: txid.clone(),
-                    vout: vout as u32,
-                })
+                tx.outputs
+                    .iter()
+                    .enumerate()
+                    .map(|(vout, _)| SerializedOutPoint::from_txid_vout(txid, vout as u32))
             })
             .collect::<Vec<_>>();
 
@@ -265,8 +264,10 @@ impl<'a> Rollback<'a> {
             .get_outpoints_to_script_pubkey(&outpoints, true)?;
 
         // Update script pubkey entries.
-        let mut script_pubkey_entries: HashMap<ScriptBuf, (Vec<OutPoint>, Vec<OutPoint>)> =
-            HashMap::new();
+        let mut script_pubkey_entries: HashMap<
+            ScriptBuf,
+            (Vec<SerializedOutPoint>, Vec<SerializedOutPoint>),
+        > = HashMap::default();
 
         // Delete outpoints.
         for outpoint in outpoints {
@@ -294,7 +295,7 @@ impl<'a> Rollback<'a> {
             // Remove spent outpoints.
             self.cache.add_prev_outpoint_to_delete(&prev_outpoints);
         } else {
-            let outpoints_to_script_pubkeys: HashMap<OutPoint, ScriptBuf> = self
+            let outpoints_to_script_pubkeys = self
                 .cache
                 .get_outpoints_to_script_pubkey(&prev_outpoints, false)?;
 
