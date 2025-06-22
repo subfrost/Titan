@@ -57,6 +57,8 @@ impl Server {
         handle: Handle,
     ) -> SpawnResult<task::JoinHandle<io::Result<()>>> {
         let router = Router::new()
+            // Health check
+            .route("/", get(Self::health_check))
             // Status
             .route("/status", get(Self::status))
             // Blocks
@@ -135,6 +137,15 @@ impl Server {
                 .serve(router.into_make_service())
                 .await
         }))
+    }
+
+    async fn health_check() -> ServerResult {
+        Ok((
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            Json(serde_json::json!({"status": "ok"})),
+        )
+            .into_response())
     }
 
     async fn tip(Extension(index): Extension<Arc<Index>>) -> ServerResult {
