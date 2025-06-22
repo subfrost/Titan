@@ -141,8 +141,6 @@ impl BlockCache {
             .flat_map(|b| b.tx_ids.iter().cloned())
             .collect::<Vec<_>>();
 
-        info!("precache_block: all_txids: {:?}", all_txids.len());
-
         let tx_state_changes = db.read().get_txs_state_changes(&all_txids, false)?;
 
         let spent_outpoints = tx_state_changes

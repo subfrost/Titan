@@ -257,7 +257,6 @@ impl RocksDB {
         self.db.set_options(&[
             ("write_buffer_size", &(128 * 1024 * 1024).to_string()),
             ("max_write_buffer_number", "4"),
-            ("min_write_buffer_number_to_merge", "2"),
         ])?;
 
         // Force a flush so that everything written in bulk-load mode lands on disk.
