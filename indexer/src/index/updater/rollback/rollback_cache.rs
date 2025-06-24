@@ -7,7 +7,7 @@ use {
     ordinals::{Rune, RuneId},
     rustc_hash::FxHashMap as HashMap,
     std::sync::Arc,
-    titan_types::{InscriptionId, SerializedOutPoint, SerializedTxid, TxOutEntry},
+    titan_types::{InscriptionId, SerializedOutPoint, SerializedTxid, TxOut},
     tracing::info,
 };
 
@@ -15,7 +15,7 @@ type Result<T> = std::result::Result<T, StoreError>;
 
 #[derive(Default)]
 pub struct TempCache {
-    txouts: HashMap<SerializedOutPoint, TxOutEntry>,
+    txouts: HashMap<SerializedOutPoint, TxOut>,
 }
 
 pub struct RollbackCache<'a> {
@@ -49,7 +49,7 @@ impl<'a> RollbackCache<'a> {
         Ok(())
     }
 
-    pub fn get_tx_out(&mut self, outpoint: &SerializedOutPoint) -> Result<TxOutEntry> {
+    pub fn get_tx_out(&mut self, outpoint: &SerializedOutPoint) -> Result<TxOut> {
         Ok(self
             .temp_cache
             .txouts
@@ -58,7 +58,7 @@ impl<'a> RollbackCache<'a> {
             .clone())
     }
 
-    pub fn set_tx_out(&mut self, outpoint: SerializedOutPoint, tx_out: TxOutEntry) {
+    pub fn set_tx_out(&mut self, outpoint: SerializedOutPoint, tx_out: TxOut) {
         self.update.txouts.insert(outpoint, tx_out);
     }
 

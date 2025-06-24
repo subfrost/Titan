@@ -3,28 +3,30 @@ use rustc_hash::FxHashMap as HashMap;
 use bitcoin::{ScriptBuf, Transaction};
 use ordinals::{Rune, RuneId};
 use titan_types::{
-    InscriptionId, SerializedOutPoint, SerializedTxid, SpenderReference, TxOutEntry,
+    InscriptionId, SerializedOutPoint, SerializedTxid, SpenderReference, TxOut,
 };
 
 use crate::{
     index::StoreError,
-    models::{BlockId, Inscription, RuneEntry, TransactionStateChange},
+    models::{
+        BlockId, Inscription, RuneEntry, TransactionStateChange, TransactionStateChangeInput,
+    },
 };
 
 pub trait TransactionStore {
     fn get_tx_outs(
         &mut self,
         outpoints: &[SerializedOutPoint],
-    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>, StoreError>;
+    ) -> Result<HashMap<SerializedOutPoint, TxOut>, StoreError>;
     fn set_tx_out(
         &mut self,
         outpoint: SerializedOutPoint,
-        tx_out: TxOutEntry,
+        tx_out: TxOut,
         script_pubkey: ScriptBuf,
     );
     fn set_spent_tx_out(
         &mut self,
-        outpoint: SerializedOutPoint,
+        outpoint: &TransactionStateChangeInput,
         spent: SpenderReference,
     ) -> Result<(), StoreError>;
     fn get_transaction(&self, txid: &SerializedTxid) -> Result<Transaction, StoreError>;

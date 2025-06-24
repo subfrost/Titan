@@ -1,5 +1,6 @@
 use {
     super::Lot,
+    bitcoin::ScriptBuf,
     borsh::{BorshDeserialize, BorshSerialize},
     ordinals::{Rune, RuneId},
     rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet},
@@ -7,13 +8,51 @@ use {
         fmt::Display,
         io::{Read, Result, Write},
     },
-    titan_types::{RuneAmount, SerializedOutPoint, TxOutEntry},
+    titan_types::{RuneAmount, SerializedOutPoint, TxOut},
 };
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub struct TransactionStateChangeInput {
+    pub previous_outpoint: SerializedOutPoint,
+    pub script_pubkey: Option<ScriptBuf>,
+}
+
+impl BorshSerialize for TransactionStateChangeInput {
+    fn serialize<W: Write>(&self, writer: &mut W) -> Result<()> {
+        self.previous_outpoint.serialize(writer)?;
+        if let Some(script_pubkey) = &self.script_pubkey {
+            true.serialize(writer)?;
+            let script_bytes = script_pubkey.as_bytes();
+            script_bytes.serialize(writer)?;
+        } else {
+            false.serialize(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl BorshDeserialize for TransactionStateChangeInput {
+    fn deserialize_reader<R: Read>(reader: &mut R) -> Result<Self> {
+        let outpoint = SerializedOutPoint::deserialize_reader(reader)?;
+        let script_present = bool::deserialize_reader(reader)?;
+        let script_pubkey = if script_present {
+            let script_bytes = Vec::<u8>::deserialize_reader(reader)?;
+            Some(ScriptBuf::from_bytes(script_bytes))
+        } else {
+            None
+        };
+
+        Ok(TransactionStateChangeInput {
+            previous_outpoint: outpoint,
+            script_pubkey,
+        })
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct TransactionStateChange {
-    pub inputs: Vec<SerializedOutPoint>,
-    pub outputs: Vec<TxOutEntry>,
+    pub inputs: Vec<TransactionStateChangeInput>,
+    pub outputs: Vec<TxOut>,
     pub etched: Option<(RuneId, Rune)>,
     pub minted: Option<RuneAmount>,
     pub burned: HashMap<RuneId, Lot>,
@@ -77,16 +116,16 @@ impl BorshSerialize for TransactionStateChange {
 
 impl BorshDeserialize for TransactionStateChange {
     fn deserialize_reader<R: Read>(reader: &mut R) -> Result<Self> {
-        // 1) inputs - manually deserialize OutPoint components
+        // 1) inputs - manually deserialize TxIn components
         let input_len = u64::deserialize_reader(reader)?;
         let mut inputs = Vec::with_capacity(input_len as usize);
         for _ in 0..input_len {
-            let outpoint = SerializedOutPoint::deserialize_reader(reader)?;
-            inputs.push(outpoint);
+            let tx_in = TransactionStateChangeInput::deserialize_reader(reader)?;
+            inputs.push(tx_in);
         }
 
         // 2) outputs
-        let outputs = <Vec<TxOutEntry>>::deserialize_reader(reader)?;
+        let outputs = <Vec<TxOut>>::deserialize_reader(reader)?;
 
         // 3) etched
         let etched_present = bool::deserialize_reader(reader)?;

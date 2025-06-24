@@ -1,7 +1,7 @@
 use bitcoin::{ScriptBuf, Sequence, Witness};
 use serde::{Deserialize, Serialize};
 
-use crate::{RuneAmount, SerializedOutPoint, TxOutEntry};
+use crate::{RuneAmount, SerializedOutPoint, TxOut};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreviousOutputData {
@@ -10,8 +10,8 @@ pub struct PreviousOutputData {
     pub risky_runes: Vec<RuneAmount>,
 }
 
-impl From<TxOutEntry> for PreviousOutputData {
-    fn from(tx_out_entry: TxOutEntry) -> Self {
+impl From<TxOut> for PreviousOutputData {
+    fn from(tx_out_entry: TxOut) -> Self {
         Self {
             value: tx_out_entry.value,
             runes: tx_out_entry.runes,
@@ -29,8 +29,8 @@ pub struct TxIn {
     pub previous_output_data: Option<PreviousOutputData>,
 }
 
-impl From<(bitcoin::TxIn, Option<TxOutEntry>)> for TxIn {
-    fn from((tx_in, previous_output_data): (bitcoin::TxIn, Option<TxOutEntry>)) -> Self {
+impl From<(bitcoin::TxIn, Option<TxOut>)> for TxIn {
+    fn from((tx_in, previous_output_data): (bitcoin::TxIn, Option<TxOut>)) -> Self {
         Self {
             previous_output: tx_in.previous_output.into(),
             script_sig: tx_in.script_sig,

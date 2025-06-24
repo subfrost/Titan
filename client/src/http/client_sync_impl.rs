@@ -120,7 +120,7 @@ impl TitanApiSync for SyncClient {
         Txid::from_str(&text).map_err(Error::from)
     }
 
-    fn get_output(&self, outpoint: &OutPoint) -> Result<TxOutEntry, Error> {
+    fn get_output(&self, outpoint: &OutPoint) -> Result<TxOut, Error> {
         let text = self.call_text(&format!("/output/{}", outpoint))?;
         serde_json::from_str(&text).map_err(Error::from)
     }

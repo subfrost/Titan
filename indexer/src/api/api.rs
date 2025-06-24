@@ -16,7 +16,7 @@ use {
     titan_types::{
         query, AddressData, Block, BlockTip, InscriptionId, MempoolEntry, Pagination,
         PaginationResponse, RuneResponse, SerializedOutPoint, SerializedTxid, Status, Subscription,
-        Transaction, TransactionStatus, TxOutEntry,
+        Transaction, TransactionStatus, TxOut,
     },
     tracing::error,
     uuid::Uuid,
@@ -83,7 +83,7 @@ pub fn block_txids(index: Arc<Index>, block: &query::Block) -> Result<Vec<String
         .collect())
 }
 
-pub fn output(index: Arc<Index>, outpoint: &SerializedOutPoint) -> Result<TxOutEntry> {
+pub fn output(index: Arc<Index>, outpoint: &SerializedOutPoint) -> Result<TxOut> {
     Ok(index.get_tx_out(outpoint)?)
 }
 

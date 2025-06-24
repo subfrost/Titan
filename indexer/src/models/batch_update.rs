@@ -6,7 +6,7 @@ use {
     std::fmt::Display,
     titan_types::{
         Block, InscriptionId, MempoolEntry, SerializedOutPoint, SerializedTxid, SpenderReference,
-        TxOutEntry,
+        TxOut,
     },
 };
 
@@ -17,7 +17,7 @@ pub struct BatchUpdate {
     pub spent_outpoints_in_mempool: HashMap<SerializedOutPoint, SpenderReference>,
     pub blocks: HashMap<BlockHash, Block>,
     pub block_hashes: HashMap<u64, BlockHash>,
-    pub txouts: HashMap<SerializedOutPoint, TxOutEntry>,
+    pub txouts: HashMap<SerializedOutPoint, TxOut>,
     pub tx_state_changes: HashMap<SerializedTxid, TransactionStateChange>,
     pub rune_transactions: HashMap<RuneId, Vec<SerializedTxid>>,
     pub runes: HashMap<RuneId, RuneEntry>,

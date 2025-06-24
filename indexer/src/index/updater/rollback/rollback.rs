@@ -2,7 +2,7 @@ use {
     super::rollback_cache::RollbackCache,
     crate::{
         index::{store::Store, Settings, StoreError},
-        models::TransactionStateChange,
+        models::{TransactionStateChange, TransactionStateChangeInput},
     },
     bitcoin::ScriptBuf,
     ordinals::RuneId,
@@ -97,7 +97,8 @@ impl<'a> Rollback<'a> {
         let mut runes = HashSet::default();
 
         for (_, tx) in txs_state_changes.iter() {
-            tx_outs.extend(tx.inputs.clone());
+            tx_outs.extend(tx.inputs.iter().map(|input| input.previous_outpoint));
+
             if let Some(mint) = &tx.minted {
                 runes.insert(mint.rune_id);
             }
@@ -179,14 +180,14 @@ impl<'a> Rollback<'a> {
 
     fn update_spendable_input(
         &mut self,
-        outpoint: &SerializedOutPoint,
+        outpoint: &TransactionStateChangeInput,
         spent: SpentStatus,
     ) -> Result<()> {
-        match self.cache.get_tx_out(outpoint) {
+        match self.cache.get_tx_out(&outpoint.previous_outpoint) {
             Ok(tx_out) => {
                 let mut tx_out = tx_out;
                 tx_out.spent = spent;
-                self.cache.set_tx_out(outpoint.clone(), tx_out);
+                self.cache.set_tx_out(outpoint.previous_outpoint, tx_out);
                 Ok(())
             }
             Err(StoreError::NotFound(_)) => {
@@ -247,22 +248,6 @@ impl<'a> Rollback<'a> {
         &mut self,
         tx_to_state_changes: &HashMap<SerializedTxid, TransactionStateChange>,
     ) -> Result<()> {
-        // Get outpoints.
-        let outpoints = tx_to_state_changes
-            .iter()
-            .flat_map(|(txid, tx)| {
-                tx.outputs
-                    .iter()
-                    .enumerate()
-                    .map(|(vout, _)| SerializedOutPoint::from_txid_vout(txid, vout as u32))
-            })
-            .collect::<Vec<_>>();
-
-        // optimistic true because some of the outpoints might be op_return
-        let outpoints_to_script_pubkeys = self
-            .cache
-            .get_outpoints_to_script_pubkey(&outpoints, true)?;
-
         // Update script pubkey entries.
         let mut script_pubkey_entries: HashMap<
             ScriptBuf,
@@ -270,49 +255,42 @@ impl<'a> Rollback<'a> {
         > = HashMap::default();
 
         // Delete outpoints.
-        for outpoint in outpoints {
-            let script_pubkey = outpoints_to_script_pubkeys.get(&outpoint);
+        let mut spent_outpoints = HashSet::default();
+        for (txid, tx) in tx_to_state_changes.iter() {
+            for (vout, output) in tx.outputs.iter().enumerate() {
+                let script_pubkey = output.script_pubkey.clone();
+                let entry = script_pubkey_entries.entry(script_pubkey).or_default();
 
-            if let Some(script_pubkey) = script_pubkey {
-                let entry = script_pubkey_entries
-                    .entry(script_pubkey.clone())
-                    .or_default();
-
+                let outpoint = SerializedOutPoint::from_txid_vout(txid, vout as u32);
                 // Add "spent" outpoint.
                 entry.1.push(outpoint);
-            } else {
-                // op_return outpoint
+                spent_outpoints.insert(outpoint);
+            }
+
+            if !self.cache.mempool {
+                for input in tx.inputs.iter() {
+                    if let Some(script_pubkey) = input.script_pubkey.clone() {
+                        let entry = script_pubkey_entries
+                            .entry(script_pubkey)
+                            .or_default();
+
+                        if !spent_outpoints.contains(&input.previous_outpoint) {
+                            entry.0.push(input.previous_outpoint);
+                        }
+                    }
+                }
             }
         }
 
-        let prev_outpoints = tx_to_state_changes
-            .values()
-            .filter(|tx| !tx.is_coinbase)
-            .flat_map(|tx| tx.inputs.clone())
-            .collect::<Vec<_>>();
-
         if self.cache.mempool {
             // Remove spent outpoints.
+            let prev_outpoints = tx_to_state_changes
+                .values()
+                .filter(|tx| !tx.is_coinbase)
+                .flat_map(|tx| tx.inputs.iter().map(|input| input.previous_outpoint))
+                .collect::<Vec<_>>();
+
             self.cache.add_prev_outpoint_to_delete(&prev_outpoints);
-        } else {
-            let outpoints_to_script_pubkeys = self
-                .cache
-                .get_outpoints_to_script_pubkey(&prev_outpoints, false)?;
-
-            for prev_outpoint in prev_outpoints {
-                let script_pubkey = outpoints_to_script_pubkeys
-                    .get(&prev_outpoint)
-                    .unwrap_or_else(|| panic!("script pubkey not found"));
-
-                let entry = script_pubkey_entries
-                    .entry(script_pubkey.clone())
-                    .or_default();
-
-                // Restore outpoint only if it's not already in the spent list.
-                if !entry.1.contains(&prev_outpoint) {
-                    entry.0.push(prev_outpoint);
-                }
-            }
         }
 
         self.cache.set_script_pubkey_entries(script_pubkey_entries);

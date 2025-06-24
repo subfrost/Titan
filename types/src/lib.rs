@@ -9,9 +9,9 @@ pub use {
     rune::{MintResponse, RuneAmount, RuneResponse},
     stats::{BlockTip, Status},
     subscription::{Subscription, TcpSubscriptionRequest},
-    transaction::{Transaction, TransactionStatus, TxOut},
+    transaction::{Transaction, TransactionStatus},
     tx_in::TxIn,
-    tx_out::{SpenderReference, SpentStatus, TxOutEntry},
+    tx_out::{SpenderReference, SpentStatus, TxOut},
     txid::SerializedTxid,
 };
 
@@ -135,11 +135,12 @@ mod tests {
             amount: 500000000000000000u128,
         };
 
-        let original = TxOutEntry {
+        let original = TxOut {
             runes: vec![rune_amount.clone()],
             risky_runes: vec![rune_amount],
             value: 50000,
             spent: SpentStatus::Unspent,
+            script_pubkey: ScriptBuf::new(),
         };
 
         // Test Borsh
@@ -250,11 +251,12 @@ mod tests {
     #[test]
     fn test_edge_cases() {
         // Test empty vectors
-        let empty_tx_out = TxOutEntry {
+        let empty_tx_out = TxOut {
             runes: vec![],
             risky_runes: vec![],
             value: 0,
             spent: SpentStatus::Unspent,
+            script_pubkey: ScriptBuf::new(),
         };
         test_borsh_roundtrip(&empty_tx_out);
         test_serde_roundtrip(&empty_tx_out);

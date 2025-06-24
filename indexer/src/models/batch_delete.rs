@@ -1,4 +1,5 @@
 use {
+    crate::models::TransactionStateChangeInput,
     std::{collections::HashSet, fmt::Display},
     titan_types::{SerializedOutPoint, SerializedTxid},
 };
@@ -6,7 +7,7 @@ use {
 #[derive(Debug, Default, Clone)]
 pub struct BatchDelete {
     pub tx_outs: HashSet<SerializedOutPoint>,
-    pub script_pubkeys_outpoints: HashSet<SerializedOutPoint>,
+    pub script_pubkeys_outpoints: HashSet<TransactionStateChangeInput>,
     pub spent_outpoints_in_mempool: HashSet<SerializedOutPoint>,
     pub tx_state_changes: HashSet<SerializedTxid>,
 }

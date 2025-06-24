@@ -4,14 +4,14 @@ use {
     ordinals::{Rune, RuneId},
     rustc_hash::FxHashMap as HashMap,
     std::fmt::Display,
-    titan_types::{InscriptionId, SerializedOutPoint, SerializedTxid, TxOutEntry},
+    titan_types::{InscriptionId, SerializedOutPoint, SerializedTxid, TxOut},
 };
 
 pub struct BatchRollback {
     pub runes_count: u64,
 
     pub rune_entry: HashMap<RuneId, RuneEntry>,
-    pub txouts: HashMap<SerializedOutPoint, TxOutEntry>,
+    pub txouts: HashMap<SerializedOutPoint, TxOut>,
     pub script_pubkey_entry: HashMap<ScriptBuf, (Vec<SerializedOutPoint>, Vec<SerializedOutPoint>)>,
 
     pub outpoints_to_delete: Vec<SerializedOutPoint>,

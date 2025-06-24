@@ -2,12 +2,12 @@ use {
     super::TransactionStore,
     crate::{
         index::{inscription::index_rune_icon, Settings, StoreError},
-        models::{BlockId, RuneEntry, TransactionStateChange},
+        models::{BlockId, RuneEntry, TransactionStateChange, TransactionStateChangeInput},
     },
     bitcoin::Transaction,
     ordinals::{Artifact, Etching, Rune, RuneId, Runestone, SpacedRune},
     thiserror::Error,
-    titan_types::{Event, SerializedOutPoint, SerializedTxid, SpenderReference, TxOutEntry},
+    titan_types::{Event, SerializedOutPoint, SerializedTxid, SpenderReference, TxOut},
     tokio::sync::mpsc::error::SendError,
 };
 
@@ -104,7 +104,7 @@ impl TransactionUpdater {
                 // Spend inputs
                 self.update_spendable_input(
                     store,
-                    *tx_in,
+                    tx_in,
                     SpenderReference {
                         txid,
                         vin: vin as u32,
@@ -160,14 +160,15 @@ impl TransactionUpdater {
     fn update_spendable_input(
         &mut self,
         store: &mut dyn TransactionStore,
-        outpoint: SerializedOutPoint,
+        outpoint: &TransactionStateChangeInput,
         spent: SpenderReference,
     ) -> Result<()> {
+        let previous_outpoint = outpoint.previous_outpoint;
         match store.set_spent_tx_out(outpoint, spent) {
             Ok(()) => Ok(()),
             Err(StoreError::NotFound(_)) => {
                 return Err(TransactionUpdaterError::Store(StoreError::NotFound(
-                    format!("outpoint not found: {:?}", outpoint),
+                    format!("outpoint not found: {:?}", previous_outpoint),
                 )));
             }
             Err(e) => {
@@ -368,7 +369,7 @@ impl TransactionUpdater {
         height: Option<u64>,
         txid: SerializedTxid,
         outpoint: SerializedOutPoint,
-        output: &TxOutEntry,
+        output: &TxOut,
     ) {
         for rune_amount in output.runes.iter() {
             events.add_event(Event::RuneTransferred {

@@ -1,5 +1,6 @@
 use {
     crate::{rune::RuneAmount, SerializedTxid},
+    bitcoin::ScriptBuf,
     borsh::{BorshDeserialize, BorshSerialize},
     serde::{Deserialize, Serialize},
     std::io::{Read, Result, Write},
@@ -83,17 +84,52 @@ impl<'de> Deserialize<'de> for SpentStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
-pub struct TxOutEntry {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TxOut {
     pub runes: Vec<RuneAmount>,
     pub risky_runes: Vec<RuneAmount>,
     pub value: u64,
     pub spent: SpentStatus,
+    pub script_pubkey: ScriptBuf,
 }
 
-impl TxOutEntry {
+impl TxOut {
     pub fn has_runes(&self) -> bool {
         !self.runes.is_empty()
+    }
+}
+
+impl BorshSerialize for TxOut {
+    fn serialize<W: Write>(&self, writer: &mut W) -> Result<()> {
+        BorshSerialize::serialize(&self.value, writer)?;
+        let script_bytes = self.script_pubkey.as_bytes();
+        BorshSerialize::serialize(&(script_bytes.len() as u32), writer)?;
+        writer.write_all(script_bytes)?;
+        BorshSerialize::serialize(&self.runes, writer)?;
+        BorshSerialize::serialize(&self.risky_runes, writer)?;
+        BorshSerialize::serialize(&self.spent, writer)?;
+        Ok(())
+    }
+}
+
+impl BorshDeserialize for TxOut {
+    fn deserialize_reader<R: Read>(reader: &mut R) -> Result<Self> {
+        let value = u64::deserialize_reader(reader)?;
+        let script_len = u32::deserialize_reader(reader)? as usize;
+        let mut script_bytes = vec![0u8; script_len];
+        reader.read_exact(&mut script_bytes)?;
+        let script_pubkey = ScriptBuf::from_bytes(script_bytes);
+        let runes = Vec::<RuneAmount>::deserialize_reader(reader)?;
+        let risky_runes = Vec::<RuneAmount>::deserialize_reader(reader)?;
+        let spent = SpentStatus::deserialize_reader(reader)?;
+
+        Ok(Self {
+            value,
+            script_pubkey,
+            runes,
+            risky_runes,
+            spent,
+        })
     }
 }
 
@@ -143,13 +179,14 @@ mod tests {
         }
     }
 
-    fn create_test_tx_out_entry() -> TxOutEntry {
+    fn create_test_tx_out_entry() -> TxOut {
         let rune_amount = create_test_rune_amount();
-        TxOutEntry {
+        TxOut {
             runes: vec![rune_amount.clone()],
             risky_runes: vec![rune_amount],
             value: 50000,
             spent: SpentStatus::Unspent,
+            script_pubkey: ScriptBuf::new(),
         }
     }
 
@@ -240,11 +277,12 @@ mod tests {
 
     #[test]
     fn test_tx_out_entry_empty_runes() {
-        let entry = TxOutEntry {
+        let entry = TxOut {
             runes: vec![],
             risky_runes: vec![],
             value: 1000,
             spent: SpentStatus::Unspent,
+            script_pubkey: ScriptBuf::new(),
         };
         test_borsh_roundtrip(&entry);
         test_serde_roundtrip(&entry);
@@ -281,11 +319,12 @@ mod tests {
             amount: 3000000000000000000u128,
         };
 
-        let entry = TxOutEntry {
+        let entry = TxOut {
             runes: vec![rune1.clone(), rune2.clone()],
             risky_runes: vec![rune3],
             value: 100000,
             spent: SpentStatus::Spent(create_test_spender_reference()),
+            script_pubkey: ScriptBuf::new(),
         };
 
         test_borsh_roundtrip(&entry);
@@ -295,11 +334,12 @@ mod tests {
 
     #[test]
     fn test_tx_out_entry_zero_value() {
-        let entry = TxOutEntry {
+        let entry = TxOut {
             runes: vec![],
             risky_runes: vec![],
             value: 0,
             spent: SpentStatus::Unspent,
+            script_pubkey: ScriptBuf::new(),
         };
         test_borsh_roundtrip(&entry);
         test_serde_roundtrip(&entry);
@@ -307,11 +347,12 @@ mod tests {
 
     #[test]
     fn test_tx_out_entry_max_value() {
-        let entry = TxOutEntry {
+        let entry = TxOut {
             runes: vec![],
             risky_runes: vec![],
             value: u64::MAX,
             spent: SpentStatus::Unspent,
+            script_pubkey: ScriptBuf::new(),
         };
         test_borsh_roundtrip(&entry);
         test_serde_roundtrip(&entry);
@@ -340,11 +381,12 @@ mod tests {
             })
             .collect();
 
-        let entry = TxOutEntry {
+        let entry = TxOut {
             runes,
             risky_runes,
             value: 75000,
             spent: SpentStatus::Unspent,
+            script_pubkey: ScriptBuf::new(),
         };
 
         test_borsh_roundtrip(&entry);
@@ -362,8 +404,8 @@ mod tests {
         assert_eq!(serialized1, serialized2);
 
         // Test that deserialization produces the same value
-        let deserialized1 = borsh::from_slice::<TxOutEntry>(&serialized1).unwrap();
-        let deserialized2 = borsh::from_slice::<TxOutEntry>(&serialized2).unwrap();
+        let deserialized1 = borsh::from_slice::<TxOut>(&serialized1).unwrap();
+        let deserialized2 = borsh::from_slice::<TxOut>(&serialized2).unwrap();
         assert_eq!(deserialized1, deserialized2);
         assert_eq!(original, deserialized1);
     }
@@ -378,7 +420,7 @@ mod tests {
             amount: u128::MAX,
         };
 
-        let entry = TxOutEntry {
+        let entry = TxOut {
             runes: vec![extreme_rune.clone()],
             risky_runes: vec![extreme_rune],
             value: u64::MAX,
@@ -386,6 +428,7 @@ mod tests {
                 txid: SerializedTxid::from([255u8; 32]),
                 vin: u32::MAX,
             }),
+            script_pubkey: ScriptBuf::new(),
         };
 
         test_borsh_roundtrip(&entry);
@@ -395,17 +438,19 @@ mod tests {
     #[test]
     fn test_mixed_spent_statuses() {
         let entries = vec![
-            TxOutEntry {
+            TxOut {
                 runes: vec![],
                 risky_runes: vec![],
                 value: 1000,
                 spent: SpentStatus::Unspent,
+                script_pubkey: ScriptBuf::new(),
             },
-            TxOutEntry {
+            TxOut {
                 runes: vec![create_test_rune_amount()],
                 risky_runes: vec![],
                 value: 2000,
                 spent: SpentStatus::Spent(create_test_spender_reference()),
+                script_pubkey: ScriptBuf::new(),
             },
         ];
 

@@ -25,7 +25,7 @@ use {
     titan_types::{
         AddressData, AddressTxOut, Block, Event, InscriptionId, MempoolEntry, Pagination,
         PaginationResponse, RuneAmount, SerializedOutPoint, SerializedTxid, Transaction,
-        TransactionStatus, TxOutEntry,
+        TransactionStatus, TxOut,
     },
     tokio::{runtime::Runtime, sync::mpsc::Sender},
     tracing::{error, info, warn},
@@ -262,7 +262,7 @@ impl Index {
         Ok(self.db.get_mempool_entries_with_ancestors(txids)?)
     }
 
-    pub fn get_tx_out(&self, outpoint: &SerializedOutPoint) -> Result<TxOutEntry> {
+    pub fn get_tx_out(&self, outpoint: &SerializedOutPoint) -> Result<TxOut> {
         Ok(self
             .db
             .get_tx_out_with_mempool_spent_update(outpoint, None)?)
@@ -271,7 +271,7 @@ impl Index {
     pub fn get_tx_outs(
         &self,
         outpoints: &[SerializedOutPoint],
-    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>> {
+    ) -> Result<HashMap<SerializedOutPoint, TxOut>> {
         Ok(self
             .db
             .get_tx_outs_with_mempool_spent_update(outpoints, None)?)
@@ -394,7 +394,7 @@ impl Index {
         transaction: &BitcoinTransaction,
         txid: &SerializedTxid,
         mempool: Option<bool>,
-    ) -> Result<(Vec<Option<TxOutEntry>>, Vec<Option<TxOutEntry>>)> {
+    ) -> Result<(Vec<Option<TxOut>>, Vec<Option<TxOut>>)> {
         Ok(self
             .db
             .get_inputs_outputs_from_transaction(transaction, txid, mempool)?)

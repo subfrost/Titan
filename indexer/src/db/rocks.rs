@@ -26,7 +26,7 @@ use {
     },
     titan_types::{
         Block, InscriptionId, MempoolEntry, Pagination, PaginationResponse, SerializedOutPoint,
-        SerializedTxid, SpenderReference, Subscription, TxOutEntry,
+        SerializedTxid, SpenderReference, Subscription, TxOut,
     },
     util::rune_id_to_bytes,
     uuid::Uuid,
@@ -498,7 +498,7 @@ impl RocksDB {
         Ok(result)
     }
 
-    pub fn get_tx_out(&self, outpoint: &SerializedOutPoint, mempool: bool) -> DBResult<TxOutEntry> {
+    pub fn get_tx_out(&self, outpoint: &SerializedOutPoint, mempool: bool) -> DBResult<TxOut> {
         let cf_handle = if mempool {
             self.cf_handle(OUTPOINTS_MEMPOOL_CF)?
         } else {
@@ -514,10 +514,7 @@ impl RocksDB {
             )))?)
     }
 
-    pub fn get_all_tx_outs(
-        &self,
-        mempool: bool,
-    ) -> DBResult<HashMap<SerializedOutPoint, TxOutEntry>> {
+    pub fn get_all_tx_outs(&self, mempool: bool) -> DBResult<HashMap<SerializedOutPoint, TxOut>> {
         let cf_handle = if mempool {
             self.cf_handle(OUTPOINTS_MEMPOOL_CF)?
         } else {
@@ -530,7 +527,7 @@ impl RocksDB {
         for item in iter {
             let (key, value) = item?;
             if let Ok(outpoint) = SerializedOutPoint::try_from(key) {
-                result.insert(outpoint, TxOutEntry::load(value.to_vec()));
+                result.insert(outpoint, TxOut::load(value.to_vec()));
             }
         }
 
@@ -541,7 +538,7 @@ impl RocksDB {
         &self,
         outpoints: &[T],
         mempool: Option<bool>,
-    ) -> DBResult<HashMap<T, TxOutEntry>> {
+    ) -> DBResult<HashMap<T, TxOut>> {
         if let Some(mempool) = mempool {
             Ok(self.get_tx_outs_with_mempool(outpoints, mempool)?)
         } else {
@@ -566,7 +563,7 @@ impl RocksDB {
         &self,
         outpoints: &[T],
         mempool: bool,
-    ) -> DBResult<HashMap<T, TxOutEntry>> {
+    ) -> DBResult<HashMap<T, TxOut>> {
         let cf_handle = if mempool {
             self.cf_handle(OUTPOINTS_MEMPOOL_CF)?
         } else {
@@ -580,7 +577,7 @@ impl RocksDB {
         let mut result = HashMap::default();
         for (i, value) in values.iter().enumerate() {
             if let Ok(Some(value)) = value {
-                result.insert(outpoints[i].clone(), TxOutEntry::load(value.clone()));
+                result.insert(outpoints[i].clone(), TxOut::load(value.clone()));
             }
         }
 
@@ -1555,12 +1552,31 @@ impl RocksDB {
             let cf_handle_mempool = self.cf_handle(OUTPOINT_TO_SCRIPT_PUBKEY_MEMPOOL_CF)?;
 
             for outpoint in delete.script_pubkeys_outpoints.iter() {
-                batch.delete_cf(&cf_handle, outpoint);
-                batch.delete_cf(&cf_handle_mempool, outpoint);
+                batch.delete_cf(&cf_handle, outpoint.previous_outpoint.as_ref());
+                batch.delete_cf(&cf_handle_mempool, outpoint.previous_outpoint.as_ref());
             }
         }
 
-        // 4. Delete spent_outpoints_in_mempool
+        // 4. Delete script_pubkeys_outpoints
+        {
+            let cf_handle = self.cf_handle(SCRIPT_PUBKEYS_CF)?;
+            let cf_handle_mempool = self.cf_handle(SCRIPT_PUBKEYS_MEMPOOL_CF)?;
+
+            for outpoint in delete.script_pubkeys_outpoints.iter() {
+                if let Some(script_pubkey) = &outpoint.script_pubkey {
+                    batch.delete_cf(
+                        &cf_handle,
+                        script_pubkey_outpoint_to_bytes(script_pubkey, &outpoint.previous_outpoint),
+                    );
+                    batch.delete_cf(
+                        &cf_handle_mempool,
+                        script_pubkey_outpoint_to_bytes(script_pubkey, &outpoint.previous_outpoint),
+                    );
+                }
+            }
+        }
+
+        // 5. Delete spent_outpoints_in_mempool
         {
             let cf_handle: Arc<BoundColumnFamily<'_>> =
                 self.cf_handle(SPENT_OUTPOINTS_MEMPOOL_CF)?;

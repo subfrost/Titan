@@ -7,7 +7,7 @@ use reqwest::header::HeaderMap;
 use titan_types::{
     query, AddressData, Block, BlockTip, InscriptionId, MempoolEntry, Pagination,
     PaginationResponse, RuneResponse, Status, Subscription, Transaction, TransactionStatus,
-    TxOutEntry,
+    TxOut,
 };
 
 /// Trait for all **async** methods.
@@ -47,7 +47,7 @@ pub trait TitanApiAsync: Send + Sync + Clone + 'static {
     async fn send_transaction(&self, tx_hex: String) -> Result<Txid, Error>;
 
     /// Fetches a specific output by outpoint (`<txid>:<vout>`).
-    async fn get_output(&self, outpoint: &OutPoint) -> Result<TxOutEntry, Error>;
+    async fn get_output(&self, outpoint: &OutPoint) -> Result<TxOut, Error>;
 
     /// Returns `(HTTP Headers, Bytes)` for an inscription by its `inscription_id`.
     async fn get_inscription(
@@ -141,7 +141,7 @@ pub trait TitanApiSync: Send + Sync + Clone + 'static {
     fn send_transaction(&self, tx_hex: String) -> Result<Txid, Error>;
 
     /// Fetches a specific output (outpoint) in a **blocking** manner.
-    fn get_output(&self, outpoint: &OutPoint) -> Result<TxOutEntry, Error>;
+    fn get_output(&self, outpoint: &OutPoint) -> Result<TxOut, Error>;
 
     /// Fetches an inscription (headers + bytes) by `inscription_id`, blocking.
     fn get_inscription(

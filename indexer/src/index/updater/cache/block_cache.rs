@@ -6,7 +6,7 @@ use ordinals::{Rune, RuneId};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use titan_types::{
     Block, Event, Location, SerializedOutPoint, SerializedTxid, SpenderReference, SpentStatus,
-    TxOutEntry,
+    TxOut,
 };
 use tracing::info;
 
@@ -20,7 +20,10 @@ use crate::{
         },
         Chain, Settings, StoreError,
     },
-    models::{BatchDelete, BatchUpdate, BlockId, RuneEntry, TransactionStateChange},
+    models::{
+        BatchDelete, BatchUpdate, BlockId, RuneEntry, TransactionStateChange,
+        TransactionStateChangeInput,
+    },
 };
 
 type Result<T> = std::result::Result<T, StoreError>;
@@ -65,10 +68,10 @@ pub struct BlockCache {
     last_block_height: Option<u64>,
     settings: BlockCacheSettings,
 
-    outpoints: CLruCache<SerializedOutPoint, TxOutEntry>,
+    outpoints: CLruCache<SerializedOutPoint, TxOut>,
 
     blocks: HashMap<u64, Block>,
-    spent_outpoints: HashMap<SerializedTxid, Vec<SerializedOutPoint>>,
+    spent_outpoints: HashMap<SerializedTxid, Vec<TransactionStateChangeInput>>,
 
     runes: CLruCache<RuneId, RuneEntry>,
     rune_ids: HashSet<u128>,
@@ -126,7 +129,7 @@ impl BlockCache {
         block_count: u64,
     ) -> Result<(
         HashMap<u64, Block>,
-        HashMap<SerializedTxid, Vec<SerializedOutPoint>>,
+        HashMap<SerializedTxid, Vec<TransactionStateChangeInput>>,
     )> {
         let blocks = {
             let blocks = db.read().get_blocks_by_heights(purge_count, block_count)?;
@@ -157,7 +160,7 @@ impl BlockCache {
                         .collect::<Vec<_>>(),
                 )
             })
-            .collect::<HashMap<SerializedTxid, Vec<SerializedOutPoint>>>();
+            .collect::<HashMap<SerializedTxid, Vec<TransactionStateChangeInput>>>();
 
         Ok((blocks, spent_outpoints))
     }
@@ -212,7 +215,7 @@ impl BlockCache {
         self.increment_block_count();
     }
 
-    fn get_tx_out(&mut self, outpoint: &SerializedOutPoint) -> Result<TxOutEntry> {
+    fn get_tx_out(&mut self, outpoint: &SerializedOutPoint) -> Result<TxOut> {
         if let Some(tx_out) = self.outpoints.get(outpoint) {
             return Ok(tx_out.clone());
         }
@@ -277,7 +280,7 @@ impl BlockCache {
                         self.delete.script_pubkeys_outpoints.insert(txin.clone());
 
                         if !self.settings.index_spent_outputs {
-                            self.delete.tx_outs.insert(txin);
+                            self.delete.tx_outs.insert(txin.previous_outpoint.clone());
                         }
                     }
 
@@ -293,9 +296,6 @@ impl BlockCache {
     }
 
     fn update_script_pubkeys(&mut self) -> Result<()> {
-        // TODO: We're not taking into account past outpoitns that are not in this interval.
-        // This will cause us to miss deleting some outpoints for certain script pubkeys.
-
         for (outpoint, script_pubkey) in self.update.script_pubkeys_outpoints.iter() {
             let entry: &mut (Vec<SerializedOutPoint>, Vec<SerializedOutPoint>) = self
                 .update
@@ -373,7 +373,7 @@ impl TransactionStore for BlockCache {
     fn get_tx_outs(
         &mut self,
         outpoints: &[SerializedOutPoint],
-    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>> {
+    ) -> Result<HashMap<SerializedOutPoint, TxOut>> {
         let mut tx_outs = HashMap::default();
         let mut to_fetch = vec![];
         for outpoint in outpoints {
@@ -397,7 +397,7 @@ impl TransactionStore for BlockCache {
     fn set_tx_out(
         &mut self,
         outpoint: SerializedOutPoint,
-        tx_out: TxOutEntry,
+        tx_out: TxOut,
         script_pubkey: ScriptBuf,
     ) {
         if self.settings.index_addresses {
@@ -412,19 +412,22 @@ impl TransactionStore for BlockCache {
 
     fn set_spent_tx_out(
         &mut self,
-        outpoint: SerializedOutPoint,
+        outpoint: &TransactionStateChangeInput,
         spent: SpenderReference,
     ) -> Result<()> {
-        let mut tx_out = self.get_tx_out(&outpoint)?;
+        let mut tx_out = self.get_tx_out(&outpoint.previous_outpoint)?;
 
         self.spent_outpoints
             .entry(spent.txid)
             .or_insert(vec![])
-            .push(outpoint);
+            .push(outpoint.clone());
 
         tx_out.spent = SpentStatus::Spent(spent);
-        self.update.txouts.insert(outpoint, tx_out);
-        self.outpoints.pop(&outpoint);
+
+        self.update
+            .txouts
+            .insert(outpoint.previous_outpoint, tx_out);
+        self.outpoints.pop(&outpoint.previous_outpoint);
 
         Ok(())
     }

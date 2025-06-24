@@ -119,7 +119,7 @@ impl TitanApiAsync for AsyncClient {
         Txid::from_str(&text).map_err(Error::from)
     }
 
-    async fn get_output(&self, outpoint: &OutPoint) -> Result<TxOutEntry, Error> {
+    async fn get_output(&self, outpoint: &OutPoint) -> Result<TxOut, Error> {
         let text = self.call_text(&format!("/output/{}", outpoint)).await?;
         serde_json::from_str(&text).map_err(Error::from)
     }

@@ -3,7 +3,7 @@ use {
     crate::{
         bitcoin_rpc::BitcoinCoreRpcResultExt,
         index::{Chain, StoreError},
-        models::{Lot, TransactionStateChange},
+        models::{Lot, TransactionStateChange, TransactionStateChangeInput},
         util::IntoUsize,
     },
     bitcoin::{consensus::encode, OutPoint, Transaction},
@@ -11,7 +11,7 @@ use {
     ordinals::{Artifact, Edict, Height, Rune, RuneId, Runestone},
     rustc_hash::FxHashMap as HashMap,
     thiserror::Error,
-    titan_types::{RuneAmount, SerializedOutPoint, SpentStatus, TxOutEntry},
+    titan_types::{RuneAmount, SerializedOutPoint, SpentStatus, TxOut},
 };
 
 #[derive(Debug, Error)]
@@ -56,8 +56,25 @@ impl<'client> TransactionParser<'client> {
         tx_index: u32,
         tx: &Transaction,
     ) -> Result<TransactionStateChange> {
+        let prev_outputs = self.get_prev_outputs(store, tx)?;
+        let inputs = tx
+            .input
+            .iter()
+            .map(|txin| -> Result<TransactionStateChangeInput> {
+                let previous_outpoint = txin.previous_output.into();
+                let tx_out = prev_outputs.get(&previous_outpoint);
+
+                let script_pubkey = tx_out.map(|tx_out| tx_out.script_pubkey.clone());
+
+                Ok(TransactionStateChangeInput {
+                    previous_outpoint,
+                    script_pubkey,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
         let (allocated, risky_allocated, minted, etched, burned) = if self.should_index_runes {
-            self.parse_runes(store, tx_index, tx)?
+            self.parse_runes(store, prev_outputs, tx_index, tx)?
         } else {
             (
                 vec![HashMap::default(); tx.output.len()],
@@ -69,18 +86,19 @@ impl<'client> TransactionParser<'client> {
         };
 
         // update outpoint balances
-        let mut tx_outs: Vec<TxOutEntry> = Vec::with_capacity(tx.output.len());
+        let mut tx_outs: Vec<TxOut> = Vec::with_capacity(tx.output.len());
         for (vout, balances) in allocated.into_iter().enumerate() {
             let mut balances = balances.into_iter().collect::<Vec<(RuneId, Lot)>>();
 
             // Sort balances by id so tests can assert balances in a fixed order
             balances.sort();
 
-            let mut tx_out = TxOutEntry {
+            let mut tx_out = TxOut {
                 runes: vec![],
                 risky_runes: vec![],
                 spent: SpentStatus::Unspent,
                 value: tx.output[vout].value.to_sat(),
+                script_pubkey: tx.output[vout].script_pubkey.clone(),
             };
 
             for (id, balance) in balances {
@@ -109,11 +127,7 @@ impl<'client> TransactionParser<'client> {
 
         let transaction_state_change = TransactionStateChange {
             burned,
-            inputs: tx
-                .input
-                .iter()
-                .map(|txin| SerializedOutPoint::from(txin.previous_output))
-                .collect(),
+            inputs,
             outputs: tx_outs,
             etched,
             minted,
@@ -126,6 +140,7 @@ impl<'client> TransactionParser<'client> {
     fn parse_runes(
         &mut self,
         store: &mut dyn TransactionStore,
+        prev_outputs: HashMap<SerializedOutPoint, TxOut>,
         tx_index: u32,
         tx: &Transaction,
     ) -> Result<(
@@ -136,7 +151,7 @@ impl<'client> TransactionParser<'client> {
         HashMap<RuneId, Lot>,      // burned runes
     )> {
         let artifact = Runestone::decipher(tx);
-        let (mut unallocated, mut risky_unallocated) = self.unallocated(store, tx)?;
+        let (mut unallocated, mut risky_unallocated) = self.unallocated(tx, prev_outputs)?;
 
         // Create per-output allocation maps
         let mut allocated: Vec<HashMap<RuneId, Lot>> = vec![HashMap::default(); tx.output.len()];
@@ -509,27 +524,18 @@ impl<'client> TransactionParser<'client> {
 
     fn unallocated(
         &self,
-        store: &mut dyn TransactionStore,
         tx: &Transaction,
+        outputs: HashMap<SerializedOutPoint, TxOut>,
     ) -> Result<(HashMap<RuneId, Lot>, HashMap<RuneId, Lot>)> {
         let mut unallocated = HashMap::default();
         let mut risky_unallocated = HashMap::default();
-
-        // 1) Collect all outpoints:
-        let mut outpoints = Vec::with_capacity(tx.input.len());
-        for input in &tx.input {
-            outpoints.push(SerializedOutPoint::from(input.previous_output));
-        }
 
         if tx.is_coinbase() {
             return Ok((unallocated, risky_unallocated));
         }
 
-        // 2) Do a single multi-get in the cache:
-        let tx_out_map = store.get_tx_outs(&outpoints)?;
-
         // 3) Accumulate unallocated:
-        for (_, tx_out) in tx_out_map {
+        for (_, tx_out) in outputs {
             for rune_amount in tx_out.runes {
                 *unallocated.entry(rune_amount.rune_id).or_default() += rune_amount.amount;
             }
@@ -543,5 +549,21 @@ impl<'client> TransactionParser<'client> {
         }
 
         Ok((unallocated, risky_unallocated))
+    }
+
+    fn get_prev_outputs(
+        &self,
+        store: &mut dyn TransactionStore,
+        tx: &Transaction,
+    ) -> Result<HashMap<SerializedOutPoint, TxOut>> {
+        // 1) Collect all outpoints:
+        let mut outpoints = Vec::with_capacity(tx.input.len());
+        for input in &tx.input {
+            outpoints.push(SerializedOutPoint::from(input.previous_output));
+        }
+
+        let tx_out_map = store.get_tx_outs(&outpoints)?;
+
+        Ok(tx_out_map)
     }
 }

@@ -7,6 +7,7 @@ use {
         },
         models::{
             BatchDelete, BatchUpdate, BlockId, Inscription, RuneEntry, TransactionStateChange,
+            TransactionStateChangeInput,
         },
     },
     bitcoin::{consensus, ScriptBuf, Transaction},
@@ -15,7 +16,7 @@ use {
     std::{sync::Arc, time::Instant},
     titan_types::{
         Event, InscriptionId, Location, MempoolEntry, SerializedOutPoint, SerializedTxid,
-        SpenderReference, SpentStatus, TxOutEntry,
+        SpenderReference, SpentStatus, TxOut,
     },
     tracing::info,
 };
@@ -84,7 +85,7 @@ impl MempoolCache {
         self.update.mempool_txs.insert(txid, mempool_entry);
     }
 
-    fn get_tx_out(&self, outpoint: &SerializedOutPoint) -> Result<TxOutEntry> {
+    fn get_tx_out(&self, outpoint: &SerializedOutPoint) -> Result<TxOut> {
         if let Some(tx_out) = self.update.txouts.get(outpoint) {
             return Ok(tx_out.clone());
         }
@@ -148,7 +149,7 @@ impl TransactionStore for MempoolCache {
     fn get_tx_outs(
         &mut self,
         outpoints: &[SerializedOutPoint],
-    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>> {
+    ) -> Result<HashMap<SerializedOutPoint, TxOut>> {
         let mut results = HashMap::default();
         let mut to_fetch = HashSet::default();
 
@@ -176,7 +177,7 @@ impl TransactionStore for MempoolCache {
     fn set_tx_out(
         &mut self,
         outpoint: SerializedOutPoint,
-        tx_out: TxOutEntry,
+        tx_out: TxOut,
         script_pubkey: ScriptBuf,
     ) {
         self.update.txouts.insert(outpoint, tx_out);
@@ -190,14 +191,14 @@ impl TransactionStore for MempoolCache {
 
     fn set_spent_tx_out(
         &mut self,
-        outpoint: SerializedOutPoint,
+        outpoint: &TransactionStateChangeInput,
         spent: SpenderReference,
     ) -> Result<()> {
-        match self.get_tx_out(&outpoint) {
+        match self.get_tx_out(&outpoint.previous_outpoint) {
             Ok(tx_out) => {
                 let mut tx_out = tx_out;
                 tx_out.spent = SpentStatus::Spent(spent.clone());
-                self.update.txouts.insert(outpoint, tx_out);
+                self.update.txouts.insert(outpoint.previous_outpoint, tx_out);
             }
             Err(StoreError::NotFound(_)) => {}
             Err(e) => return Err(e),
@@ -206,7 +207,7 @@ impl TransactionStore for MempoolCache {
         if self.settings.index_addresses {
             self.update
                 .spent_outpoints_in_mempool
-                .insert(outpoint, spent);
+                .insert(outpoint.previous_outpoint, spent);
         }
 
         Ok(())

@@ -12,7 +12,7 @@ use {
     thiserror::Error,
     titan_types::{
         Block, InscriptionId, MempoolEntry, Pagination, PaginationResponse, SerializedOutPoint,
-        SerializedTxid, SpenderReference, SpentStatus, Transaction, TransactionStatus, TxOutEntry,
+        SerializedTxid, SpenderReference, SpentStatus, Transaction, TransactionStatus, TxOut,
     },
 };
 
@@ -97,26 +97,26 @@ pub trait Store {
         &self,
         outpoint: &SerializedOutPoint,
         mempool: Option<bool>,
-    ) -> Result<TxOutEntry, StoreError>;
+    ) -> Result<TxOut, StoreError>;
     fn get_all_tx_outs(
         &self,
         mempool: bool,
-    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>, StoreError>;
+    ) -> Result<HashMap<SerializedOutPoint, TxOut>, StoreError>;
     fn get_tx_out_with_mempool_spent_update(
         &self,
         outpoint: &SerializedOutPoint,
         mempool: Option<bool>,
-    ) -> Result<TxOutEntry, StoreError>;
+    ) -> Result<TxOut, StoreError>;
     fn get_tx_outs(
         &self,
         outpoints: &[SerializedOutPoint],
         mempool: Option<bool>,
-    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>, StoreError>;
+    ) -> Result<HashMap<SerializedOutPoint, TxOut>, StoreError>;
     fn get_tx_outs_with_mempool_spent_update(
         &self,
         outpoints: &[SerializedOutPoint],
         mempool: Option<bool>,
-    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>, StoreError>;
+    ) -> Result<HashMap<SerializedOutPoint, TxOut>, StoreError>;
 
     // transaction changes
     fn get_tx_state_changes(
@@ -154,7 +154,7 @@ pub trait Store {
         transaction: &bitcoin::Transaction,
         txid: &SerializedTxid,
         mempool: Option<bool>,
-    ) -> Result<(Vec<Option<TxOutEntry>>, Vec<Option<TxOutEntry>>), StoreError>;
+    ) -> Result<(Vec<Option<TxOut>>, Vec<Option<TxOut>>), StoreError>;
     fn partition_transactions_by_existence(
         &self,
         txids: &Vec<SerializedTxid>,
@@ -353,7 +353,7 @@ impl Store for RocksDB {
         &self,
         outpoint: &SerializedOutPoint,
         mempool: Option<bool>,
-    ) -> Result<TxOutEntry, StoreError> {
+    ) -> Result<TxOut, StoreError> {
         if let Some(mempool) = mempool {
             Ok(self.get_tx_out(outpoint, mempool)?)
         } else {
@@ -370,7 +370,7 @@ impl Store for RocksDB {
     fn get_all_tx_outs(
         &self,
         mempool: bool,
-    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>, StoreError> {
+    ) -> Result<HashMap<SerializedOutPoint, TxOut>, StoreError> {
         Ok(self.get_all_tx_outs(mempool)?)
     }
 
@@ -378,7 +378,7 @@ impl Store for RocksDB {
         &self,
         outpoint: &SerializedOutPoint,
         mempool: Option<bool>,
-    ) -> Result<TxOutEntry, StoreError> {
+    ) -> Result<TxOut, StoreError> {
         let mut tx_out = if let Some(mempool) = mempool {
             self.get_tx_out(outpoint, mempool)?
         } else {
@@ -410,7 +410,7 @@ impl Store for RocksDB {
         &self,
         outpoints: &[SerializedOutPoint],
         mempool: Option<bool>,
-    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>, StoreError> {
+    ) -> Result<HashMap<SerializedOutPoint, TxOut>, StoreError> {
         Ok(self.get_tx_outs(outpoints, mempool)?)
     }
 
@@ -418,7 +418,7 @@ impl Store for RocksDB {
         &self,
         outpoints: &[SerializedOutPoint],
         mempool: Option<bool>,
-    ) -> Result<HashMap<SerializedOutPoint, TxOutEntry>, StoreError> {
+    ) -> Result<HashMap<SerializedOutPoint, TxOut>, StoreError> {
         let mut tx_outs = self.get_tx_outs(outpoints, mempool)?;
         let spent_outpoints: HashMap<SerializedOutPoint, Option<SpenderReference>> =
             self.get_spent_outpoints_in_mempool(outpoints)?;
@@ -516,7 +516,7 @@ impl Store for RocksDB {
         transaction: &bitcoin::Transaction,
         txid: &SerializedTxid,
         mempool: Option<bool>,
-    ) -> Result<(Vec<Option<TxOutEntry>>, Vec<Option<TxOutEntry>>), StoreError> {
+    ) -> Result<(Vec<Option<TxOut>>, Vec<Option<TxOut>>), StoreError> {
         let prev_outpoints = transaction
             .input
             .iter()
