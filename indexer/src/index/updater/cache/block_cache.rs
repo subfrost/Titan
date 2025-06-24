@@ -30,6 +30,7 @@ pub struct BlockCacheSettings {
     pub chain: Chain,
     pub max_async_batches: usize,
     pub index_addresses: bool,
+    pub index_spent_outputs: bool,
     pub rune_cache_size: usize,
     pub outpoint_cache_size: usize,
 }
@@ -40,6 +41,7 @@ impl BlockCacheSettings {
             max_recoverable_reorg_depth: settings.max_recoverable_reorg_depth(),
             chain: settings.chain,
             index_addresses: settings.index_addresses,
+            index_spent_outputs: settings.index_spent_outputs,
             max_async_batches: 8,
             rune_cache_size: 1000,
             outpoint_cache_size: 10_000_000,
@@ -273,7 +275,10 @@ impl BlockCache {
                 if let Some(inputs) = inputs {
                     for txin in inputs {
                         self.delete.script_pubkeys_outpoints.insert(txin.clone());
-                        self.delete.tx_outs.insert(txin);
+
+                        if !self.settings.index_spent_outputs {
+                            self.delete.tx_outs.insert(txin);
+                        }
                     }
 
                     self.delete.tx_state_changes.insert(*txid);

@@ -99,6 +99,15 @@ pub struct Options {
     )]
     pub(super) index_bitcoin_transactions: bool,
 
+    /// Index spent outputs
+    #[arg(
+        long,
+        short,
+        help = "Index spent outputs. [default: true]",
+        default_value = "true"
+    )]
+    pub(super) index_spent_outputs: bool,
+
     /// Index addresses. [default: false]
     #[arg(
         long,
@@ -111,8 +120,8 @@ pub struct Options {
     /// Commit interval in blocks. [default: 500]
     #[arg(
         long,
-        help = "Commit interval in blocks. [default: 500]",
-        default_value = "500"
+        help = "Commit interval in blocks. [default: 50]",
+        default_value = "50"
     )]
     pub(super) commit_interval: u64,
 
@@ -197,6 +206,7 @@ impl From<Options> for Settings {
             chain: options.chain,
             no_index_inscriptions: options.no_index_inscriptions,
             index_bitcoin_transactions: options.index_bitcoin_transactions,
+            index_spent_outputs: options.index_spent_outputs,
             index_addresses: options.index_addresses,
             commit_interval: options.commit_interval,
             main_loop_interval: options.main_loop_interval,

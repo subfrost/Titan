@@ -49,6 +49,8 @@ pub trait Store {
     fn set_index_addresses(&self, value: bool) -> Result<(), StoreError>;
     fn is_index_bitcoin_transactions(&self) -> Result<Option<bool>, StoreError>;
     fn set_index_bitcoin_transactions(&self, value: bool) -> Result<(), StoreError>;
+    fn is_index_spent_outputs(&self) -> Result<Option<bool>, StoreError>;
+    fn set_index_spent_outputs(&self, value: bool) -> Result<(), StoreError>;
 
     // block
     fn get_block_count(&self) -> Result<u64, StoreError>;
@@ -147,12 +149,12 @@ pub trait Store {
         &self,
         txids: &[SerializedTxid],
     ) -> Result<HashMap<SerializedTxid, Option<BlockId>>, StoreError>;
-    fn get_outputs_from_transaction(
+    fn get_inputs_outputs_from_transaction(
         &self,
         transaction: &bitcoin::Transaction,
         txid: &SerializedTxid,
         mempool: Option<bool>,
-    ) -> Result<Vec<Option<TxOutEntry>>, StoreError>;
+    ) -> Result<(Vec<Option<TxOutEntry>>, Vec<Option<TxOutEntry>>), StoreError>;
     fn partition_transactions_by_existence(
         &self,
         txids: &Vec<SerializedTxid>,
@@ -221,6 +223,14 @@ impl Store for RocksDB {
 
     fn set_index_bitcoin_transactions(&self, value: bool) -> Result<(), StoreError> {
         Ok(self.set_index_bitcoin_transactions(value)?)
+    }
+
+    fn is_index_spent_outputs(&self) -> Result<Option<bool>, StoreError> {
+        Ok(self.is_index_spent_outputs()?)
+    }
+
+    fn set_index_spent_outputs(&self, value: bool) -> Result<(), StoreError> {
+        Ok(self.set_index_spent_outputs(value)?)
     }
 
     fn get_block_count(&self) -> Result<u64, StoreError> {
@@ -495,17 +505,24 @@ impl Store for RocksDB {
             }
         };
 
-        let outputs = self.get_outputs_from_transaction(&transaction, txid, Some(mempool))?;
+        let (inputs, outputs) =
+            self.get_inputs_outputs_from_transaction(&transaction, txid, Some(mempool))?;
 
-        Ok(Transaction::from((transaction, status, outputs)))
+        Ok(Transaction::from((transaction, status, inputs, outputs)))
     }
 
-    fn get_outputs_from_transaction(
+    fn get_inputs_outputs_from_transaction(
         &self,
         transaction: &bitcoin::Transaction,
         txid: &SerializedTxid,
         mempool: Option<bool>,
-    ) -> Result<Vec<Option<TxOutEntry>>, StoreError> {
+    ) -> Result<(Vec<Option<TxOutEntry>>, Vec<Option<TxOutEntry>>), StoreError> {
+        let prev_outpoints = transaction
+            .input
+            .iter()
+            .map(|tx_in| tx_in.previous_output.into())
+            .collect::<Vec<SerializedOutPoint>>();
+
         let outpoints = transaction
             .output
             .iter()
@@ -513,14 +530,26 @@ impl Store for RocksDB {
             .map(|(vout, _)| SerializedOutPoint::from_txid_vout(txid, vout as u32))
             .collect::<Vec<_>>();
 
-        let mut outputs_map = self.get_tx_outs_with_mempool_spent_update(&outpoints, mempool)?;
+        let all_outpoints = prev_outpoints
+            .iter()
+            .chain(outpoints.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let mut outputs_map =
+            self.get_tx_outs_with_mempool_spent_update(&all_outpoints, mempool)?;
+
+        let inputs = prev_outpoints
+            .iter()
+            .map(|outpoint| outputs_map.remove(outpoint))
+            .collect::<Vec<_>>();
 
         let outputs = outpoints
             .iter()
             .map(|outpoint| outputs_map.remove(outpoint))
             .collect::<Vec<_>>();
 
-        Ok(outputs)
+        Ok((inputs, outputs))
     }
 
     fn get_transaction_raw(

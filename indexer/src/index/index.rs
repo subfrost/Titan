@@ -124,6 +124,20 @@ impl Index {
             _ => {}
         }
 
+        let db_index_spent_outputs = self.db.is_index_spent_outputs()?;
+        match (self.settings.index_spent_outputs, db_index_spent_outputs) {
+            (true, Some(false)) => {
+                return Err(IndexError::InvalidIndex("index_spent_outputs is not set. Disable index_spent_outputs in settings or clean up the database".to_string()));
+            }
+            (true, None) => {
+                self.db.set_index_spent_outputs(true)?;
+            }
+            (false, Some(true)) | (false, None) => {
+                self.db.set_index_spent_outputs(false)?;
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 
@@ -375,15 +389,15 @@ impl Index {
         Ok(self.db.get_transaction(txid, None)?)
     }
 
-    pub fn get_outputs_from_transaction(
+    pub fn get_inputs_outputs_from_transaction(
         &self,
         transaction: &BitcoinTransaction,
         txid: &SerializedTxid,
         mempool: Option<bool>,
-    ) -> Result<Vec<Option<TxOutEntry>>> {
+    ) -> Result<(Vec<Option<TxOutEntry>>, Vec<Option<TxOutEntry>>)> {
         Ok(self
             .db
-            .get_outputs_from_transaction(transaction, txid, mempool)?)
+            .get_inputs_outputs_from_transaction(transaction, txid, mempool)?)
     }
 
     pub fn get_transaction_status(&self, txid: &SerializedTxid) -> Result<TransactionStatus> {

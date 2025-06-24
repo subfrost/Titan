@@ -10,6 +10,7 @@ pub use {
     stats::{BlockTip, Status},
     subscription::{Subscription, TcpSubscriptionRequest},
     transaction::{Transaction, TransactionStatus, TxOut},
+    tx_in::TxIn,
     tx_out::{SpenderReference, SpentStatus, TxOutEntry},
     txid::SerializedTxid,
 };
@@ -26,6 +27,7 @@ mod rune;
 mod stats;
 mod subscription;
 mod transaction;
+mod tx_in;
 mod tx_out;
 mod txid;
 

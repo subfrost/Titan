@@ -1,6 +1,6 @@
 use {
-    crate::{rune::RuneAmount, tx_out::SpentStatus, TxOutEntry},
-    bitcoin::{BlockHash, ScriptBuf, TxIn, Txid},
+    crate::{rune::RuneAmount, tx_in::TxIn, tx_out::SpentStatus, TxOutEntry},
+    bitcoin::{BlockHash, ScriptBuf, Txid},
     borsh::{BorshDeserialize, BorshSerialize},
     serde::{Deserialize, Serialize},
     std::io::{Read, Result, Write},
@@ -48,12 +48,14 @@ impl
         bitcoin::Transaction,
         TransactionStatus,
         Vec<Option<TxOutEntry>>,
+        Vec<Option<TxOutEntry>>,
     )> for Transaction
 {
     fn from(
-        (transaction, status, outputs): (
+        (transaction, status, prev_outputs, outputs): (
             bitcoin::Transaction,
             TransactionStatus,
+            Vec<Option<TxOutEntry>>,
             Vec<Option<TxOutEntry>>,
         ),
     ) -> Self {
@@ -61,7 +63,12 @@ impl
             txid: transaction.compute_txid(),
             version: transaction.version.0,
             lock_time: transaction.lock_time.to_consensus_u32(),
-            input: transaction.input,
+            input: transaction
+                .input
+                .into_iter()
+                .zip(prev_outputs.into_iter())
+                .map(|(tx_in, prev_output)| TxIn::from((tx_in, prev_output)))
+                .collect(),
             output: transaction
                 .output
                 .into_iter()

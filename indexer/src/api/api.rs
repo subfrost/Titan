@@ -201,8 +201,9 @@ pub fn transaction(
     } else {
         let status = index.get_transaction_status(txid)?;
         let transaction = client.get_raw_transaction(&txid.into(), None)?;
-        let outputs = index.get_outputs_from_transaction(&transaction, txid, None)?;
-        let transaction = Transaction::from((transaction, status, outputs));
+        let (inputs, outputs) =
+            index.get_inputs_outputs_from_transaction(&transaction, txid, None)?;
+        let transaction = Transaction::from((transaction, status, inputs, outputs));
 
         transaction
     };
