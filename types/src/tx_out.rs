@@ -93,7 +93,7 @@ impl TxOutEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rune::{RuneAmount};
+    use crate::rune::RuneAmount;
     use borsh::{BorshDeserialize, BorshSerialize};
     use ordinals::RuneId;
 
@@ -128,7 +128,10 @@ mod tests {
 
     fn create_test_rune_amount() -> RuneAmount {
         RuneAmount {
-            rune_id: RuneId { block: 840000, tx: 1 },
+            rune_id: RuneId {
+                block: 840000,
+                tx: 1,
+            },
             amount: 1000000000000000000u128,
         }
     }
@@ -193,9 +196,9 @@ mod tests {
     fn test_spent_status_different_variants() {
         let unspent = SpentStatus::Unspent;
         let spent = SpentStatus::Spent(create_test_spender_reference());
-        
+
         assert_ne!(unspent, spent);
-        
+
         // Test serialization produces different results
         let unspent_serialized = borsh::to_vec(&unspent).unwrap();
         let spent_serialized = borsh::to_vec(&spent).unwrap();
@@ -250,15 +253,24 @@ mod tests {
     #[test]
     fn test_tx_out_entry_multiple_runes() {
         let rune1 = RuneAmount {
-            rune_id: RuneId { block: 840000, tx: 1 },
+            rune_id: RuneId {
+                block: 840000,
+                tx: 1,
+            },
             amount: 1000000000000000000u128,
         };
         let rune2 = RuneAmount {
-            rune_id: RuneId { block: 840001, tx: 2 },
+            rune_id: RuneId {
+                block: 840001,
+                tx: 2,
+            },
             amount: 2000000000000000000u128,
         };
         let rune3 = RuneAmount {
-            rune_id: RuneId { block: 840002, tx: 3 },
+            rune_id: RuneId {
+                block: 840002,
+                tx: 3,
+            },
             amount: 3000000000000000000u128,
         };
 
@@ -303,14 +315,20 @@ mod tests {
         // Test with larger collections
         let runes: Vec<RuneAmount> = (0..10)
             .map(|i| RuneAmount {
-                rune_id: RuneId { block: 840000 + i, tx: i as u32 },
+                rune_id: RuneId {
+                    block: 840000 + i,
+                    tx: i as u32,
+                },
                 amount: (i as u128 + 1) * 1000000000000000000u128,
             })
             .collect();
 
         let risky_runes: Vec<RuneAmount> = (10..15)
             .map(|i| RuneAmount {
-                rune_id: RuneId { block: 840000 + i, tx: i as u32 },
+                rune_id: RuneId {
+                    block: 840000 + i,
+                    tx: i as u32,
+                },
                 amount: (i as u128 + 1) * 500000000000000000u128,
             })
             .collect();
@@ -330,12 +348,12 @@ mod tests {
     #[test]
     fn test_tx_out_entry_consistency() {
         let original = create_test_tx_out_entry();
-        
+
         // Test that multiple serializations produce the same result
         let serialized1 = borsh::to_vec(&original).unwrap();
         let serialized2 = borsh::to_vec(&original).unwrap();
         assert_eq!(serialized1, serialized2);
-        
+
         // Test that deserialization produces the same value
         let deserialized1 = borsh::from_slice::<TxOutEntry>(&serialized1).unwrap();
         let deserialized2 = borsh::from_slice::<TxOutEntry>(&serialized2).unwrap();
@@ -346,7 +364,10 @@ mod tests {
     #[test]
     fn test_edge_cases_with_extreme_rune_values() {
         let extreme_rune = RuneAmount {
-            rune_id: RuneId { block: u64::MAX, tx: u32::MAX },
+            rune_id: RuneId {
+                block: u64::MAX,
+                tx: u32::MAX,
+            },
             amount: u128::MAX,
         };
 

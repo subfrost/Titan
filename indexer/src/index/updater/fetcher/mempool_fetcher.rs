@@ -1,9 +1,9 @@
 use bitcoin::Transaction;
 use bitcoincore_rpc::json::GetMempoolEntryResult;
 use bitcoincore_rpc::RpcApi;
+use rustc_hash::FxHashMap as HashMap;
 use std::cmp::min;
 use std::collections::VecDeque;
-use rustc_hash::FxHashMap as HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;

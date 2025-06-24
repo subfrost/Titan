@@ -173,8 +173,8 @@ impl<'de> Deserialize<'de> for SerializedOutPoint {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use borsh::{BorshDeserialize, BorshSerialize};
     use bitcoin::{hashes::Hash, OutPoint, Txid};
+    use borsh::{BorshDeserialize, BorshSerialize};
 
     /// Helper function to test borsh serialization roundtrip
     fn test_borsh_roundtrip<T>(original: &T) -> T
@@ -277,7 +277,7 @@ mod tests {
         let txid_bytes = [1u8; 32];
         let vout = 42;
         let outpoint = SerializedOutPoint::new(&txid_bytes, vout);
-        
+
         let display_str = outpoint.to_string();
         assert!(display_str.contains(":"));
         assert!(display_str.contains(&vout.to_string()));
@@ -288,10 +288,10 @@ mod tests {
         let txid_str = "1111111111111111111111111111111111111111111111111111111111111111";
         let vout = 42;
         let outpoint_str = format!("{}:{}", txid_str, vout);
-        
+
         let outpoint = SerializedOutPoint::from_str(&outpoint_str)
             .expect("Should parse valid outpoint string");
-        
+
         assert_eq!(outpoint.vout(), vout);
     }
 
@@ -317,8 +317,8 @@ mod tests {
     #[test]
     fn test_serialized_outpoint_try_from_box() {
         let boxed_slice: Box<[u8]> = Box::new([42u8; 36]);
-        let outpoint = SerializedOutPoint::try_from(boxed_slice)
-            .expect("Should convert from Box<[u8]>");
+        let outpoint =
+            SerializedOutPoint::try_from(boxed_slice).expect("Should convert from Box<[u8]>");
         assert_eq!(outpoint.txid(), &[42u8; 32]);
     }
 
@@ -334,7 +334,7 @@ mod tests {
         let txid_bytes = [42u8; 32];
         let outpoint = SerializedOutPoint::new(&txid_bytes, 0);
         let bitcoin_txid = outpoint.to_txid();
-        
+
         // Verify the txid conversion works correctly
         assert_eq!(bitcoin_txid.as_raw_hash().as_byte_array(), &txid_bytes);
     }
@@ -344,19 +344,19 @@ mod tests {
         let txid_bytes = [42u8; 32];
         let outpoint = SerializedOutPoint::new(&txid_bytes, 0);
         let serialized_txid = outpoint.to_serialized_txid();
-        
+
         assert_eq!(serialized_txid.as_bytes(), &txid_bytes);
     }
 
     #[test]
     fn test_serialized_outpoint_consistency() {
         let original = create_test_outpoint();
-        
+
         // Test that multiple serializations produce the same result
         let serialized1 = borsh::to_vec(&original).unwrap();
         let serialized2 = borsh::to_vec(&original).unwrap();
         assert_eq!(serialized1, serialized2);
-        
+
         // Test that deserialization produces the same value
         let deserialized1 = borsh::from_slice::<SerializedOutPoint>(&serialized1).unwrap();
         let deserialized2 = borsh::from_slice::<SerializedOutPoint>(&serialized2).unwrap();
@@ -387,16 +387,12 @@ mod tests {
     #[test]
     fn test_serialized_outpoint_edge_cases() {
         // Test with different txid patterns
-        let patterns = [
-            [0u8; 32],
-            [255u8; 32],
-            {
-                let mut pattern = [0u8; 32];
-                pattern[0] = 255;
-                pattern[31] = 255;
-                pattern
-            },
-        ];
+        let patterns = [[0u8; 32], [255u8; 32], {
+            let mut pattern = [0u8; 32];
+            pattern[0] = 255;
+            pattern[31] = 255;
+            pattern
+        }];
 
         for pattern in patterns {
             let outpoint = SerializedOutPoint::new(&pattern, 42);

@@ -146,9 +146,7 @@ mod tests {
                 SerializedTxid::from([1u8; 32]),
                 SerializedTxid::from([2u8; 32]),
             ],
-            spent_by: vec![
-                SerializedTxid::from([3u8; 32]),
-            ],
+            spent_by: vec![SerializedTxid::from([3u8; 32])],
         }
     }
 
@@ -193,14 +191,13 @@ mod tests {
     #[test]
     fn test_mempool_entry_serialization_deserialization_round_trip() {
         let original = create_test_mempool_entry();
-        
+
         // Serialize
         let serialized = serialize_entry(&original).expect("Serialization should succeed");
-        
+
         // Deserialize
-        let deserialized = deserialize_entry(&serialized)
-            .expect("Deserialization should succeed");
-        
+        let deserialized = deserialize_entry(&serialized).expect("Deserialization should succeed");
+
         // Assert equality
         assert_eq!(original, deserialized);
     }
@@ -208,14 +205,13 @@ mod tests {
     #[test]
     fn test_mempool_entry_minimal_serialization_deserialization() {
         let original = create_minimal_mempool_entry();
-        
+
         // Serialize
         let serialized = serialize_entry(&original).expect("Serialization should succeed");
-        
+
         // Deserialize
-        let deserialized = deserialize_entry(&serialized)
-            .expect("Deserialization should succeed");
-        
+        let deserialized = deserialize_entry(&serialized).expect("Deserialization should succeed");
+
         // Assert equality
         assert_eq!(original, deserialized);
     }
@@ -224,11 +220,10 @@ mod tests {
     fn test_mempool_entry_with_none_weight() {
         let mut entry = create_test_mempool_entry();
         entry.weight = None;
-        
+
         let serialized = serialize_entry(&entry).expect("Serialization should succeed");
-        let deserialized = deserialize_entry(&serialized)
-            .expect("Deserialization should succeed");
-        
+        let deserialized = deserialize_entry(&serialized).expect("Deserialization should succeed");
+
         assert_eq!(entry, deserialized);
         assert_eq!(deserialized.weight, None);
     }
@@ -237,11 +232,10 @@ mod tests {
     fn test_mempool_entry_with_some_weight() {
         let mut entry = create_test_mempool_entry();
         entry.weight = Some(42000);
-        
+
         let serialized = serialize_entry(&entry).expect("Serialization should succeed");
-        let deserialized = deserialize_entry(&serialized)
-            .expect("Deserialization should succeed");
-        
+        let deserialized = deserialize_entry(&serialized).expect("Deserialization should succeed");
+
         assert_eq!(entry, deserialized);
         assert_eq!(deserialized.weight, Some(42000));
     }
@@ -251,11 +245,10 @@ mod tests {
         let mut entry = create_test_mempool_entry();
         entry.depends = vec![];
         entry.spent_by = vec![];
-        
+
         let serialized = serialize_entry(&entry).expect("Serialization should succeed");
-        let deserialized = deserialize_entry(&serialized)
-            .expect("Deserialization should succeed");
-        
+        let deserialized = deserialize_entry(&serialized).expect("Deserialization should succeed");
+
         assert_eq!(entry, deserialized);
         assert!(deserialized.depends.is_empty());
         assert!(deserialized.spent_by.is_empty());
@@ -264,15 +257,18 @@ mod tests {
     #[test]
     fn test_mempool_entry_large_vectors() {
         let mut entry = create_test_mempool_entry();
-        
+
         // Create larger vectors
-        entry.depends = (0..10).map(|i| SerializedTxid::from([i as u8; 32])).collect();
-        entry.spent_by = (10..15).map(|i| SerializedTxid::from([i as u8; 32])).collect();
-        
+        entry.depends = (0..10)
+            .map(|i| SerializedTxid::from([i as u8; 32]))
+            .collect();
+        entry.spent_by = (10..15)
+            .map(|i| SerializedTxid::from([i as u8; 32]))
+            .collect();
+
         let serialized = serialize_entry(&entry).expect("Serialization should succeed");
-        let deserialized = deserialize_entry(&serialized)
-            .expect("Deserialization should succeed");
-        
+        let deserialized = deserialize_entry(&serialized).expect("Deserialization should succeed");
+
         assert_eq!(entry, deserialized);
         assert_eq!(deserialized.depends.len(), 10);
         assert_eq!(deserialized.spent_by.len(), 5);
@@ -285,11 +281,11 @@ mod tests {
             descendant: 0,
             ancestor: 12345,
         };
-        
+
         let serialized = serialize_fee(&fee).expect("Fee serialization should succeed");
-        let deserialized = deserialize_fee(&serialized)
-            .expect("Fee deserialization should succeed");
-        
+        let deserialized =
+            deserialize_fee(&serialized).expect("Fee deserialization should succeed");
+
         assert_eq!(fee, deserialized);
     }
 
@@ -310,11 +306,10 @@ mod tests {
             depends: vec![SerializedTxid::all_zeros()],
             spent_by: vec![SerializedTxid::from([255u8; 32])],
         };
-        
+
         let serialized = serialize_entry(&entry).expect("Serialization should succeed");
-        let deserialized = deserialize_entry(&serialized)
-            .expect("Deserialization should succeed");
-        
+        let deserialized = deserialize_entry(&serialized).expect("Deserialization should succeed");
+
         assert_eq!(entry, deserialized);
     }
 
@@ -335,11 +330,10 @@ mod tests {
             depends: vec![],
             spent_by: vec![],
         };
-        
+
         let serialized = serialize_entry(&entry).expect("Serialization should succeed");
-        let deserialized = deserialize_entry(&serialized)
-            .expect("Deserialization should succeed");
-        
+        let deserialized = deserialize_entry(&serialized).expect("Deserialization should succeed");
+
         assert_eq!(entry, deserialized);
     }
 
@@ -347,10 +341,10 @@ mod tests {
     fn test_serialized_data_consistency() {
         let entry1 = create_test_mempool_entry();
         let entry2 = create_test_mempool_entry();
-        
+
         let serialized1 = serialize_entry(&entry1).expect("Serialization should succeed");
         let serialized2 = serialize_entry(&entry2).expect("Serialization should succeed");
-        
+
         // Same data should produce same serialized bytes
         assert_eq!(serialized1, serialized2);
     }
@@ -359,13 +353,13 @@ mod tests {
     fn test_serialization_size_efficiency() {
         let minimal = create_minimal_mempool_entry();
         let full = create_test_mempool_entry();
-        
+
         let minimal_size = serialize_entry(&minimal).unwrap().len();
         let full_size = serialize_entry(&full).unwrap().len();
-        
+
         // Full entry should be larger than minimal (basic sanity check)
         assert!(full_size > minimal_size);
-        
+
         // Print sizes for debugging (will only show when test runs with --nocapture)
         println!("Minimal entry serialized size: {} bytes", minimal_size);
         println!("Full entry serialized size: {} bytes", full_size);
@@ -376,6 +370,9 @@ mod tests {
         // Test with incomplete data
         let incomplete_data = vec![1, 2, 3]; // Too short to be valid
         let result = deserialize_entry(&incomplete_data);
-        assert!(result.is_err(), "Should fail to deserialize incomplete data");
+        assert!(
+            result.is_err(),
+            "Should fail to deserialize incomplete data"
+        );
     }
 }

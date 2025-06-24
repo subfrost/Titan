@@ -137,11 +137,7 @@ impl Block {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcoin::{
-        block::Version,
-        hashes::Hash,
-        BlockHash, CompactTarget, TxMerkleNode,
-    };
+    use bitcoin::{block::Version, hashes::Hash, BlockHash, CompactTarget, TxMerkleNode};
     use borsh::BorshDeserialize;
     use ordinals::RuneId;
 
@@ -149,12 +145,8 @@ mod tests {
     fn create_test_header() -> Header {
         Header {
             version: Version::from_consensus(1),
-            prev_blockhash: BlockHash::from_raw_hash(
-                Hash::from_slice(&[1u8; 32]).unwrap()
-            ),
-            merkle_root: TxMerkleNode::from_raw_hash(
-                Hash::from_slice(&[2u8; 32]).unwrap()
-            ),
+            prev_blockhash: BlockHash::from_raw_hash(Hash::from_slice(&[1u8; 32]).unwrap()),
+            merkle_root: TxMerkleNode::from_raw_hash(Hash::from_slice(&[2u8; 32]).unwrap()),
             time: 1640995200, // 2022-01-01 00:00:00 UTC
             bits: CompactTarget::from_consensus(0x1d00ffff),
             nonce: 42,
@@ -186,10 +178,10 @@ mod tests {
 
         // Serialize
         let serialized = borsh::to_vec(&block).expect("Failed to serialize empty block");
-        
+
         // Deserialize
-        let deserialized = Block::try_from_slice(&serialized)
-            .expect("Failed to deserialize empty block");
+        let deserialized =
+            Block::try_from_slice(&serialized).expect("Failed to deserialize empty block");
 
         // Verify all fields match
         assert_eq!(block.height, deserialized.height);
@@ -214,10 +206,10 @@ mod tests {
 
         // Serialize
         let serialized = borsh::to_vec(&block).expect("Failed to serialize full block");
-        
+
         // Deserialize
-        let deserialized = Block::try_from_slice(&serialized)
-            .expect("Failed to deserialize full block");
+        let deserialized =
+            Block::try_from_slice(&serialized).expect("Failed to deserialize full block");
 
         // Verify all fields match
         assert_eq!(block.height, deserialized.height);
@@ -241,10 +233,10 @@ mod tests {
 
         // Serialize
         let serialized = borsh::to_vec(&block).expect("Failed to serialize single tx block");
-        
+
         // Deserialize
-        let deserialized = Block::try_from_slice(&serialized)
-            .expect("Failed to deserialize single tx block");
+        let deserialized =
+            Block::try_from_slice(&serialized).expect("Failed to deserialize single tx block");
 
         assert_eq!(block, deserialized);
         assert_eq!(deserialized.tx_ids.len(), 1);
@@ -254,7 +246,10 @@ mod tests {
     #[test]
     fn test_block_with_single_rune_serialization() {
         let header = create_test_header();
-        let etched_runes = vec![RuneId { block: 999, tx: 888 }];
+        let etched_runes = vec![RuneId {
+            block: 999,
+            tx: 888,
+        }];
 
         let block = Block {
             height: 2,
@@ -265,10 +260,10 @@ mod tests {
 
         // Serialize
         let serialized = borsh::to_vec(&block).expect("Failed to serialize single rune block");
-        
+
         // Deserialize
-        let deserialized = Block::try_from_slice(&serialized)
-            .expect("Failed to deserialize single rune block");
+        let deserialized =
+            Block::try_from_slice(&serialized).expect("Failed to deserialize single rune block");
 
         assert_eq!(block, deserialized);
         assert_eq!(deserialized.tx_ids.len(), 0);
@@ -281,12 +276,8 @@ mod tests {
     fn test_block_with_edge_case_values() {
         let header = Header {
             version: Version::from_consensus(i32::MAX),
-            prev_blockhash: BlockHash::from_raw_hash(
-                Hash::from_slice(&[0u8; 32]).unwrap()
-            ),
-            merkle_root: TxMerkleNode::from_raw_hash(
-                Hash::from_slice(&[255u8; 32]).unwrap()
-            ),
+            prev_blockhash: BlockHash::from_raw_hash(Hash::from_slice(&[0u8; 32]).unwrap()),
+            merkle_root: TxMerkleNode::from_raw_hash(Hash::from_slice(&[255u8; 32]).unwrap()),
             time: u32::MAX,
             bits: CompactTarget::from_consensus(u32::MAX),
             nonce: u32::MAX,
@@ -296,15 +287,18 @@ mod tests {
             height: u64::MAX,
             header: header.clone(),
             tx_ids: vec![SerializedTxid::all_zeros()],
-            etched_runes: vec![RuneId { block: u64::MAX, tx: u32::MAX }],
+            etched_runes: vec![RuneId {
+                block: u64::MAX,
+                tx: u32::MAX,
+            }],
         };
 
         // Serialize
         let serialized = borsh::to_vec(&block).expect("Failed to serialize edge case block");
-        
+
         // Deserialize
-        let deserialized = Block::try_from_slice(&serialized)
-            .expect("Failed to deserialize edge case block");
+        let deserialized =
+            Block::try_from_slice(&serialized).expect("Failed to deserialize edge case block");
 
         assert_eq!(block, deserialized);
         assert_eq!(deserialized.height, u64::MAX);
@@ -316,7 +310,7 @@ mod tests {
     #[test]
     fn test_large_vectors_serialization() {
         let header = create_test_header();
-        
+
         // Create large vectors to test performance and correctness
         let large_tx_ids: Vec<SerializedTxid> = (0..1000)
             .map(|i| {
@@ -327,7 +321,10 @@ mod tests {
             .collect();
 
         let large_etched_runes: Vec<RuneId> = (0..500)
-            .map(|i| RuneId { block: i as u64, tx: (i * 2) as u32 })
+            .map(|i| RuneId {
+                block: i as u64,
+                tx: (i * 2) as u32,
+            })
             .collect();
 
         let block = Block {
@@ -339,15 +336,15 @@ mod tests {
 
         // Serialize
         let serialized = borsh::to_vec(&block).expect("Failed to serialize large block");
-        
+
         // Deserialize
-        let deserialized = Block::try_from_slice(&serialized)
-            .expect("Failed to deserialize large block");
+        let deserialized =
+            Block::try_from_slice(&serialized).expect("Failed to deserialize large block");
 
         assert_eq!(block, deserialized);
         assert_eq!(deserialized.tx_ids.len(), 1000);
         assert_eq!(deserialized.etched_runes.len(), 500);
-        
+
         // Verify first and last elements
         assert_eq!(deserialized.tx_ids[0], large_tx_ids[0]);
         assert_eq!(deserialized.tx_ids[999], large_tx_ids[999]);
@@ -368,19 +365,26 @@ mod tests {
         // Serialize twice and ensure identical results
         let serialized1 = borsh::to_vec(&block).expect("Failed first serialization");
         let serialized2 = borsh::to_vec(&block).expect("Failed second serialization");
-        
-        assert_eq!(serialized1, serialized2, "Serialization should be deterministic");
+
+        assert_eq!(
+            serialized1, serialized2,
+            "Serialization should be deterministic"
+        );
 
         // Verify serialized data is not empty
-        assert!(!serialized1.is_empty(), "Serialized data should not be empty");
-        
+        assert!(
+            !serialized1.is_empty(),
+            "Serialized data should not be empty"
+        );
+
         // Deserialize and re-serialize to test full roundtrip
-        let deserialized = Block::try_from_slice(&serialized1)
-            .expect("Failed to deserialize");
-        let re_serialized = borsh::to_vec(&deserialized)
-            .expect("Failed to re-serialize");
-        
-        assert_eq!(serialized1, re_serialized, "Re-serialization should match original");
+        let deserialized = Block::try_from_slice(&serialized1).expect("Failed to deserialize");
+        let re_serialized = borsh::to_vec(&deserialized).expect("Failed to re-serialize");
+
+        assert_eq!(
+            serialized1, re_serialized,
+            "Re-serialization should match original"
+        );
     }
 
     #[test]
@@ -413,13 +417,16 @@ mod tests {
                 etched_runes: vec![],
             };
 
-            let serialized = borsh::to_vec(&block)
-                .expect(&format!("Failed to serialize header test {}", i));
+            let serialized =
+                borsh::to_vec(&block).expect(&format!("Failed to serialize header test {}", i));
             let deserialized = Block::try_from_slice(&serialized)
                 .expect(&format!("Failed to deserialize header test {}", i));
 
             assert_eq!(block.header.version, deserialized.header.version);
-            assert_eq!(block.header.prev_blockhash, deserialized.header.prev_blockhash);
+            assert_eq!(
+                block.header.prev_blockhash,
+                deserialized.header.prev_blockhash
+            );
             assert_eq!(block.header.merkle_root, deserialized.header.merkle_root);
             assert_eq!(block.header.time, deserialized.header.time);
             assert_eq!(block.header.bits, deserialized.header.bits);

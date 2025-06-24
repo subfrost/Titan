@@ -79,7 +79,10 @@ mod tests {
 
     #[test]
     fn test_rune_amount() {
-        let rune_id = RuneId { block: 840000, tx: 1 };
+        let rune_id = RuneId {
+            block: 840000,
+            tx: 1,
+        };
         let original = RuneAmount {
             rune_id,
             amount: 1000000000000000000u128,
@@ -121,7 +124,10 @@ mod tests {
 
     #[test]
     fn test_tx_out_entry() {
-        let rune_id = RuneId { block: 840000, tx: 1 };
+        let rune_id = RuneId {
+            block: 840000,
+            tx: 1,
+        };
         let rune_amount = RuneAmount {
             rune_id,
             amount: 500000000000000000u128,
@@ -144,7 +150,10 @@ mod tests {
     #[test]
     fn test_transaction_tx_out() {
         let script = ScriptBuf::from_bytes(vec![0x76, 0xa9, 0x14]); // OP_DUP OP_HASH160 PUSH(20)
-        let rune_id = RuneId { block: 840000, tx: 1 };
+        let rune_id = RuneId {
+            block: 840000,
+            tx: 1,
+        };
         let rune_amount = RuneAmount {
             rune_id,
             amount: 100000000000000000u128,
@@ -269,7 +278,10 @@ mod tests {
 
         // Test max values
         let max_rune_amount = RuneAmount {
-            rune_id: RuneId { block: u64::MAX, tx: u32::MAX },
+            rune_id: RuneId {
+                block: u64::MAX,
+                tx: u32::MAX,
+            },
             amount: u128::MAX,
         };
         test_borsh_roundtrip(&max_rune_amount);
@@ -279,12 +291,24 @@ mod tests {
     #[test]
     fn test_complex_nested_structures() {
         // Create a complex TxOut with multiple runes
-        let rune_id1 = RuneId { block: 840000, tx: 1 };
-        let rune_id2 = RuneId { block: 840001, tx: 2 };
-        
+        let rune_id1 = RuneId {
+            block: 840000,
+            tx: 1,
+        };
+        let rune_id2 = RuneId {
+            block: 840001,
+            tx: 2,
+        };
+
         let rune_amounts = vec![
-            RuneAmount { rune_id: rune_id1, amount: 1000000000000000000u128 },
-            RuneAmount { rune_id: rune_id2, amount: 2000000000000000000u128 },
+            RuneAmount {
+                rune_id: rune_id1,
+                amount: 1000000000000000000u128,
+            },
+            RuneAmount {
+                rune_id: rune_id2,
+                amount: 2000000000000000000u128,
+            },
         ];
 
         let spender_ref = SpenderReference {
@@ -308,7 +332,10 @@ mod tests {
     fn test_serialization_consistency() {
         // Ensure that the same data serialized with Borsh and Serde produces
         // the same result when deserialized
-        let rune_id = RuneId { block: 840000, tx: 1 };
+        let rune_id = RuneId {
+            block: 840000,
+            tx: 1,
+        };
         let original = RuneAmount {
             rune_id,
             amount: 1000000000000000000u128,

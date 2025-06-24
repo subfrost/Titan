@@ -1,4 +1,4 @@
-use rustc_hash::{FxHashSet as HashSet};
+use rustc_hash::FxHashSet as HashSet;
 
 use titan_types::SerializedTxid;
 

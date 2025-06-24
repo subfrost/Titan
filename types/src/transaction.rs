@@ -1,6 +1,5 @@
 use {
-    crate::rune::RuneAmount,
-    crate::tx_out::SpentStatus,
+    crate::{rune::RuneAmount, tx_out::SpentStatus, TxOutEntry},
     bitcoin::{BlockHash, ScriptBuf, TxIn, Txid},
     borsh::{BorshDeserialize, BorshSerialize},
     serde::{Deserialize, Serialize},
@@ -44,8 +43,10 @@ pub struct Transaction {
     pub status: TransactionStatus,
 }
 
-impl From<(bitcoin::Transaction, TransactionStatus)> for Transaction {
-    fn from((transaction, status): (bitcoin::Transaction, TransactionStatus)) -> Self {
+impl From<(bitcoin::Transaction, TransactionStatus, Vec<TxOutEntry>)> for Transaction {
+    fn from(
+        (transaction, status, outputs): (bitcoin::Transaction, TransactionStatus, Vec<TxOutEntry>),
+    ) -> Self {
         Transaction {
             txid: transaction.compute_txid(),
             version: transaction.version.0,
@@ -53,13 +54,14 @@ impl From<(bitcoin::Transaction, TransactionStatus)> for Transaction {
             input: transaction.input,
             output: transaction
                 .output
-                .iter()
-                .map(|tx_out| TxOut {
+                .into_iter()
+                .zip(outputs.into_iter())
+                .map(|(tx_out, tx_out_entry)| TxOut {
                     value: tx_out.value.to_sat(),
-                    script_pubkey: tx_out.script_pubkey.clone(),
-                    runes: vec![],
-                    risky_runes: vec![],
-                    spent: SpentStatus::Unspent,
+                    script_pubkey: tx_out.script_pubkey,
+                    runes: tx_out_entry.runes,
+                    risky_runes: tx_out_entry.risky_runes,
+                    spent: tx_out_entry.spent,
                 })
                 .collect(),
             status,

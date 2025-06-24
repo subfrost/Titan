@@ -121,9 +121,7 @@ impl<'a> RollbackCache<'a> {
     }
 
     pub fn add_prev_outpoint_to_delete(&mut self, outpoints: &[SerializedOutPoint]) {
-        self.update
-            .prev_outpoints_to_delete
-            .extend(outpoints);
+        self.update.prev_outpoints_to_delete.extend(outpoints);
     }
 
     pub fn flush(&mut self) -> Result<()> {

@@ -290,7 +290,7 @@ impl BlockCache {
     fn update_script_pubkeys(&mut self) -> Result<()> {
         // TODO: We're not taking into account past outpoitns that are not in this interval.
         // This will cause us to miss deleting some outpoints for certain script pubkeys.
-        
+
         for (outpoint, script_pubkey) in self.update.script_pubkeys_outpoints.iter() {
             let entry: &mut (Vec<SerializedOutPoint>, Vec<SerializedOutPoint>) = self
                 .update

@@ -1,7 +1,5 @@
-use std::{
-    sync::Arc,
-};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+use std::sync::Arc;
 use titan_types::{Event, EventType, TcpSubscriptionRequest};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},

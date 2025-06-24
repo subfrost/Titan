@@ -140,7 +140,8 @@ impl<'client> TransactionParser<'client> {
 
         // Create per-output allocation maps
         let mut allocated: Vec<HashMap<RuneId, Lot>> = vec![HashMap::default(); tx.output.len()];
-        let mut allocated_risky: Vec<HashMap<RuneId, Lot>> = vec![HashMap::default(); tx.output.len()];
+        let mut allocated_risky: Vec<HashMap<RuneId, Lot>> =
+            vec![HashMap::default(); tx.output.len()];
         let mut minted: Option<RuneAmount> = None;
         let mut etched: Option<(RuneId, Rune)> = None;
 
