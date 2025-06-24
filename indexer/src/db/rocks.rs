@@ -23,13 +23,11 @@ use {
     std::{
         collections::VecDeque,
         sync::{Arc, RwLock},
-        time::Instant,
     },
     titan_types::{
         Block, InscriptionId, MempoolEntry, Pagination, PaginationResponse, SerializedOutPoint,
         SerializedTxid, SpenderReference, Subscription, TxOutEntry,
     },
-    tracing::info,
     util::rune_id_to_bytes,
     uuid::Uuid,
     wrapper::RuneIdWrapper,
@@ -1150,10 +1148,8 @@ impl RocksDB {
         for (i, result) in results.iter().enumerate() {
             match result {
                 Ok(Some(bytes)) => {
-                    spent_outpoints.insert(
-                        outpoints[i],
-                        Some(SpenderReference::load(bytes.clone())),
-                    );
+                    spent_outpoints
+                        .insert(outpoints[i], Some(SpenderReference::load(bytes.clone())));
                 }
                 Ok(None) => {
                     spent_outpoints.insert(outpoints[i], None);

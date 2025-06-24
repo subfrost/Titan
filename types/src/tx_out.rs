@@ -31,6 +31,7 @@ impl BorshDeserialize for SpenderReference {
 pub enum SpentStatus {
     Unspent,
     Spent(SpenderReference),
+    SpentUnknown,
 }
 
 // Intermediate structure for JSON serialization
@@ -55,6 +56,10 @@ impl Serialize for SpentStatus {
                 spent: true,
                 vin: Some(vin.clone()),
             },
+            SpentStatus::SpentUnknown => SpentStatusJson {
+                spent: true,
+                vin: None,
+            },
         }
         .serialize(serializer)
     }
@@ -67,9 +72,11 @@ impl<'de> Deserialize<'de> for SpentStatus {
     {
         let json = SpentStatusJson::deserialize(deserializer)?;
         Ok(if json.spent {
-            SpentStatus::Spent(json.vin.ok_or_else(|| {
-                serde::de::Error::custom("missing vin field for spent transaction")
-            })?)
+            if let Some(vin) = json.vin {
+                SpentStatus::Spent(vin)
+            } else {
+                SpentStatus::SpentUnknown
+            }
         } else {
             SpentStatus::Unspent
         })

@@ -375,6 +375,17 @@ impl Index {
         Ok(self.db.get_transaction(txid, None)?)
     }
 
+    pub fn get_outputs_from_transaction(
+        &self,
+        transaction: &BitcoinTransaction,
+        txid: &SerializedTxid,
+        mempool: Option<bool>,
+    ) -> Result<Vec<Option<TxOutEntry>>> {
+        Ok(self
+            .db
+            .get_outputs_from_transaction(transaction, txid, mempool)?)
+    }
+
     pub fn get_transaction_status(&self, txid: &SerializedTxid) -> Result<TransactionStatus> {
         let result = self.db.get_transaction_confirming_block(txid);
         match result {

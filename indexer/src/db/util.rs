@@ -1,30 +1,8 @@
-use bitcoin::{hashes::Hash, OutPoint, ScriptBuf, Txid};
+use bitcoin::ScriptBuf;
 use ordinals::RuneId;
 use std::convert::TryInto;
 
 use titan_types::SerializedOutPoint;
-
-/// Converts an `Txid` to a 32-byte Vec<u8>.
-pub fn txid_to_bytes(txid: &Txid) -> [u8; 32] {
-    txid.as_raw_hash().to_byte_array()
-}
-
-/// Converts a 32-byte array to a `Txid`.
-pub fn txid_from_bytes(bytes: &[u8]) -> Result<Txid, &'static str> {
-    if bytes.len() != 32 {
-        return Err("Invalid length for Txid, expected 32 bytes");
-    }
-
-    Ok(Txid::from_slice(bytes).unwrap())
-}
-
-/// Converts an `OutPoint` to a 36-byte Vec<u8>.
-pub fn outpoint_to_bytes(outpoint: &OutPoint) -> Vec<u8> {
-    let mut buffer: Vec<u8> = Vec::with_capacity(36);
-    buffer.extend_from_slice(&txid_to_bytes(&outpoint.txid)); // Add 32 bytes of the Txid
-    buffer.extend_from_slice(&outpoint.vout.to_le_bytes()); // Add 4 bytes of the vout in little-endian
-    buffer
-}
 
 /// Creates an `OutPoint` from a 36-byte slice.
 /// Returns an error if the slice is not exactly 36 bytes long.

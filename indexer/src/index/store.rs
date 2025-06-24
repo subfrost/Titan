@@ -147,6 +147,12 @@ pub trait Store {
         &self,
         txids: &[SerializedTxid],
     ) -> Result<HashMap<SerializedTxid, Option<BlockId>>, StoreError>;
+    fn get_outputs_from_transaction(
+        &self,
+        transaction: &bitcoin::Transaction,
+        txid: &SerializedTxid,
+        mempool: Option<bool>,
+    ) -> Result<Vec<Option<TxOutEntry>>, StoreError>;
     fn partition_transactions_by_existence(
         &self,
         txids: &Vec<SerializedTxid>,
@@ -452,7 +458,7 @@ impl Store for RocksDB {
         txid: &SerializedTxid,
         mempool: Option<bool>,
     ) -> Result<Transaction, StoreError> {
-        let (mut tx, mempool) = if let Some(mempool) = mempool {
+        let (transaction, status, mempool) = if let Some(mempool) = mempool {
             let status = if !mempool {
                 self.get_transaction_confirming_block(txid)?
                     .into_transaction_status()
@@ -464,10 +470,7 @@ impl Store for RocksDB {
                 }
             };
 
-            (
-                Transaction::from((self.get_transaction(txid, mempool)?, status)),
-                mempool,
-            )
+            (self.get_transaction(txid, mempool)?, status, mempool)
         } else {
             match self.get_transaction(txid, false) {
                 Ok(transaction) => {
@@ -475,7 +478,7 @@ impl Store for RocksDB {
                         .get_transaction_confirming_block(txid)?
                         .into_transaction_status();
 
-                    (Transaction::from((transaction, status)), false)
+                    (transaction, status, false)
                 }
                 Err(err) => match err {
                     RocksDBError::NotFound(_) => {
@@ -485,36 +488,39 @@ impl Store for RocksDB {
                             block_hash: None,
                         };
 
-                        (
-                            Transaction::from((self.get_transaction(txid, true)?, status)),
-                            true,
-                        )
+                        (self.get_transaction(txid, true)?, status, true)
                     }
                     other => return Err(StoreError::DB(other)),
                 },
             }
         };
 
-        let outpoints = tx
+        let outputs = self.get_outputs_from_transaction(&transaction, txid, Some(mempool))?;
+
+        Ok(Transaction::from((transaction, status, outputs)))
+    }
+
+    fn get_outputs_from_transaction(
+        &self,
+        transaction: &bitcoin::Transaction,
+        txid: &SerializedTxid,
+        mempool: Option<bool>,
+    ) -> Result<Vec<Option<TxOutEntry>>, StoreError> {
+        let outpoints = transaction
             .output
             .iter()
             .enumerate()
             .map(|(vout, _)| SerializedOutPoint::from_txid_vout(txid, vout as u32))
             .collect::<Vec<_>>();
 
-        let tx_outs = self.get_tx_outs_with_mempool_spent_update(&outpoints, Some(mempool))?;
+        let mut outputs_map = self.get_tx_outs_with_mempool_spent_update(&outpoints, mempool)?;
 
-        for (vout, output) in tx.output.iter_mut().enumerate() {
-            let tx_out_entry = tx_outs.get(&outpoints[vout]);
+        let outputs = outpoints
+            .iter()
+            .map(|outpoint| outputs_map.remove(outpoint))
+            .collect::<Vec<_>>();
 
-            if let Some(tx_out_entry) = tx_out_entry {
-                output.runes = tx_out_entry.runes.clone();
-                output.risky_runes = tx_out_entry.risky_runes.clone();
-                output.spent = tx_out_entry.spent.clone();
-            }
-        }
-
-        Ok(tx)
+        Ok(outputs)
     }
 
     fn get_transaction_raw(

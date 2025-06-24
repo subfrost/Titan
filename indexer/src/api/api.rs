@@ -11,8 +11,8 @@ use {
     bitcoin::{consensus, Address, BlockHash},
     bitcoincore_rpc::RpcApi,
     http::HeaderMap,
-    std::sync::Arc,
     rustc_hash::FxHashMap as HashMap,
+    std::sync::Arc,
     titan_types::{
         query, AddressData, Block, BlockTip, InscriptionId, MempoolEntry, Pagination,
         PaginationResponse, RuneResponse, SerializedOutPoint, SerializedTxid, Status, Subscription,
@@ -200,27 +200,9 @@ pub fn transaction(
         index.get_transaction(txid)?
     } else {
         let status = index.get_transaction_status(txid)?;
-        let mut transaction =
-            Transaction::from((client.get_raw_transaction(&txid.into(), None)?, status));
-
-        let outpoints = transaction
-            .output
-            .iter()
-            .enumerate()
-            .map(|(vout, _)| SerializedOutPoint::from_txid_vout(txid, vout as u32))
-            .collect::<Vec<_>>();
-
-        let tx_outs = index.get_tx_outs(&outpoints)?;
-
-        for (vout, output) in transaction.output.iter_mut().enumerate() {
-            let tx_out_entry = tx_outs.get(&outpoints[vout]);
-
-            if let Some(tx_out_entry) = tx_out_entry {
-                output.runes = tx_out_entry.runes.clone();
-                output.risky_runes = tx_out_entry.risky_runes.clone();
-                output.spent = tx_out_entry.spent.clone();
-            }
-        }
+        let transaction = client.get_raw_transaction(&txid.into(), None)?;
+        let outputs = index.get_outputs_from_transaction(&transaction, txid, None)?;
+        let transaction = Transaction::from((transaction, status, outputs));
 
         transaction
     };

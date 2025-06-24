@@ -43,9 +43,19 @@ pub struct Transaction {
     pub status: TransactionStatus,
 }
 
-impl From<(bitcoin::Transaction, TransactionStatus, Vec<TxOutEntry>)> for Transaction {
+impl
+    From<(
+        bitcoin::Transaction,
+        TransactionStatus,
+        Vec<Option<TxOutEntry>>,
+    )> for Transaction
+{
     fn from(
-        (transaction, status, outputs): (bitcoin::Transaction, TransactionStatus, Vec<TxOutEntry>),
+        (transaction, status, outputs): (
+            bitcoin::Transaction,
+            TransactionStatus,
+            Vec<Option<TxOutEntry>>,
+        ),
     ) -> Self {
         Transaction {
             txid: transaction.compute_txid(),
@@ -56,12 +66,25 @@ impl From<(bitcoin::Transaction, TransactionStatus, Vec<TxOutEntry>)> for Transa
                 .output
                 .into_iter()
                 .zip(outputs.into_iter())
-                .map(|(tx_out, tx_out_entry)| TxOut {
-                    value: tx_out.value.to_sat(),
-                    script_pubkey: tx_out.script_pubkey,
-                    runes: tx_out_entry.runes,
-                    risky_runes: tx_out_entry.risky_runes,
-                    spent: tx_out_entry.spent,
+                .map(|(tx_out, tx_out_entry)| {
+                    let (runes, risky_runes, spent) = match tx_out_entry {
+                        Some(tx_out_entry) => (
+                            tx_out_entry.runes,
+                            tx_out_entry.risky_runes,
+                            tx_out_entry.spent,
+                        ),
+                        None => (vec![], vec![], SpentStatus::SpentUnknown),
+                    };
+
+                    let tx_out = TxOut {
+                        value: tx_out.value.to_sat(),
+                        script_pubkey: tx_out.script_pubkey,
+                        runes,
+                        risky_runes,
+                        spent,
+                    };
+
+                    tx_out
                 })
                 .collect(),
             status,
