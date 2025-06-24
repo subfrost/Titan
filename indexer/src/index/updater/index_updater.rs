@@ -841,52 +841,51 @@ impl Updater {
             .latency
             .with_label_values(&["notify_tx_updates"])
             .start_timer();
-        if self.settings.index_bitcoin_transactions {
-            let categorized = {
-                let transaction_update = self
-                    .transaction_update
-                    .read()
-                    .map_err(|_| UpdaterError::Mutex)?;
 
-                transaction_update.categorize_to_change_set()
-            };
+        let categorized = {
+            let transaction_update = self
+                .transaction_update
+                .read()
+                .map_err(|_| UpdaterError::Mutex)?;
 
-            if let Some(sender) = &self.sender {
-                if !flush && (!categorized.removed.is_empty() || !categorized.added.is_empty()) {
-                    let client = self.bitcoin_rpc_pool.get()?;
+            transaction_update.categorize_to_change_set()
+        };
 
-                    let chain_info = client.get_blockchain_info()?;
+        if let Some(sender) = &self.sender {
+            if !flush && (!categorized.removed.is_empty() || !categorized.added.is_empty()) {
+                let client = self.bitcoin_rpc_pool.get()?;
 
-                    let block = {
-                        let db = self.db.read();
-                        db.get_block_by_hash(&chain_info.best_block_hash)
-                    };
+                let chain_info = client.get_blockchain_info()?;
 
-                    let Ok(block) = block else {
-                        return Err(UpdaterError::InvalidMainChainTip);
-                    };
+                let block = {
+                    let db = self.db.read();
+                    db.get_block_by_hash(&chain_info.best_block_hash)
+                };
 
-                    if block.height != chain_info.blocks {
-                        return Err(UpdaterError::InvalidMainChainTip);
-                    }
+                let Ok(block) = block else {
+                    return Err(UpdaterError::InvalidMainChainTip);
+                };
+
+                if block.height != chain_info.blocks {
+                    return Err(UpdaterError::InvalidMainChainTip);
                 }
+            }
 
-                if !categorized.removed.is_empty() {
-                    let (_, not_exists) = {
-                        let db = self.db.read();
-                        db.partition_transactions_by_existence(
-                            &categorized.removed.into_iter().collect(),
-                        )?
-                    };
+            if !categorized.removed.is_empty() {
+                let (_, not_exists) = {
+                    let db = self.db.read();
+                    db.partition_transactions_by_existence(
+                        &categorized.removed.into_iter().collect(),
+                    )?
+                };
 
-                    sender.blocking_send(Event::TransactionsReplaced { txids: not_exists })?;
-                }
+                sender.blocking_send(Event::TransactionsReplaced { txids: not_exists })?;
+            }
 
-                if !categorized.added.is_empty() {
-                    sender.blocking_send(Event::TransactionsAdded {
-                        txids: categorized.added.into_iter().collect(),
-                    })?;
-                }
+            if !categorized.added.is_empty() {
+                sender.blocking_send(Event::TransactionsAdded {
+                    txids: categorized.added.into_iter().collect(),
+                })?;
             }
         }
 
