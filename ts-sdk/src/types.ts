@@ -71,11 +71,18 @@ export interface TxOutEntry {
   spent: SpentStatus;
 }
 
+export interface PreviousOutputData {
+  value: number;
+  runes: RuneAmount[];
+  risky_runes: RuneAmount[];
+}
+
 export interface TxIn {
   previous_output: OutPoint;
   script_sig: string;
   sequence: number;
   witness: string[];
+  previous_output_data?: PreviousOutputData;
 }
 
 export interface Transaction {
