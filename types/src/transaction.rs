@@ -1,6 +1,6 @@
 use {
     crate::{tx_in::TxIn, tx_out::SpentStatus, TxOut},
-    bitcoin::{BlockHash, Txid},
+    bitcoin::{constants::WITNESS_SCALE_FACTOR, BlockHash, Txid},
     serde::{Deserialize, Serialize},
 };
 
@@ -39,6 +39,14 @@ pub struct Transaction {
     pub input: Vec<TxIn>,
     pub output: Vec<TxOut>,
     pub status: TransactionStatus,
+    pub size: u64,
+    pub weight: u64,
+}
+
+impl Transaction {
+    pub fn vbytes(&self) -> u64 {
+        (self.weight + WITNESS_SCALE_FACTOR as u64 - 1) / WITNESS_SCALE_FACTOR as u64
+    }
 }
 
 impl
@@ -58,6 +66,8 @@ impl
         ),
     ) -> Self {
         Transaction {
+            size: transaction.total_size() as u64,
+            weight: transaction.weight().to_wu(),
             txid: transaction.compute_txid(),
             version: transaction.version.0,
             lock_time: transaction.lock_time.to_consensus_u32(),

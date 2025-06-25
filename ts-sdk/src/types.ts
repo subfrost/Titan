@@ -91,6 +91,8 @@ export interface Transaction {
   input: TxIn[];
   output: TxOut[];
   status: TransactionStatus;
+  size: number;
+  weight: number;
 }
 
 export interface MintResponse {
