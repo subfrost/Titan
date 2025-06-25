@@ -267,6 +267,12 @@ impl BlockCache {
         }
 
         for height in from..to {
+            // In regtest, the first block is not accessible via RPC and for testing purposes we
+            // don't need to start at block 0.
+            if self.settings.chain == Chain::Regtest && height == 0 {
+                continue;
+            }
+
             let block = self
                 .blocks
                 .remove(&height)
