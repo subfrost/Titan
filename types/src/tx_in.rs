@@ -8,6 +8,7 @@ pub struct PreviousOutputData {
     pub value: u64,
     pub runes: Vec<RuneAmount>,
     pub risky_runes: Vec<RuneAmount>,
+    pub script_pubkey: ScriptBuf,
 }
 
 impl From<TxOut> for PreviousOutputData {
@@ -16,6 +17,7 @@ impl From<TxOut> for PreviousOutputData {
             value: tx_out_entry.value,
             runes: tx_out_entry.runes,
             risky_runes: tx_out_entry.risky_runes,
+            script_pubkey: tx_out_entry.script_pubkey,
         }
     }
 }
@@ -26,6 +28,7 @@ pub struct TxIn {
     pub script_sig: ScriptBuf,
     pub sequence: Sequence,
     pub witness: Witness,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_output_data: Option<PreviousOutputData>,
 }
 
