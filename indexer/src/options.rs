@@ -102,7 +102,6 @@ pub struct Options {
     /// Index spent outputs
     #[arg(
         long,
-        short,
         help = "Index spent outputs. [default: true]",
         default_value = "true"
     )]
