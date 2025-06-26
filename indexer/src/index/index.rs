@@ -393,11 +393,10 @@ impl Index {
         &self,
         transaction: &BitcoinTransaction,
         txid: &SerializedTxid,
-        mempool: Option<bool>,
     ) -> Result<(Vec<Option<TxOut>>, Vec<Option<TxOut>>)> {
         Ok(self
             .db
-            .get_inputs_outputs_from_transaction(transaction, txid, mempool)?)
+            .get_inputs_outputs_from_transaction(transaction, txid)?)
     }
 
     pub fn get_transaction_status(&self, txid: &SerializedTxid) -> Result<TransactionStatus> {

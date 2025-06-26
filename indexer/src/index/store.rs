@@ -153,7 +153,6 @@ pub trait Store {
         &self,
         transaction: &bitcoin::Transaction,
         txid: &SerializedTxid,
-        mempool: Option<bool>,
     ) -> Result<(Vec<Option<TxOut>>, Vec<Option<TxOut>>), StoreError>;
     fn partition_transactions_by_existence(
         &self,
@@ -505,8 +504,7 @@ impl Store for RocksDB {
             }
         };
 
-        let (inputs, outputs) =
-            self.get_inputs_outputs_from_transaction(&transaction, txid, Some(mempool))?;
+        let (inputs, outputs) = self.get_inputs_outputs_from_transaction(&transaction, txid)?;
 
         Ok(Transaction::from((transaction, status, inputs, outputs)))
     }
@@ -515,7 +513,6 @@ impl Store for RocksDB {
         &self,
         transaction: &bitcoin::Transaction,
         txid: &SerializedTxid,
-        mempool: Option<bool>,
     ) -> Result<(Vec<Option<TxOut>>, Vec<Option<TxOut>>), StoreError> {
         let prev_outpoints = transaction
             .input
@@ -536,8 +533,7 @@ impl Store for RocksDB {
             .cloned()
             .collect::<Vec<_>>();
 
-        let mut outputs_map =
-            self.get_tx_outs_with_mempool_spent_update(&all_outpoints, mempool)?;
+        let mut outputs_map = self.get_tx_outs_with_mempool_spent_update(&all_outpoints, None)?;
 
         let inputs = prev_outpoints
             .iter()
