@@ -175,6 +175,10 @@ impl Index {
                 }
                 Err(e) => {
                     error!("Failed to update to tip: {}", e);
+                    // Signal shutdown so that background workers (e.g. block fetcher, bg_writer,
+                    // ZMQ listener) can terminate gracefully instead of lingering and giving the
+                    // impression that the indexer is still running.
+                    self.shutdown();
                     break;
                 }
             }
@@ -195,6 +199,8 @@ impl Index {
                 }
                 Err(e) => {
                     error!("Failed to index mempool: {}", e);
+                    // Ensure we also trigger a graceful shutdown here.
+                    self.shutdown();
                     break;
                 }
             }
