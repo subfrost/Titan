@@ -7,7 +7,7 @@ use std::{
     str::FromStr,
 };
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct SerializedTxid(pub [u8; 32]);
 
 impl SerializedTxid {
@@ -78,6 +78,12 @@ impl From<SerializedTxid> for Txid {
 impl From<&SerializedTxid> for Txid {
     fn from(txid: &SerializedTxid) -> Self {
         Self::from_raw_hash(Hash::from_slice(&txid.0).unwrap())
+    }
+}
+
+impl std::fmt::Debug for SerializedTxid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_string())
     }
 }
 

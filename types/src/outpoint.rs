@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::SerializedTxid;
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, BorshSerialize, BorshDeserialize)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, BorshSerialize, BorshDeserialize)]
 pub struct SerializedOutPoint([u8; 36]);
 
 impl SerializedOutPoint {
@@ -74,6 +74,12 @@ impl TryFrom<Box<[u8]>> for SerializedOutPoint {
     fn try_from(outpoint: Box<[u8]>) -> Result<Self, Self::Error> {
         let array: [u8; 36] = outpoint.as_ref().try_into()?;
         Ok(Self(array))
+    }
+}
+
+impl std::fmt::Debug for SerializedOutPoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.to_txid(), self.vout())
     }
 }
 
