@@ -216,10 +216,20 @@ impl BlockCache {
     }
 
     fn get_tx_out(&mut self, outpoint: &SerializedOutPoint) -> Result<TxOut> {
+        // 1. Check current in-memory update.
         if let Some(tx_out) = self.outpoints.get(outpoint) {
             return Ok(tx_out.clone());
         }
 
+        // 2. Check any pending batches that have been flushed but not yet persisted.
+        if let Some(tx_out) = self
+            .bg_writer
+            .find_in_pending(|b| b.txouts.get(outpoint).cloned())
+        {
+            return Ok(tx_out);
+        }
+
+        // 3. Fall back to the persistent store.
         let tx_out = self.db.read().get_tx_out(outpoint, Some(false))?;
         self.outpoints.put(*outpoint, tx_out.clone());
         Ok(tx_out)
@@ -384,9 +394,16 @@ impl TransactionStore for BlockCache {
         let mut to_fetch = vec![];
         for outpoint in outpoints {
             if let Some(tx_out) = self.outpoints.get(outpoint) {
-                tx_outs.insert(outpoint.clone(), tx_out.clone());
+                tx_outs.insert(*outpoint, tx_out.clone());
             } else {
-                to_fetch.push(outpoint.clone());
+                if let Some(tx_out) = self
+                    .bg_writer
+                    .find_in_pending(|b| b.txouts.get(outpoint).cloned())
+                {
+                    tx_outs.insert(*outpoint, tx_out);
+                } else {
+                    to_fetch.push(*outpoint);
+                }
             }
         }
 
@@ -434,7 +451,6 @@ impl TransactionStore for BlockCache {
             .txouts
             .insert(outpoint.previous_outpoint, tx_out);
         self.outpoints.pop(&outpoint.previous_outpoint);
-
         Ok(())
     }
 
