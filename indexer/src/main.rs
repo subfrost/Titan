@@ -74,7 +74,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     index.validate_index()?;
 
     // 7. Spawn background threads (indexer, ZMQ listener, etc.)
-    let index_handle = spawn_background_threads(index.clone(), options.enable_zmq_listener).await;
+    //    We also receive a signal (`index_shutdown_rx`) that fires when the indexer thread
+    //    terminates unexpectedly (e.g., due to `Failed to update to tip`). When that happens
+    //    we will initiate a graceful shutdown without relying on external signals.
+    let (index_handle, index_shutdown_rx) =
+        spawn_background_threads(index.clone(), options.enable_zmq_listener).await;
 
     // 8. Start the HTTP server
     let handle = Handle::new();
@@ -88,8 +92,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         handle.clone(),
     )?;
 
-    // 9. Wait for SIGINT (Ctrl-C) or SIGTERM
-    wait_for_signals().await;
+    // 9. Wait for SIGINT (Ctrl-C), SIGTERM, or the indexer thread finishing unexpectedly
+    wait_for_signals(index_shutdown_rx).await;
 
     // 10. Graceful shutdown (async)
     graceful_shutdown(
@@ -162,11 +166,22 @@ fn set_panic_hook(db_arc: Arc<RocksDB>) {
 async fn spawn_background_threads(
     index: Arc<Index>,
     enable_zmq_listener: bool,
-) -> std::thread::JoinHandle<()> {
+) -> (
+    std::thread::JoinHandle<()>,
+    tokio::sync::oneshot::Receiver<()>,
+) {
+    use tokio::sync::oneshot;
+
+    // Channel used to notify the main async runtime that the indexer thread has
+    // finished – either normally or because it encountered a fatal error.
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
     // 1) Spawn the indexer loop in a blocking thread
     let index_clone = index.clone();
     let index_handle = std::thread::spawn(move || {
         index_clone.index();
+        // Ignore send errors – it just means the receiver was dropped.
+        let _ = shutdown_tx.send(());
     });
 
     // 2) Spawn the ZMQ listener (also likely blocking)
@@ -175,11 +190,11 @@ async fn spawn_background_threads(
     }
 
     info!("Spawned background threads");
-    index_handle
+    (index_handle, shutdown_rx)
 }
 
 /// Block until either SIGINT or SIGTERM is received
-async fn wait_for_signals() {
+async fn wait_for_signals(index_shutdown_rx: tokio::sync::oneshot::Receiver<()>) {
     use tokio::select;
     let mut sigterm = signal(SignalKind::terminate()).expect("Failed to open signal stream");
 
@@ -189,6 +204,9 @@ async fn wait_for_signals() {
         }
         _ = sigterm.recv() => {
             info!("Received SIGTERM, shutting down...");
+        }
+        _ = index_shutdown_rx => {
+            info!("Indexer thread terminated, shutting down...");
         }
     }
 }
