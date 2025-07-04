@@ -29,14 +29,12 @@ type Result<T> = std::result::Result<T, TransactionUpdaterError>;
 
 #[derive(Debug)]
 pub struct TransactionUpdaterSettings {
-    pub(super) index_addresses: bool,
     pub(super) index_bitcoin_transactions: bool,
 }
 
 impl From<Settings> for TransactionUpdaterSettings {
     fn from(settings: Settings) -> Self {
         Self {
-            index_addresses: settings.index_addresses,
             index_bitcoin_transactions: settings.index_bitcoin_transactions,
         }
     }
@@ -115,10 +113,6 @@ impl TransactionUpdater {
 
         // Create new outputs
         for (vout, output) in transaction_state_change.outputs.iter().enumerate() {
-            if output.runes.is_empty() && !self.settings.index_addresses {
-                continue;
-            }
-
             // Create new outputs
             let outpoint = SerializedOutPoint::from_txid_vout(&txid, vout as u32);
 
