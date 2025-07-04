@@ -206,6 +206,7 @@ impl Updater {
                 self.bitcoin_rpc_pool.clone(),
                 current_block_count,
                 chain_info.blocks + 1,
+                self.shutdown_flag.clone(),
             )?;
 
             let rpc_client = self.bitcoin_rpc_pool.get()?;

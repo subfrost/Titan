@@ -5,7 +5,7 @@ use {
     std::{
         collections::BTreeMap,
         sync::{
-            atomic::{AtomicU64, Ordering},
+            atomic::{AtomicU64, Ordering, AtomicBool},
             mpsc, Arc, Condvar, Mutex,
         },
         thread,
@@ -145,8 +145,15 @@ pub fn fetch_blocks_from(
     bitcoin_rpc_pool: RpcClientPool,
     start_height: u64,
     limit: u64,
+    shutdown_flag: Arc<AtomicBool>,
 ) -> Result<(mpsc::Receiver<Block>, BlockFetcherStats), bitcoincore_rpc::Error> {
-    fetch_blocks_from_with_buffer_limit(bitcoin_rpc_pool, start_height, limit, 500)
+    fetch_blocks_from_with_buffer_limit(
+        bitcoin_rpc_pool,
+        start_height,
+        limit,
+        500,
+        shutdown_flag,
+    )
 }
 
 pub fn fetch_blocks_from_with_buffer_limit(
@@ -154,6 +161,7 @@ pub fn fetch_blocks_from_with_buffer_limit(
     start_height: u64,
     limit: u64,
     max_buffer_size: u64,
+    shutdown_flag: Arc<AtomicBool>,
 ) -> Result<(mpsc::Receiver<Block>, BlockFetcherStats), bitcoincore_rpc::Error> {
     let stats = BlockFetcherStats::new();
     let buffer_semaphore = Semaphore::new(max_buffer_size as usize); // Limit buffer size
@@ -164,59 +172,81 @@ pub fn fetch_blocks_from_with_buffer_limit(
     // Intermediate channel for unordered (height, block) tuples.
     let (intermediate_sender, intermediate_receiver) = mpsc::sync_channel(1000);
 
-    // Spawn a logging thread to report stats every second
+    // Spawn a logging thread to report stats every second. Automatically stops when `shutdown_flag` is set.
     thread::spawn({
         let stats = stats.clone();
-        move || loop {
-            thread::sleep(Duration::from_secs(1));
-            let (fetching, intermediate, final_count, buffer) = stats.snapshot();
-            tracing::info!(
-                "Block fetcher stats - Fetching: {}, Intermediate: {}, Final: {}, Buffer: {}",
-                fetching,
-                intermediate,
-                final_count,
-                buffer
-            );
+        let shutdown_flag = shutdown_flag.clone();
+        move || {
+            while !shutdown_flag.load(Ordering::SeqCst) {
+                thread::sleep(Duration::from_secs(1));
+                let (fetching, intermediate, final_count, buffer) = stats.snapshot();
+                tracing::info!(
+                    "Block fetcher stats - Fetching: {}, Intermediate: {}, Final: {}, Buffer: {}",
+                    fetching,
+                    intermediate,
+                    final_count,
+                    buffer
+                );
+            }
+            tracing::info!("Block fetcher logging thread terminating due to shutdown signal");
         }
     });
 
-    // Spawn a thread to reorder blocks.
+    // Spawn a thread to reorder blocks. Terminates when `shutdown_flag` is set or channels close.
     thread::spawn({
         let final_sender = final_sender.clone();
         let stats = stats.clone();
         let buffer_semaphore = buffer_semaphore.clone();
+        let shutdown_flag = shutdown_flag.clone();
         move || {
             let mut next_expected = start_height;
             let mut buffer = BTreeMap::new();
-            while let Ok((height, block)) = intermediate_receiver.recv() {
-                stats.decrement_intermediate();
+            loop {
+                if shutdown_flag.load(Ordering::SeqCst) {
+                    trace!("Reorder thread terminating due to shutdown signal");
+                    return;
+                }
 
-                if height == next_expected {
-                    // Release the buffer permit that was acquired by the producer for this block.
-                    buffer_semaphore.release();
+                match intermediate_receiver.recv_timeout(Duration::from_secs(1)) {
+                    Ok((height, block)) => {
+                        stats.decrement_intermediate();
 
-                    if final_sender.send(block).is_err() {
-                        trace!("Final receiver disconnected");
+                        if height == next_expected {
+                            // Release the buffer permit that was acquired by the producer for this block.
+                            buffer_semaphore.release();
+
+                            if final_sender.send(block).is_err() {
+                                trace!("Final receiver disconnected");
+                                return;
+                            }
+                            stats.increment_final();
+                            next_expected += 1;
+                            while let Some(block) = buffer.remove(&next_expected) {
+                                stats.decrement_buffer();
+                                buffer_semaphore.release(); // Release buffer space held for this buffered block
+                                if final_sender.send(block).is_err() {
+                                    warn!("Final receiver disconnected");
+                                    return;
+                                }
+                                stats.increment_final();
+                                next_expected += 1;
+                            }
+                        } else {
+                            // Insert out-of-order block into the buffer. Capacity for this block was already
+                            // reserved by the producer before the network fetch, so we can safely insert
+                            // without acquiring here.
+                            buffer.insert(height, block);
+                            stats.increment_buffer();
+                        }
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        // Periodically check shutdown flag even if no data is coming through.
+                        continue;
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        trace!("Intermediate sender disconnected");
                         return;
                     }
-                    stats.increment_final();
-                    next_expected += 1;
-                    while let Some(block) = buffer.remove(&next_expected) {
-                        stats.decrement_buffer();
-                        buffer_semaphore.release(); // Release buffer space held for this buffered block
-                        if final_sender.send(block).is_err() {
-                            warn!("Final receiver disconnected");
-                            return;
-                        }
-                        stats.increment_final();
-                        next_expected += 1;
-                    }
-                } else {
-                    // Insert out-of-order block into the buffer. Capacity for this block was already
-                    // reserved by the producer before the network fetch, so we can safely insert
-                    // without acquiring here.
-                    buffer.insert(height, block);
-                    stats.increment_buffer();
                 }
             }
         }
@@ -230,9 +260,15 @@ pub fn fetch_blocks_from_with_buffer_limit(
         let intermediate_sender = intermediate_sender.clone();
         let stats = stats.clone();
         let buffer_semaphore = buffer_semaphore.clone();
+        let shutdown_flag = shutdown_flag.clone();
 
         stats.increment_fetching();
         pool.execute(move || {
+            if shutdown_flag.load(Ordering::SeqCst) {
+                // If shutdown has already been requested, skip fetching.
+                return;
+            }
+
             // Reserve buffer capacity BEFORE starting the expensive RPC call. This guarantees that
             // once the block is fetched there will always be space for it in the in-memory buffer
             // or the downstream channels, preventing deadlocks when an earlier block is delayed.
