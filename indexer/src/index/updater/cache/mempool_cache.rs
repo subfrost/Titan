@@ -40,7 +40,6 @@ impl MempoolCacheSettings {
 pub struct MempoolCache {
     db: Arc<StoreWithLock>,
     update: BatchUpdate,
-    delete: BatchDelete,
     pub settings: MempoolCacheSettings,
 }
 
@@ -64,7 +63,6 @@ impl MempoolCache {
         Ok(Self {
             db,
             update: BatchUpdate::new(rune_count, block_count, purged_blocks_count),
-            delete: BatchDelete::new(),
             settings,
         })
     }
@@ -121,12 +119,6 @@ impl MempoolCache {
             let start = Instant::now();
             db.batch_update(&self.update, true)?;
             debug!("Flushed update: {} in {:?}", self.update, start.elapsed());
-        }
-
-        if !self.delete.is_empty() {
-            let start = Instant::now();
-            db.batch_delete(&self.delete)?;
-            debug!("Flushed delete: {} in {:?}", self.delete, start.elapsed());
         }
 
         Ok(())
@@ -198,9 +190,10 @@ impl TransactionStore for MempoolCache {
             Ok(tx_out) => {
                 let mut tx_out = tx_out;
                 tx_out.spent = SpentStatus::Spent(spent.clone());
-                self.update.txouts.insert(outpoint.previous_outpoint, tx_out);
+                self.update
+                    .txouts
+                    .insert(outpoint.previous_outpoint, tx_out);
             }
-            Err(StoreError::NotFound(_)) => {}
             Err(e) => return Err(e),
         }
 
