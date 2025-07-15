@@ -115,7 +115,7 @@ impl Metrics {
                     }
                 }
                 for (method, avg) in method_avg_latencies {
-                    info!("Average Latency for {}: {:.3} ms", method, avg);
+                    debug!("Average Latency for {}: {:.3} ms", method, avg);
                 }
             }
 

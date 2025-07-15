@@ -180,7 +180,7 @@ pub fn fetch_blocks_from_with_buffer_limit(
             while !shutdown_flag.load(Ordering::SeqCst) {
                 thread::sleep(Duration::from_secs(1));
                 let (fetching, intermediate, final_count, buffer) = stats.snapshot();
-                tracing::info!(
+                tracing::debug!(
                     "Block fetcher stats - Fetching: {}, Intermediate: {}, Final: {}, Buffer: {}",
                     fetching,
                     intermediate,
@@ -188,7 +188,7 @@ pub fn fetch_blocks_from_with_buffer_limit(
                     buffer
                 );
             }
-            tracing::info!("Block fetcher logging thread terminating due to shutdown signal");
+            tracing::debug!("Block fetcher logging thread terminating due to shutdown signal");
         }
     });
 
