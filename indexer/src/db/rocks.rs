@@ -88,6 +88,10 @@ const INDEX_SPENT_OUTPUTS_KEY: &str = "index_spent_outputs";
 
 const BLOCK_COUNT_KEY: &str = "block_count";
 const PURGED_BLOCKS_COUNT_KEY: &str = "purged_blocks_count";
+const DB_SCHEMA_VERSION_KEY: &str = "db_schema_version";
+
+/// Increment this when the on-disk schema changes in a backward-incompatible way.
+const EXPECTED_DB_SCHEMA_VERSION: u64 = 1;
 
 impl RocksDB {
     pub fn open(file_path: &str) -> DBResult<Self> {
@@ -237,6 +241,10 @@ impl RocksDB {
             mempool_cache: RwLock::new(mempool_cache),
             write_opts,
         };
+
+        // Verify that the on-disk schema is compatible with the running binary.
+        rocks_db.verify_schema_version()?;
+
         Ok(rocks_db)
     }
 
@@ -278,6 +286,34 @@ impl RocksDB {
         match self.db.get_cf(cf_handle, key) {
             Ok(val) => Ok(val),
             Err(e) => Err(e)?,
+        }
+    }
+
+    /// Ensures the database schema version on disk matches the one compiled into the
+    /// binary. If the key is missing (fresh database) the current version is written.
+    /// If a mismatch is detected we return `RocksDBError::SchemaMismatch`.
+    fn verify_schema_version(&self) -> DBResult<()> {
+        let cf_handle = self.cf_handle(SETTINGS_CF)?;
+
+        // Try to read existing version
+        let stored_version: Option<u64> = self
+            .get_option_vec_data(&cf_handle, DB_SCHEMA_VERSION_KEY)
+            .mapped()?;
+
+        match stored_version {
+            Some(v) if v == EXPECTED_DB_SCHEMA_VERSION => Ok(()),
+            Some(v) => Err(RocksDBError::SchemaMismatch(format!(
+                "found version {v}, expected {EXPECTED_DB_SCHEMA_VERSION}. Please wipe or migrate your RocksDB data directory."
+            ))),
+            None => {
+                // Fresh DB – store the expected version for future runs.
+                self.db.put_cf(
+                    &cf_handle,
+                    DB_SCHEMA_VERSION_KEY,
+                    EXPECTED_DB_SCHEMA_VERSION.to_le_bytes().to_vec(),
+                )?;
+                Ok(())
+            }
         }
     }
 

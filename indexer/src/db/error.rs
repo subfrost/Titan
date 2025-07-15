@@ -24,4 +24,6 @@ pub enum RocksDBError {
     NotFound(String),
     #[error("overflow")]
     Overflow,
+    #[error("schema version mismatch: {0}")]
+    SchemaMismatch(String),
 }
