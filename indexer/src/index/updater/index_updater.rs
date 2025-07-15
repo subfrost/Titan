@@ -435,7 +435,7 @@ impl Updater {
         }
 
         if new_txs_len > 0 || removed_len > 0 {
-            info!(
+            debug!(
                 "Mempool: New txs: {}. Removed txs: {}",
                 new_txs_len, removed_len
             );
@@ -709,7 +709,7 @@ impl Updater {
             TransactionParser::new(&rpc_client, self.settings.chain, height, true)?;
 
         let result = transaction_parser.parse(cache, 0, tx)?;
-        info!("Indexing tx {}", txid);
+        debug!("Indexing tx {}", txid);
 
         let mut transaction_updater = TransactionUpdater::new(self.settings.clone().into(), true)?;
         transaction_updater.save(cache, events, now as u32, None, *txid, tx, &result)?;

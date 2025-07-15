@@ -1,7 +1,7 @@
 use std::{sync::Arc, thread, time::Instant};
 
 use crossbeam_channel::{bounded, Sender};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::{
     index::updater::store_lock::StoreWithLock,
@@ -39,7 +39,7 @@ impl BgWriter {
                         tracing::error!("Background RocksDB write failed: {:?}", e);
                     }
 
-                    info!("Flushed update: {} in {:?}", batch.update, start.elapsed());
+                    debug!("Flushed update: {} in {:?}", batch.update, start.elapsed());
 
                     let start = Instant::now();
 
@@ -47,7 +47,7 @@ impl BgWriter {
                         tracing::error!("Background RocksDB write failed: {:?}", e);
                     }
 
-                    info!("Flushed delete: {} in {:?}", batch.delete, start.elapsed());
+                    debug!("Flushed delete: {} in {:?}", batch.delete, start.elapsed());
                 }
             })
             .expect("failed to spawn rocksdb-writer thread");

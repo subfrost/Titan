@@ -18,7 +18,7 @@ use {
         Event, InscriptionId, Location, MempoolEntry, SerializedOutPoint, SerializedTxid,
         SpenderReference, SpentStatus, TxOut,
     },
-    tracing::info,
+    tracing::{debug, info},
 };
 
 type Result<T> = std::result::Result<T, StoreError>;
@@ -120,13 +120,13 @@ impl MempoolCache {
         if !self.update.is_empty() {
             let start = Instant::now();
             db.batch_update(&self.update, true)?;
-            info!("Flushed update: {} in {:?}", self.update, start.elapsed());
+            debug!("Flushed update: {} in {:?}", self.update, start.elapsed());
         }
 
         if !self.delete.is_empty() {
             let start = Instant::now();
             db.batch_delete(&self.delete)?;
-            info!("Flushed delete: {} in {:?}", self.delete, start.elapsed());
+            debug!("Flushed delete: {} in {:?}", self.delete, start.elapsed());
         }
 
         Ok(())
