@@ -194,7 +194,6 @@ impl Updater {
 
         // Fetch new blocks if needed.
         while !self.is_chain_synced(&mut cache, &chain_info)? {
-            let was_at_tip = self.is_at_tip.load(Ordering::Relaxed);
             self.is_at_tip.store(false, Ordering::Release);
 
             let progress_bar =
@@ -225,27 +224,31 @@ impl Updater {
                     break;
                 }
 
-                if was_at_tip || indexing_first_block {
-                    match self.detect_reorg(
-                        &block,
-                        cache.get_block_count(),
-                        &rpc_client,
-                        self.settings.max_recoverable_reorg_depth(),
-                    ) {
-                        Ok(()) => (),
-                        Err(ReorgError::Recoverable { height, depth }) => {
-                            self.handle_reorg(height, depth)?;
-                            if let Some(sender) = &self.sender {
-                                if let Err(e) = sender.blocking_send(Event::Reorg { height, depth })
-                                {
-                                    error!("Failed to send reorg event: {:?}", e);
-                                }
+                // Always check for potential reorgs before indexing the next block.
+                match self.detect_reorg(
+                    &block,
+                    cache.get_block_count(),
+                    &mut cache,
+                    &rpc_client,
+                    self.settings.max_recoverable_reorg_depth(),
+                ) {
+                    Ok(()) => (),
+                    Err(ReorgError::Recoverable { height, depth }) => {
+                        // Persist any in-memory updates so `handle_reorg` can cleanly roll
+                        // back blocks that might still be sitting in the cache and have not
+                        // been flushed to RocksDB yet.
+                        cache.flush()?;
+
+                        self.handle_reorg(height, depth)?;
+                        if let Some(sender) = &self.sender {
+                            if let Err(e) = sender.blocking_send(Event::Reorg { height, depth }) {
+                                error!("Failed to send reorg event: {:?}", e);
                             }
-                            return Err(ReorgError::Recoverable { height, depth }.into());
                         }
-                        Err(e) => {
-                            return Err(e.into());
-                        }
+                        return Err(ReorgError::Recoverable { height, depth }.into());
+                    }
+                    Err(e) => {
+                        return Err(e.into());
                     }
                 }
 
@@ -740,6 +743,7 @@ impl Updater {
         &self,
         block: &BitcoinBlock,
         height: u64,
+        cache: &mut BlockCache,
         client: &Client,
         max_recoverable_reorg_depth: u64,
     ) -> std::result::Result<(), ReorgError> {
@@ -747,28 +751,31 @@ impl Updater {
             return Ok(());
         }
 
-        let db = self.db.read();
         let bitcoind_prev_blockhash = block.header.prev_blockhash;
 
         let prev_height = height.checked_sub(1).ok_or(ReorgError::Unrecoverable)?;
-        match db.get_block_hash(prev_height as u64) {
-            Ok(index_prev_blockhash) if index_prev_blockhash == bitcoind_prev_blockhash => Ok(()),
-            Ok(index_prev_blockhash) if index_prev_blockhash != bitcoind_prev_blockhash => {
-                for depth in 1..max_recoverable_reorg_depth {
-                    let height_to_check = height.saturating_sub(depth);
-                    let index_block_hash = db.get_block_hash(height_to_check)?;
-                    let bitcoind_block_hash = client.get_block_hash(height_to_check)?;
 
-                    if index_block_hash == bitcoind_block_hash {
-                        info!("Reorg until height {}. Depth: {}", height_to_check, depth);
-                        return Err(ReorgError::Recoverable { height, depth });
-                    }
-                }
+        let index_prev_blockhash = cache.get_block_hash(prev_height as u64)?;
 
-                Err(ReorgError::Unrecoverable)
-            }
-            _ => Ok(()),
+        if index_prev_blockhash == bitcoind_prev_blockhash {
+            return Ok(());
         }
+
+        // Walk back up to max_recoverable_reorg_depth looking for a common ancestor.
+        for depth in 1..max_recoverable_reorg_depth {
+            let height_to_check = height.saturating_sub(depth);
+
+            let index_block_hash = cache.get_block_hash(height_to_check)?;
+
+            let bitcoind_block_hash = client.get_block_hash(height_to_check)?;
+
+            if index_block_hash == bitcoind_block_hash {
+                info!("Reorg until height {}. Depth: {}", height_to_check, depth);
+                return Err(ReorgError::Recoverable { height, depth });
+            }
+        }
+
+        Err(ReorgError::Unrecoverable)
     }
 
     fn handle_reorg(&self, height: u64, depth: u64) -> Result<()> {
