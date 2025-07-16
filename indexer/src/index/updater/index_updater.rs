@@ -237,7 +237,7 @@ impl Updater {
                         // Persist any in-memory updates so `handle_reorg` can cleanly roll
                         // back blocks that might still be sitting in the cache and have not
                         // been flushed to RocksDB yet.
-                        cache.flush()?;
+                        cache.flush_sync()?;
 
                         self.handle_reorg(height, depth)?;
                         if let Some(sender) = &self.sender {
@@ -753,9 +753,13 @@ impl Updater {
 
         let bitcoind_prev_blockhash = block.header.prev_blockhash;
 
-        let prev_height = height.checked_sub(1).ok_or(ReorgError::Unrecoverable)?;
+        let prev_height = height.checked_sub(1);
 
-        let index_prev_blockhash = cache.get_block_hash(prev_height as u64)?;
+        let Some(prev_height) = prev_height else {
+            return Ok(());
+        };
+
+        let index_prev_blockhash = cache.get_block_hash(prev_height)?;
 
         if index_prev_blockhash == bitcoind_prev_blockhash {
             return Ok(());
@@ -790,14 +794,19 @@ impl Updater {
         {
             let db = self.db.write();
 
-            // rollback block count indexed.
-            // +1 because this is the block count and not the block height, therefore block count is always height + 1.
-            db.set_block_count(height - depth + 1)?;
+            // Roll back the persisted block count.
+            // `height` refers to the height of the *next* block that was about to be indexed (i.e. equal to
+            // the current block count). Since that block has not been written to the database yet, we only
+            // want to keep blocks strictly below `height`. Therefore, after reverting `depth` blocks, the
+            // new block count must be `height - depth` (the last retained height + 1).
+            db.set_block_count(height - depth)?;
         }
 
         // Find rolled back blocks and revert those txs.
-        for i in 1..depth {
-            let block_height_rolled_back = height - i;
+        // The block at `height` has not yet been stored, so begin reverting from `height - 1` down to
+        // `height - depth`, inclusive. This rolls back exactly `depth` blocks.
+        for i in 0..depth {
+            let block_height_rolled_back = height - 1 - i;
             let block = self.get_block_by_height(block_height_rolled_back)?;
             self.revert_block(block_height_rolled_back as u32, &block)?;
         }

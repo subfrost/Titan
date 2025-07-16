@@ -383,6 +383,18 @@ impl BlockCache {
 
         Ok(())
     }
+
+    /// Flush all pending updates and block until they are fully persisted.
+    pub fn flush_sync(&mut self) -> Result<()> {
+        // Perform the regular flush, which hands the batch off to the background writer.
+        self.flush()?;
+
+        // Wait for the background writer to drain the queue so that every update is
+        // guaranteed to be visible via the persistent store.
+        self.bg_writer.wait_until_empty();
+
+        Ok(())
+    }
 }
 
 impl TransactionStore for BlockCache {

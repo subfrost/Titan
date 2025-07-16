@@ -92,6 +92,28 @@ impl BgWriter {
     fn cleanup_completed_batches(&mut self) {
         self.pending_batches.retain(|b| Arc::strong_count(b) > 1);
     }
+
+    /// Block the caller until all queued batches have been written to RocksDB.
+    ///
+    /// This is useful in scenarios (e.g. reorg handling) where we must guarantee
+    /// that every update previously pushed via `save` is fully persisted before
+    /// we proceed with further read-or-write operations on the underlying store.
+    pub fn wait_until_empty(&mut self) {
+        use std::time::Duration;
+
+        // Actively poll the list of in-flight batches until it becomes empty.
+        // The background writer will drop its Arc once the write completes.
+        while !self.pending_batches.is_empty() {
+            // Remove any batches that the writer has already finished.
+            self.cleanup_completed_batches();
+
+            // If there are still pending batches, wait a short amount of time
+            // before polling again to avoid busy-spinning.
+            if !self.pending_batches.is_empty() {
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
 }
 
 impl Drop for BgWriter {
