@@ -13,7 +13,7 @@ use {
                 events::Events,
                 transaction::{TransactionParser, TransactionUpdater},
             },
-            Settings, StoreError,
+            Chain, Settings, StoreError,
         },
         models::{BlockId, RuneEntry},
     },
@@ -758,6 +758,11 @@ impl Updater {
         let Some(prev_height) = prev_height else {
             return Ok(());
         };
+
+        // Regtest has no genesis block, so we don't need to check for reorgs.
+        if prev_height == 0 && self.settings.chain == Chain::Regtest {
+            return Ok(());
+        }
 
         let index_prev_blockhash = cache.get_block_hash(prev_height)?;
 
