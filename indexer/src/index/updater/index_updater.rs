@@ -178,17 +178,71 @@ impl Updater {
         }
     }
 
+    fn is_already_at_tip(
+        &self,
+        chain_info: &bitcoincore_rpc::json::GetBlockchainInfoResult,
+    ) -> Result<bool> {
+        let db_read = self.db.read();
+        let db_block_count = db_read.get_block_count()?;
+        let db_tip_height = db_block_count.saturating_sub(1);
+
+        let heights_match =
+            db_tip_height == chain_info.blocks || (db_tip_height == 0 && chain_info.blocks == 0);
+
+        if !heights_match {
+            return Ok(false);
+        }
+
+        if db_block_count == 0 {
+            return Ok(true);
+        }
+
+        Ok(db_read.get_block_hash(db_tip_height)? == chain_info.best_block_hash)
+    }
+
+    fn mark_as_at_tip(&self) {
+        use std::sync::atomic::Ordering;
+        if !self.shutdown_flag.load(Ordering::SeqCst) {
+            let was_at_tip = self.is_at_tip.swap(true, Ordering::AcqRel);
+            if !was_at_tip {
+                let db = self.db.write();
+                if let Err(e) = db.finish_bulk_load() {
+                    warn!("Failed to switch database to online mode: {:?}", e);
+                }
+            }
+        }
+    }
+
+    /// Lightweight entry-point that performs a quick tip check and, if needed, runs a full sync.
     pub fn update_to_tip(&self) -> Result<()> {
+        debug!("Updating to tip");
+
+        let rpc_client = self.bitcoin_rpc_pool.get()?;
+        let chain_info = rpc_client.get_blockchain_info()?;
+
+        if self.is_already_at_tip(&chain_info)? {
+            self.mark_as_at_tip();
+            return Ok(());
+        }
+
+        self.perform_full_sync()?;
+        self.mark_as_at_tip();
+        Ok(())
+    }
+
+    fn perform_full_sync(&self) -> Result<()> {
         debug!("Updating to tip");
 
         // Every 5000 blocks, commit the changes to the database
         let commit_interval = self.settings.commit_interval as usize;
-        let mut cache = BlockCache::new(self.db.clone(), BlockCacheSettings::new(&self.settings))?;
-        let mut events = Events::new();
 
-        // Get RPC client and get block height
+        // Get RPC client and current blockchain info before doing any heavy work
         let bitcoin_block_client = self.bitcoin_rpc_pool.get()?;
         let mut chain_info = bitcoin_block_client.get_blockchain_info()?;
+
+        // Not at tip – proceed with full indexing workflow.
+        let mut cache = BlockCache::new(self.db.clone(), BlockCacheSettings::new(&self.settings))?;
+        let mut events = Events::new();
 
         let mut indexing_first_block = true;
 
