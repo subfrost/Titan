@@ -5,7 +5,7 @@ use {
     std::{
         collections::BTreeMap,
         sync::{
-            atomic::{AtomicU64, Ordering, AtomicBool},
+            atomic::{AtomicBool, AtomicU64, Ordering},
             mpsc, Arc, Condvar, Mutex,
         },
         thread,
@@ -32,17 +32,24 @@ impl Semaphore {
     /// Block the current thread until a permit can be acquired.
     fn acquire(&self) {
         let (mutex, cvar) = &*self.inner;
-        let mut remaining = mutex.lock().unwrap();
-        while *remaining == 0 {
-            remaining = cvar.wait(remaining).unwrap();
+        // Enter standard Condvar pattern: guard + loop on predicate.
+        let mut remaining = mutex.lock().expect("Semaphore mutex poisoned");
+        loop {
+            if *remaining > 0 {
+                *remaining -= 1;
+                return;
+            }
+            remaining = match cvar.wait(remaining) {
+                Ok(guard) => guard, // spurious wake-up or notify()
+                Err(poison) => panic!("Semaphore condvar poisoned: {poison}"),
+            };
         }
-        *remaining -= 1;
     }
 
     /// Release a previously-acquired permit, unblocking one waiting thread if any.
     fn release(&self) {
         let (mutex, cvar) = &*self.inner;
-        let mut remaining = mutex.lock().unwrap();
+        let mut remaining = mutex.lock().expect("Semaphore mutex poisoned");
         *remaining += 1;
         cvar.notify_one();
     }
@@ -147,13 +154,7 @@ pub fn fetch_blocks_from(
     limit: u64,
     shutdown_flag: Arc<AtomicBool>,
 ) -> Result<(mpsc::Receiver<Block>, BlockFetcherStats), bitcoincore_rpc::Error> {
-    fetch_blocks_from_with_buffer_limit(
-        bitcoin_rpc_pool,
-        start_height,
-        limit,
-        500,
-        shutdown_flag,
-    )
+    fetch_blocks_from_with_buffer_limit(bitcoin_rpc_pool, start_height, limit, 500, shutdown_flag)
 }
 
 pub fn fetch_blocks_from_with_buffer_limit(
