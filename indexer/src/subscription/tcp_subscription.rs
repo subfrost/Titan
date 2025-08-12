@@ -1,6 +1,7 @@
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::sync::Arc;
 use titan_types::{Event, EventType, TcpSubscriptionRequest};
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
@@ -53,10 +54,23 @@ impl TcpSubscriptionManager {
 
         for (id, sub) in subs.iter() {
             if sub.event_types.contains(&event_type) {
-                // Try sending the event; if it fails (e.g. channel closed) log the error.
-                if let Err(e) = sub.sender.send(event.clone()).await {
-                    error!("Failed to send event to subscription {}: {:?}", id, e);
-                    failed_ids.push(*id);
+                // Non-blocking send to avoid stalling the dispatcher on slow clients.
+                match sub.sender.try_send(event.clone()) {
+                    Ok(()) => {}
+                    Err(TrySendError::Full(_)) => {
+                        info!(
+                            "Dropping event and evicting slow TCP subscriber {} due to full channel",
+                            id
+                        );
+                        failed_ids.push(*id);
+                    }
+                    Err(TrySendError::Closed(_)) => {
+                        info!(
+                            "Evicting TCP subscriber {} because its channel is closed",
+                            id
+                        );
+                        failed_ids.push(*id);
+                    }
                 }
             }
         }
