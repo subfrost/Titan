@@ -30,6 +30,10 @@ impl Events {
 
         Ok(())
     }
+
+    pub fn take_all(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.events)
+    }
 }
 
 impl TransactionEventMgr for Events {

@@ -330,14 +330,9 @@ impl Updater {
                         .start_timer();
 
                     cache.add_address_events(&mut events, self.settings.chain);
-                    cache.flush()?;
 
-                    // Ignore errors from sending events.
-                    if let Err(e) = events.send_events(&self.sender) {
-                        if !self.shutdown_flag.load(Ordering::SeqCst) {
-                            error!("Failed to send events: {:?}", e);
-                        }
-                    }
+                    // Flush asynchronously, and emit events only after persistence completes
+                    self.emit_events_after_persist(&mut cache, &mut events)?;
                 }
 
                 indexing_first_block = false;
@@ -368,12 +363,7 @@ impl Updater {
                 cache.add_address_events(&mut events, self.settings.chain);
             }
 
-            cache.flush()?;
-            if let Err(e) = events.send_events(&self.sender) {
-                if !self.shutdown_flag.load(Ordering::SeqCst) {
-                    error!("Failed to send events: {:?}", e);
-                }
-            }
+            self.emit_events_after_persist(&mut cache, &mut events)?;
         }
 
         if !self.shutdown_flag.load(Ordering::SeqCst) {
@@ -389,6 +379,25 @@ impl Updater {
             }
         }
 
+        Ok(())
+    }
+
+    fn emit_events_after_persist(&self, cache: &mut BlockCache, events: &mut Events) -> Result<()> {
+        let rx = cache.flush_with_notify()?;
+        let mut pending_events = events.take_all();
+        let sender_clone = self.sender.clone();
+        std::thread::spawn(move || {
+            let _ = rx.recv();
+            info!("emit_events_after_persist: events emitted");
+            if let Some(sender) = sender_clone {
+                for event in pending_events.drain(..) {
+                    let result = sender.blocking_send(event);
+                    if let Err(e) = result {
+                        error!("Failed to send event: {:?} in emit_events_after_persist", e);
+                    }
+                }
+            }
+        });
         Ok(())
     }
 

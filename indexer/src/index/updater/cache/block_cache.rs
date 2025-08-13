@@ -395,6 +395,33 @@ impl BlockCache {
 
         Ok(())
     }
+
+    /// Flush the current batch and return a receiver that signals when persistence completes.
+    pub fn flush_with_notify(&mut self) -> Result<crossbeam_channel::Receiver<()>> {
+        self.prepare_to_delete(self.settings.max_recoverable_reorg_depth)?;
+
+        if self.settings.index_addresses {
+            self.update_script_pubkeys()?;
+        }
+
+        let new_update = BatchUpdate::new(
+            self.update.rune_count,
+            self.update.block_count,
+            self.update.purged_blocks_count,
+        );
+
+        let update = std::mem::replace(&mut self.update, new_update);
+        let delete = std::mem::replace(&mut self.delete, BatchDelete::new());
+
+        let batch = Arc::new(BatchDB { update, delete });
+
+        let rx = self.bg_writer.save_with_notify(batch);
+
+        self.last_block_height = None;
+        self.first_block_height = self.update.block_count;
+
+        Ok(rx)
+    }
 }
 
 impl TransactionStore for BlockCache {

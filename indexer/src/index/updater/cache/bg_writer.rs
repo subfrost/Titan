@@ -19,18 +19,23 @@ pub struct BgWriterSettings {
 
 pub struct BgWriter {
     handle: Option<std::thread::JoinHandle<()>>,
-    sender: Option<Sender<Arc<BatchDB>>>,
+    sender: Option<Sender<BgMessage>>,
     pending_batches: Vec<Arc<BatchDB>>,
+}
+
+struct BgMessage {
+    batch: Arc<BatchDB>,
+    notify: Option<crossbeam_channel::Sender<()>>,
 }
 
 impl BgWriter {
     pub fn start(db: Arc<StoreWithLock>, settings: BgWriterSettings) -> Self {
-        let (tx, rx) = bounded::<Arc<BatchDB>>(settings.max_async_batches);
+        let (tx, rx) = bounded::<BgMessage>(settings.max_async_batches);
 
         let handle = thread::Builder::new()
             .name("rocksdb-writer".into())
             .spawn(move || {
-                while let Ok(batch) = rx.recv() {
+                while let Ok(BgMessage { batch, notify }) = rx.recv() {
                     let store = db.write();
                     let start = Instant::now();
 
@@ -48,6 +53,15 @@ impl BgWriter {
                     }
 
                     debug!("Flushed delete: {} in {:?}", batch.delete, start.elapsed());
+
+                    // Signal completion to any waiter.
+                    if let Some(done_tx) = notify {
+                        info!("BgWriter: sending notify");
+                        let result = done_tx.send(());
+                        if let Err(e) = result {
+                            error!("BgWriter: error sending notify: {:?}", e);
+                        }
+                    }
                 }
             })
             .expect("failed to spawn rocksdb-writer thread");
@@ -83,10 +97,29 @@ impl BgWriter {
         self.pending_batches.push(batch.clone());
 
         if let Some(sender) = &self.sender {
-            if let Err(e) = sender.send(batch) {
+            if let Err(e) = sender.send(BgMessage { batch, notify: None }) {
                 error!("Failed to send batch to background writer: {:?}", e);
             }
         }
+    }
+
+    /// Enqueue a batch and return a receiver that fires once the background write completes.
+    pub fn save_with_notify(&mut self, batch: Arc<BatchDB>) -> crossbeam_channel::Receiver<()> {
+        self.cleanup_completed_batches();
+        self.pending_batches.push(batch.clone());
+
+        let (tx, rx) = bounded::<()>(1);
+
+        if let Some(sender) = &self.sender {
+            if let Err(e) = sender.send(BgMessage {
+                batch,
+                notify: Some(tx),
+            }) {
+                error!("Failed to send batch to background writer: {:?}", e);
+            }
+        }
+
+        rx
     }
 
     fn cleanup_completed_batches(&mut self) {
