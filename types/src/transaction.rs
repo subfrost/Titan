@@ -47,6 +47,68 @@ impl Transaction {
     pub fn vbytes(&self) -> u64 {
         (self.weight + WITNESS_SCALE_FACTOR as u64 - 1) / WITNESS_SCALE_FACTOR as u64
     }
+
+    pub fn is_coinbase(&self) -> bool {
+        if self.input.len() != 1 {
+            return false;
+        }
+
+        let prev = &self.input[0].previous_output;
+        let is_zero_txid = prev.txid().iter().all(|b| *b == 0);
+        let is_max_vout = prev.vout() == u32::MAX;
+        is_zero_txid && is_max_vout
+    }
+
+    pub fn input_value_sat(&self) -> Option<u64> {
+        let mut sum: u64 = 0;
+
+        for txin in &self.input {
+            let value = txin.previous_output_data.as_ref()?.value;
+            sum = sum.saturating_add(value);
+        }
+
+        Some(sum)
+    }
+
+    pub fn output_value_sat(&self) -> u64 {
+        self.output
+            .iter()
+            .fold(0u64, |acc, o| acc.saturating_add(o.value))
+    }
+
+    pub fn fee_paid_sat(&self) -> Option<u64> {
+        if self.is_coinbase() {
+            return None;
+        }
+
+        let input_sum = self.input_value_sat()?;
+        input_sum.checked_sub(self.output_value_sat())
+    }
+
+    pub fn fee_rate_sat_vb(&self) -> Option<f64> {
+        let fee = self.fee_paid_sat()? as f64;
+        let vbytes = self.vbytes() as f64;
+        if vbytes == 0.0 {
+            return None;
+        }
+        Some(fee / vbytes)
+    }
+
+    pub fn num_inputs(&self) -> usize {
+        self.input.len()
+    }
+
+    pub fn num_outputs(&self) -> usize {
+        self.output.len()
+    }
+
+    pub fn has_runes(&self) -> bool {
+        self.output.iter().any(|o| !o.runes.is_empty())
+    }
+
+    pub fn has_risky_runes(&self) -> bool {
+        self.output.iter().any(|o| !o.risky_runes.is_empty())
+    }
 }
 
 impl
