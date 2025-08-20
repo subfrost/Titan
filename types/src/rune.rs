@@ -11,8 +11,11 @@ pub struct MintResponse {
     pub start: Option<u64>,
     pub end: Option<u64>,
     pub mintable: bool,
+    #[serde(with = "crate::serde_str")]
     pub cap: u128,
+    #[serde(with = "crate::serde_str")]
     pub amount: u128,
+    #[serde(with = "crate::serde_str")]
     pub mints: u128,
 }
 
@@ -20,18 +23,25 @@ pub struct MintResponse {
 pub struct RuneResponse {
     pub id: RuneId,
     pub block: u64,
+    #[serde(with = "crate::serde_str")]
     pub burned: u128,
     pub divisibility: u8,
     pub etching: SerializedTxid,
     pub number: u64,
+    #[serde(with = "crate::serde_str")]
     pub premine: u128,
+    #[serde(with = "crate::serde_str")]
     pub supply: u128,
+    #[serde(with = "crate::serde_str")]
     pub max_supply: u128,
     pub spaced_rune: SpacedRune,
     pub symbol: Option<char>,
     pub mint: Option<MintResponse>,
+    #[serde(with = "crate::serde_str")]
     pub burns: u128,
+    #[serde(with = "crate::serde_str")]
     pub pending_burns: u128,
+    #[serde(with = "crate::serde_str")]
     pub pending_mints: u128,
     pub inscription_id: Option<InscriptionId>,
     pub timestamp: u64,
@@ -41,6 +51,7 @@ pub struct RuneResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuneAmount {
     pub rune_id: RuneId,
+    #[serde(with = "crate::serde_str")]
     pub amount: u128,
 }
 

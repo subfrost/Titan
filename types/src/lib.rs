@@ -30,6 +30,7 @@ mod transaction;
 mod tx_in;
 mod tx_out;
 mod txid;
+mod serde_str;
 
 #[cfg(test)]
 mod tests {

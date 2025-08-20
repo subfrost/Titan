@@ -119,18 +119,21 @@ pub enum Event {
         txid: SerializedTxid,
     },
     RuneBurned {
+        #[serde(with = "crate::serde_str")]
         amount: u128,
         location: Location,
         rune_id: RuneId,
         txid: SerializedTxid,
     },
     RuneMinted {
+        #[serde(with = "crate::serde_str")]
         amount: u128,
         location: Location,
         rune_id: RuneId,
         txid: SerializedTxid,
     },
     RuneTransferred {
+        #[serde(with = "crate::serde_str")]
         amount: u128,
         location: Location,
         outpoint: SerializedOutPoint,
