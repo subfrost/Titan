@@ -24,13 +24,16 @@ mod outpoint;
 mod pagination;
 pub mod query;
 mod rune;
+mod serde_str;
 mod stats;
 mod subscription;
 mod transaction;
 mod tx_in;
 mod tx_out;
 mod txid;
-mod serde_str;
+
+// Re-export from ordinals crate
+pub use ordinals::{Artifact, Cenotaph, Edict, Etching, Rune, RuneId, Runestone, SpacedRune};
 
 #[cfg(test)]
 mod tests {
