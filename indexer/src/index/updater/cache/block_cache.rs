@@ -486,6 +486,15 @@ impl TransactionStore for BlockCache {
 
         tx_out.spent = SpentStatus::Spent(spent);
 
+        // Ensure the address index mapping for this outpoint is updated on flush
+        // so that a delete is emitted for confirmed spends.
+        if self.settings.index_addresses {
+            let script_pubkey = tx_out.script_pubkey.clone();
+            self.update
+                .script_pubkeys_outpoints
+                .insert(outpoint.previous_outpoint, script_pubkey);
+        }
+
         self.update
             .txouts
             .insert(outpoint.previous_outpoint, tx_out);
