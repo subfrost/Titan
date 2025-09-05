@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   titan:
     image: ghcr.io/${GITHUB_REPOSITORY:-saturnbtc/titan}:${DOCKER_TAG:-latest}

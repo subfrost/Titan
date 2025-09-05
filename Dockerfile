@@ -21,6 +21,9 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     librocksdb7.8 \
     ca-certificates \
+    gosu \
+    util-linux \
+    passwd \
   && rm -rf /var/lib/apt/lists/*
 
 # Create unprivileged titan user
@@ -34,8 +37,6 @@ RUN mkdir -p /home/titan/data \
 COPY --from=builder --chown=titan:titan /tmp/target/release/titan /usr/local/bin/titan
 RUN chmod +x /usr/local/bin/titan
 
-# Switch to non-root user
-USER titan
 WORKDIR /home/titan
 
 # Default environment (overridable at runtime)
@@ -50,4 +51,10 @@ ENV TCP_ADDRESS=0.0.0.0:8080
 # Expose the mountpoint for the data dir
 VOLUME ["/home/titan/data"]
 
-CMD ["/bin/sh", "-c", "/usr/local/bin/titan --commit-interval ${COMMIT_INTERVAL} --bitcoin-rpc-url ${BITCOIN_RPC_URL} --bitcoin-rpc-username ${BITCOIN_RPC_USERNAME} --bitcoin-rpc-password ${BITCOIN_RPC_PASSWORD} --chain ${CHAIN} --http-listen ${HTTP_LISTEN} --index-addresses --index-bitcoin-transactions --enable-tcp-subscriptions --tcp-address ${TCP_ADDRESS}"]
+# Copy entrypoint script and set it as the container entrypoint
+COPY --chown=root:root entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
+# Default command delegates to entrypoint which will drop privileges and exec titan
+CMD ["/usr/local/bin/titan", "--commit-interval", "${COMMIT_INTERVAL}", "--bitcoin-rpc-url", "${BITCOIN_RPC_URL}", "--bitcoin-rpc-username", "${BITCOIN_RPC_USERNAME}", "--bitcoin-rpc-password", "${BITCOIN_RPC_PASSWORD}", "--chain", "${CHAIN}", "--http-listen", "${HTTP_LISTEN}", "--index-addresses", "--index-bitcoin-transactions", "--enable-tcp-subscriptions", "--tcp-address", "${TCP_ADDRESS}"]
