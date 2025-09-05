@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct BlockTip {
     pub height: u64,
     pub hash: String,
+    pub is_at_tip: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

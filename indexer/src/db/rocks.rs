@@ -89,6 +89,7 @@ const INDEX_SPENT_OUTPUTS_KEY: &str = "index_spent_outputs";
 const BLOCK_COUNT_KEY: &str = "block_count";
 const PURGED_BLOCKS_COUNT_KEY: &str = "purged_blocks_count";
 const DB_SCHEMA_VERSION_KEY: &str = "db_schema_version";
+const IS_AT_TIP_KEY: &str = "is_at_tip";
 
 /// Increment this when the on-disk schema changes in a backward-incompatible way.
 const EXPECTED_DB_SCHEMA_VERSION: u64 = 1;
@@ -395,6 +396,21 @@ impl RocksDB {
             .get_option_vec_data(&cf_handle, PURGED_BLOCKS_COUNT_KEY)
             .mapped()?
             .unwrap_or(0))
+    }
+
+    pub fn get_is_at_tip(&self) -> DBResult<bool> {
+        let cf_handle = self.cf_handle(STATS_CF)?;
+        let val: Option<u64> = self
+            .get_option_vec_data(&cf_handle, IS_AT_TIP_KEY)
+            .mapped()?;
+        Ok(val.map(|v| v == 1).unwrap_or(false))
+    }
+
+    pub fn set_is_at_tip(&self, value: bool) -> DBResult<()> {
+        let cf_handle = self.cf_handle(STATS_CF)?;
+        self.db
+            .put_cf(&cf_handle, IS_AT_TIP_KEY, (value as u64).to_le_bytes().to_vec())?;
+        Ok(())
     }
 
     pub fn get_block_hash(&self, height: u64) -> DBResult<BlockHash> {

@@ -209,7 +209,19 @@ impl Updater {
                 if let Err(e) = db.finish_bulk_load() {
                     warn!("Failed to switch database to online mode: {:?}", e);
                 }
+                if let Err(e) = db.set_is_at_tip(true) {
+                    warn!("Failed to persist is_at_tip=true: {:?}", e);
+                }
             }
+        }
+    }
+
+    pub fn mark_as_not_at_tip(&self) {
+        use std::sync::atomic::Ordering;
+        self.is_at_tip.store(false, Ordering::Release);
+        let db = self.db.write();
+        if let Err(e) = db.set_is_at_tip(false) {
+            warn!("Failed to persist is_at_tip=false: {:?}", e);
         }
     }
 
@@ -248,7 +260,7 @@ impl Updater {
 
         // Fetch new blocks if needed.
         while !self.is_chain_synced(&mut cache, &chain_info)? {
-            self.is_at_tip.store(false, Ordering::Release);
+            self.mark_as_not_at_tip();
 
             let progress_bar =
                 self.open_progress_bar(cache.get_block_height_tip(), chain_info.blocks);
@@ -852,7 +864,7 @@ impl Updater {
 
     fn handle_reorg(&self, height: u64, depth: u64) -> Result<()> {
         // we're not at tip anymore.
-        self.is_at_tip.store(false, Ordering::Release);
+        self.mark_as_not_at_tip();
 
         info!(
             "Reorg detected at height {}, rolling back {} blocks",

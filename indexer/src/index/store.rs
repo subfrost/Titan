@@ -52,6 +52,10 @@ pub trait Store {
     fn is_index_spent_outputs(&self) -> Result<Option<bool>, StoreError>;
     fn set_index_spent_outputs(&self, value: bool) -> Result<(), StoreError>;
 
+    // status
+    fn get_is_at_tip(&self) -> Result<bool, StoreError>;
+    fn set_is_at_tip(&self, value: bool) -> Result<(), StoreError>;
+
     // block
     fn get_block_count(&self) -> Result<u64, StoreError>;
     fn set_block_count(&self, count: u64) -> Result<(), StoreError>;
@@ -230,6 +234,14 @@ impl Store for RocksDB {
 
     fn set_index_spent_outputs(&self, value: bool) -> Result<(), StoreError> {
         Ok(self.set_index_spent_outputs(value)?)
+    }
+
+    fn get_is_at_tip(&self) -> Result<bool, StoreError> {
+        Ok(self.get_is_at_tip()?)
+    }
+
+    fn set_is_at_tip(&self, value: bool) -> Result<(), StoreError> {
+        Ok(self.set_is_at_tip(value)?)
     }
 
     fn get_block_count(&self) -> Result<u64, StoreError> {

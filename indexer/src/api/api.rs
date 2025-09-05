@@ -47,6 +47,7 @@ pub fn tip(index: Arc<Index>) -> Result<BlockTip> {
     Ok(BlockTip {
         height,
         hash: block_hash.to_string(),
+        is_at_tip: index.get_is_at_tip()?,
     })
 }
 
@@ -57,6 +58,7 @@ pub fn status(index: Arc<Index>) -> Result<Status> {
         block_tip: BlockTip {
             height: block_count - 1,
             hash: block_hash.to_string(),
+            is_at_tip: index.get_is_at_tip()?,
         },
         runes_count: index.get_runes_count()?,
         mempool_tx_count: index.get_mempool_txids()?.len() as u64,

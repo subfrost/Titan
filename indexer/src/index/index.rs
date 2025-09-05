@@ -238,6 +238,10 @@ impl Index {
         Ok(self.db.get_block_hash(height)?)
     }
 
+    pub fn get_is_at_tip(&self) -> Result<bool> {
+        Ok(self.db.get_is_at_tip()?)
+    }
+
     pub fn get_block_by_hash(&self, hash: &BlockHash) -> Result<Block> {
         Ok(self.db.get_block_by_hash(hash)?)
     }

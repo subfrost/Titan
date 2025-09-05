@@ -1,6 +1,7 @@
 export interface BlockTip {
   height: number;
   hash: string;
+  is_at_tip: boolean;
 }
 
 export interface Status {
