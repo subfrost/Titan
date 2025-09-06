@@ -56,5 +56,4 @@ COPY --chown=root:root entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
-# Default command delegates to entrypoint which will drop privileges and exec titan
-CMD ["/usr/local/bin/titan", "--commit-interval", "${COMMIT_INTERVAL}", "--bitcoin-rpc-url", "${BITCOIN_RPC_URL}", "--bitcoin-rpc-username", "${BITCOIN_RPC_USERNAME}", "--bitcoin-rpc-password", "${BITCOIN_RPC_PASSWORD}", "--chain", "${CHAIN}", "--http-listen", "${HTTP_LISTEN}", "--index-addresses", "--index-bitcoin-transactions", "--enable-tcp-subscriptions", "--tcp-address", "${TCP_ADDRESS}"]
+CMD ["titan"]

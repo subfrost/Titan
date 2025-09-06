@@ -44,6 +44,28 @@ else
   echo "[entrypoint] Skipping chown per SKIP_CHOWN=${SKIP_CHOWN}"
 fi
 
+# Build default command if none provided or only 'titan' without flags
+if [ "$#" -eq 0 ]; then
+  set -- /usr/local/bin/titan
+fi
+
+if [ "$1" = "titan" ] || [ "$1" = "/usr/local/bin/titan" ]; then
+  if [ "$#" -eq 1 ]; then
+    shift
+    set -- /usr/local/bin/titan \
+      --commit-interval "${COMMIT_INTERVAL:-5}" \
+      --bitcoin-rpc-url "${BITCOIN_RPC_URL:-http://bitcoind:18443}" \
+      --bitcoin-rpc-username "${BITCOIN_RPC_USERNAME:-bitcoin}" \
+      --bitcoin-rpc-password "${BITCOIN_RPC_PASSWORD:-bitcoinpass}" \
+      --chain "${CHAIN:-regtest}" \
+      --http-listen "${HTTP_LISTEN:-0.0.0.0:3030}" \
+      --index-addresses \
+      --index-bitcoin-transactions \
+      --enable-tcp-subscriptions \
+      --tcp-address "${TCP_ADDRESS:-0.0.0.0:8080}"
+  fi
+fi
+
 # Drop privileges if running as root (prefer gosu, fallback to setpriv)
 if [ "$(id -u)" = "0" ]; then
   if command -v gosu >/dev/null 2>&1; then
