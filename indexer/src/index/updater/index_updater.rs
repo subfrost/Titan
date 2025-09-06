@@ -201,17 +201,17 @@ impl Updater {
     }
 
     fn mark_as_at_tip(&self) {
-        use std::sync::atomic::Ordering;
         if !self.shutdown_flag.load(Ordering::SeqCst) {
             let was_at_tip = self.is_at_tip.swap(true, Ordering::AcqRel);
+            let db = self.db.write();
             if !was_at_tip {
-                let db = self.db.write();
                 if let Err(e) = db.finish_bulk_load() {
                     warn!("Failed to switch database to online mode: {:?}", e);
                 }
-                if let Err(e) = db.set_is_at_tip(true) {
-                    warn!("Failed to persist is_at_tip=true: {:?}", e);
-                }
+            }
+
+            if let Err(e) = db.set_is_at_tip(true) {
+                warn!("Failed to persist is_at_tip=true: {:?}", e);
             }
         }
     }
@@ -238,7 +238,6 @@ impl Updater {
         }
 
         self.perform_full_sync()?;
-        self.mark_as_at_tip();
         Ok(())
     }
 
@@ -378,18 +377,7 @@ impl Updater {
             self.emit_events_after_persist(&mut cache, &mut events)?;
         }
 
-        if !self.shutdown_flag.load(Ordering::SeqCst) {
-            // Check if this is the first time we are at tip.
-            let was_at_tip = self.is_at_tip.swap(true, Ordering::AcqRel);
-
-            if !was_at_tip {
-                // First time reaching tip – switch RocksDB back to online mode.
-                let db = self.db.write();
-                if let Err(e) = db.finish_bulk_load() {
-                    warn!("Failed to switch database to online mode: {:?}", e);
-                }
-            }
-        }
+        self.mark_as_at_tip();
 
         Ok(())
     }
