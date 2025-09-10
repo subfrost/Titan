@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bech32::Hrp;
 use bitcoin::Script;
-use metashrew_support::address::{AddressEncoding, Payload};
+use crate::address::{AddressEncoding, Payload};
 static mut _NETWORK: Option<NetworkParams> = None;
 
 #[derive(Clone, Debug, Default)]

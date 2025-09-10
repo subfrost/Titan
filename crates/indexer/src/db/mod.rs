@@ -1,4 +1,4 @@
-pub use {error::RocksDBError, rocks::RocksDB};
+pub use {error::RocksDBError, rocks::{RocksDB, PROTORUNE_BALANCES_CF}};
 
 pub mod entry;
 mod error;

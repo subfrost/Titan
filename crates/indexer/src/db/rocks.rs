@@ -7,9 +7,12 @@ use {
         },
         *,
     },
-    crate::models::{
-        BatchDelete, BatchRollback, BatchUpdate, BlockId, Inscription, RuneEntry,
-        TransactionStateChange, TxRuneIndexRef,
+    crate::{
+        index::store::{Store, StoreError},
+        models::{
+            BatchDelete, BatchRollback, BatchUpdate, BlockId, Inscription, RuneEntry,
+            TransactionStateChange, TxRuneIndexRef,
+        },
     },
     bitcoin::{consensus, hashes::Hash, BlockHash, ScriptBuf, Transaction},
     borsh::BorshDeserialize,
@@ -62,7 +65,7 @@ const RUNES_CF: &str = "runes";
 const RUNE_IDS_CF: &str = "rune_ids";
 const RUNE_NUMBER_CF: &str = "rune_number";
 
-const PROTORUNE_BALANCES_CF: &str = "protorune_balances";
+pub const PROTORUNE_BALANCES_CF: &str = "protorune_balances";
 
 const INSCRIPTIONS_CF: &str = "inscriptions";
 
@@ -2008,6 +2011,592 @@ impl RocksDB {
         //    at the end of this function.
         //    That will release RocksDB file handles, locks, etc.
         Ok(())
+    }
+}
+
+impl Store for RocksDB {
+    fn get(&self, cf: &str, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
+        let cf_handle = self.cf_handle(cf)?;
+        Ok(self.get_option_vec_data(&cf_handle, key)?)
+    }
+
+    fn is_index_addresses(&self) -> Result<Option<bool>, StoreError> {
+        Ok(self.is_index_addresses()?)
+    }
+
+    fn set_index_addresses(&self, value: bool) -> Result<(), StoreError> {
+        Ok(self.set_index_addresses(value)?)
+    }
+
+    fn is_index_bitcoin_transactions(&self) -> Result<Option<bool>, StoreError> {
+        Ok(self.is_index_bitcoin_transactions()?)
+    }
+
+    fn set_index_bitcoin_transactions(&self, value: bool) -> Result<(), StoreError> {
+        Ok(self.set_index_bitcoin_transactions(value)?)
+    }
+
+    fn is_index_spent_outputs(&self) -> Result<Option<bool>, StoreError> {
+        Ok(self.is_index_spent_outputs()?)
+    }
+
+    fn set_index_spent_outputs(&self, value: bool) -> Result<(), StoreError> {
+        Ok(self.set_index_spent_outputs(value)?)
+    }
+
+    fn get_block_count(&self) -> Result<u64, StoreError> {
+        Ok(self.get_block_count()?)
+    }
+
+    fn set_block_count(&self, count: u64) -> Result<(), StoreError> {
+        Ok(self.set_block_count(count)?)
+    }
+
+    fn get_purged_blocks_count(&self) -> Result<u64, StoreError> {
+        Ok(self.get_purged_blocks_count()?)
+    }
+
+    fn get_is_at_tip(&self) -> Result<bool, StoreError> {
+        Ok(self.get_is_at_tip()?)
+    }
+
+    fn set_is_at_tip(&self, value: bool) -> Result<(), StoreError> {
+        Ok(self.set_is_at_tip(value)?)
+    }
+
+    fn get_block_hash(&self, height: u64) -> Result<BlockHash, StoreError> {
+        Ok(self.get_block_hash(height)?)
+    }
+
+    fn delete_block_hash(&self, height: u64) -> Result<(), StoreError> {
+        Ok(self.delete_block_hash(height)?)
+    }
+
+    fn get_block_by_hash(&self, hash: &BlockHash) -> Result<Block, StoreError> {
+        Ok(self.get_block_by_hash(hash)?)
+    }
+
+    fn get_block_hashes_by_height(
+        &self,
+        from_height: u64,
+        to_height: u64,
+    ) -> Result<Vec<BlockHash>, StoreError> {
+        Ok(self.get_block_hashes_by_height(from_height, to_height)?)
+    }
+
+    fn get_blocks_by_hashes(
+        &self,
+        hashes: &Vec<BlockHash>,
+    ) -> Result<HashMap<BlockHash, Block>, StoreError> {
+        Ok(self.get_blocks_by_hashes(hashes)?)
+    }
+
+    fn delete_block(&self, hash: &BlockHash) -> Result<(), StoreError> {
+        Ok(self.delete_block(hash)?)
+    }
+
+    fn get_rune(&self, rune_id: &RuneId) -> Result<RuneEntry, StoreError> {
+        Ok(self.get_rune(rune_id)?)
+    }
+
+    fn get_runes_by_ids(&self, rune_ids: &Vec<RuneId>) -> Result<HashMap<RuneId, RuneEntry>, StoreError> {
+        Ok(self.get_runes_by_ids(rune_ids)?)
+    }
+
+    fn get_rune_id_by_number(&self, number: u64) -> Result<RuneId, StoreError> {
+        Ok(self.get_rune_id_by_number(number)?)
+    }
+
+    fn get_rune_ids_by_numbers(&self, numbers: &Vec<u64>) -> Result<HashMap<u64, RuneId>, StoreError> {
+        Ok(self.get_rune_ids_by_numbers(numbers)?)
+    }
+
+    fn get_tx_out(
+        &self,
+        outpoint: &SerializedOutPoint,
+        mempool: Option<bool>,
+    ) -> Result<TxOut, StoreError> {
+        if let Some(mempool) = mempool {
+            Ok(self.get_tx_out(outpoint, mempool)?)
+        } else {
+            match self.get_tx_out(outpoint, false) {
+                Ok(tx_out) => return Ok(tx_out),
+                Err(err) => match err {
+                    RocksDBError::NotFound(_) => self.get_tx_out(outpoint, true).map_err(Into::into),
+                    other => Err(StoreError::DB(other)),
+                },
+            }
+        }
+    }
+
+    fn get_all_tx_outs(&self, mempool: bool) -> Result<HashMap<SerializedOutPoint, TxOut>, StoreError> {
+        Ok(self.get_all_tx_outs(mempool)?)
+    }
+
+    fn get_tx_outs(
+        &self,
+        outpoints: &[SerializedOutPoint],
+        mempool: Option<bool>,
+    ) -> Result<HashMap<SerializedOutPoint, TxOut>, StoreError> {
+        Ok(self.get_tx_outs(outpoints, mempool)?)
+    }
+
+    fn get_tx_state_changes(
+        &self,
+        tx_id: &SerializedTxid,
+        mempool: Option<bool>,
+    ) -> Result<TransactionStateChange, StoreError> {
+        if let Some(mempool) = mempool {
+            Ok(self.get_tx_state_changes(tx_id, mempool)?)
+        } else {
+            match self.get_tx_state_changes(tx_id, false) {
+                Ok(tx_state_change) => return Ok(tx_state_change),
+                Err(err) => match err {
+                    RocksDBError::NotFound(_) => Ok(self.get_tx_state_changes(tx_id, true)?),
+                    other => Err(StoreError::DB(other)),
+                },
+            }
+        }
+    }
+
+    fn get_txs_state_changes(
+        &self,
+        txids: &[SerializedTxid],
+        mempool: bool,
+    ) -> Result<HashMap<SerializedTxid, TransactionStateChange>, StoreError> {
+        Ok(self.get_txs_state_changes(txids, mempool)?)
+    }
+
+    fn get_runes_count(&self) -> Result<u64, StoreError> {
+        Ok(self.get_runes_count()?)
+    }
+
+    fn get_rune_id(&self, rune: &ordinals::Rune) -> Result<RuneId, StoreError> {
+        Ok(self.get_rune_id(&rune.0)?)
+    }
+
+    fn get_inscription(&self, id: &InscriptionId) -> Result<Inscription, StoreError> {
+        Ok(self.get_inscription(id)?)
+    }
+
+    fn get_protorune_balance_sheet(
+        &self,
+        outpoint: &SerializedOutPoint,
+    ) -> Result<ProtoruneBalanceSheet, StoreError> {
+        Ok(self.get_protorune_balance_sheet(outpoint)?)
+    }
+
+    fn get_last_rune_transactions(
+        &self,
+        rune_id: &RuneId,
+        pagination: Option<Pagination>,
+        mempool: Option<bool>,
+    ) -> Result<PaginationResponse<SerializedTxid>, StoreError> {
+        if let Some(mempool) = mempool {
+            Ok(self.get_last_rune_transactions(rune_id, pagination, mempool)?)
+        } else {
+            // First get mempool transactions
+            let mempool_txids = self.get_last_rune_transactions(rune_id, pagination, true)?;
+
+            // Then get non-mempool transactions
+            // Adapt pagination to offset
+            let non_mempool_pagination = match pagination {
+                Some(pagination) => Pagination {
+                    skip: pagination.skip.saturating_sub(mempool_txids.offset),
+                    limit: pagination
+                        .limit
+                        .saturating_sub(mempool_txids.items.len() as u64),
+                },
+                None => Pagination {
+                    skip: 0,
+                    limit: u64::MAX,
+                },
+            };
+
+            let non_mempool_txids =
+                self.get_last_rune_transactions(rune_id, Some(non_mempool_pagination), false)?;
+
+            let new_offset = mempool_txids.offset + non_mempool_txids.offset;
+
+            Ok(PaginationResponse {
+                items: mempool_txids
+                    .items
+                    .into_iter()
+                    .chain(non_mempool_txids.items)
+                    .collect(),
+                offset: new_offset,
+            })
+        }
+    }
+
+    fn add_rune_transactions_batch(
+        &self,
+        rune_tx_map: &HashMap<RuneId, Vec<SerializedTxid>>,
+        mempool: bool,
+    ) -> Result<(), StoreError> {
+        Ok(self.add_rune_transactions_batch(rune_tx_map, mempool)?)
+    }
+
+    fn delete_rune_transactions(
+        &self,
+        txids: &[SerializedTxid],
+        mempool: bool,
+    ) -> Result<(), StoreError> {
+        Ok(self.delete_rune_transactions(txids, mempool)?)
+    }
+
+    fn get_mempool_txids(&self) -> Result<HashMap<SerializedTxid, MempoolEntry>, StoreError> {
+        Ok(self.get_mempool_txids()?)
+    }
+
+    fn is_tx_in_mempool(&self, txid: &SerializedTxid) -> Result<bool, StoreError> {
+        Ok(self.is_tx_in_mempool(txid)?)
+    }
+
+    fn get_mempool_entry(&self, txid: &SerializedTxid) -> Result<MempoolEntry, StoreError> {
+        Ok(self.get_mempool_entry(txid)?)
+    }
+
+    fn get_mempool_entries(
+        &self,
+        txids: &[SerializedTxid],
+    ) -> Result<HashMap<SerializedTxid, Option<MempoolEntry>>, StoreError> {
+        Ok(self.get_mempool_entries(txids)?)
+    }
+
+    fn get_mempool_entries_with_ancestors(
+        &self,
+        txids: &[SerializedTxid],
+    ) -> Result<HashMap<SerializedTxid, MempoolEntry>, StoreError> {
+        Ok(self.get_mempool_entries_with_ancestors(txids)?)
+    }
+
+    fn get_script_pubkey_outpoints(
+        &self,
+        script_pubkey: &ScriptBuf,
+        mempool: Option<bool>,
+    ) -> Result<Vec<SerializedOutPoint>, StoreError> {
+        if let Some(mempool) = mempool {
+            Ok(self.get_script_pubkey_outpoints(script_pubkey, mempool)?)
+        } else {
+            let mut ledger_entry = self.get_script_pubkey_outpoints(script_pubkey, false)?;
+            let mempool_entry = self.get_script_pubkey_outpoints(script_pubkey, true)?;
+
+            ledger_entry.extend(mempool_entry);
+
+            // Get spent outpoints in mempool.
+            let spent_outpoints = self.get_spent_outpoints_in_mempool(&ledger_entry)?;
+            ledger_entry.retain(|outpoint| {
+                let spent = spent_outpoints.get(outpoint);
+                match spent {
+                    Some(Some(_)) => false,
+                    Some(None) => true,
+                    None => true,
+                }
+            });
+
+            Ok(ledger_entry)
+        }
+    }
+
+    fn get_outpoints_to_script_pubkey(
+        &self,
+        outpoints: &[SerializedOutPoint],
+        mempool: Option<bool>,
+        optimistic: bool,
+    ) -> Result<HashMap<SerializedOutPoint, ScriptBuf>, StoreError> {
+        let script_pubkeys = if let Some(mempool) = mempool {
+            self.get_outpoints_to_script_pubkey(outpoints, mempool, optimistic)?
+        } else {
+            let ledger_script_pubkeys =
+                self.get_outpoints_to_script_pubkey(outpoints, false, true)?;
+
+            let remaining_outpoints = outpoints
+                .iter()
+                .filter(|outpoint| !ledger_script_pubkeys.contains_key(outpoint))
+                .cloned()
+                .collect::<Vec<_>>();
+
+            let mempool_script_pubkeys =
+                self.get_outpoints_to_script_pubkey(&remaining_outpoints, true, optimistic)?;
+
+            ledger_script_pubkeys
+                .into_iter()
+                .chain(mempool_script_pubkeys)
+                .collect()
+        };
+
+        Ok(script_pubkeys)
+    }
+
+    fn get_spent_outpoints_in_mempool(
+        &self,
+        outpoints: &[SerializedOutPoint],
+    ) -> Result<HashMap<SerializedOutPoint, Option<SpenderReference>>, StoreError> {
+        Ok(self.get_spent_outpoints_in_mempool(outpoints)?)
+    }
+
+    fn get_transaction_raw(
+        &self,
+        txid: &SerializedTxid,
+        mempool: Option<bool>,
+    ) -> Result<Vec<u8>, StoreError> {
+        if let Some(mempool) = mempool {
+            Ok(self.get_transaction_raw(txid, mempool)?)
+        } else {
+            match self.get_transaction_raw(txid, false) {
+                Ok(transaction) => return Ok(transaction),
+                Err(err) => match err {
+                    RocksDBError::NotFound(_) => Ok(self.get_transaction_raw(txid, true)?),
+                    other => Err(StoreError::DB(other)),
+                },
+            }
+        }
+    }
+
+    fn get_transaction(
+        &self,
+        txid: &SerializedTxid,
+        mempool: Option<bool>,
+    ) -> Result<titan_types::Transaction, StoreError> {
+        let (transaction, status, mempool) = if let Some(mempool) = mempool {
+            let status = if !mempool {
+                self.get_transaction_confirming_block(txid)?
+                    .into_transaction_status()
+            } else {
+                titan_types::TransactionStatus {
+                    confirmed: false,
+                    block_height: None,
+                    block_hash: None,
+                }
+            };
+
+            (self.get_transaction(txid, mempool)?, status, mempool)
+        } else {
+            match self.get_transaction(txid, false) {
+                Ok(transaction) => {
+                    let status = self
+                        .get_transaction_confirming_block(txid)?
+                        .into_transaction_status();
+
+                    (transaction, status, false)
+                }
+                Err(err) => match err {
+                    RocksDBError::NotFound(_) => {
+                        let status = titan_types::TransactionStatus {
+                            confirmed: false,
+                            block_height: None,
+                            block_hash: None,
+                        };
+
+                        (self.get_transaction(txid, true)?, status, true)
+                    }
+                    other => return Err(StoreError::DB(other)),
+                },
+            }
+        };
+
+        let (inputs, outputs) = self.get_inputs_outputs_from_transaction(&transaction, txid)?;
+
+        Ok(titan_types::Transaction::from((
+            transaction,
+            status,
+            inputs,
+            outputs,
+        )))
+    }
+
+    fn partition_transactions_by_existence<'a, I>(
+        &self,
+        txids: I,
+    ) -> Result<(Vec<SerializedTxid>, Vec<SerializedTxid>), StoreError>
+    where
+        I: IntoIterator<Item = &'a SerializedTxid>,
+    {
+        Ok(self.partition_transactions_by_existence(txids)?)
+    }
+
+    fn get_transaction_confirming_block(&self, txid: &SerializedTxid) -> Result<BlockId, StoreError> {
+        Ok(self.get_transaction_confirming_block(txid)?)
+    }
+
+    fn get_transaction_confirming_blocks(
+        &self,
+        txids: &[SerializedTxid],
+    ) -> Result<HashMap<SerializedTxid, Option<BlockId>>, StoreError> {
+        Ok(self.get_transaction_confirming_blocks(txids)?)
+    }
+
+    fn batch_update(&self, update: &BatchUpdate, mempool: bool) -> Result<(), StoreError> {
+        Ok(self.batch_update(update, mempool)?)
+    }
+
+    fn batch_delete(&self, delete: &BatchDelete) -> Result<(), StoreError> {
+        Ok(self.batch_delete(delete)?)
+    }
+
+    fn batch_rollback(&self, rollback: &BatchRollback, mempool: bool) -> Result<(), StoreError> {
+        Ok(self.batch_rollback(rollback, mempool)?)
+    }
+
+    fn set_subscription(&self, sub: &Subscription) -> Result<(), StoreError> {
+        Ok(self.set_subscription(sub)?)
+    }
+
+    fn get_subscription(&self, id: &Uuid) -> Result<Subscription, StoreError> {
+        Ok(self.get_subscription(id)?)
+    }
+
+    fn get_subscriptions(&self) -> Result<Vec<Subscription>, StoreError> {
+        Ok(self.get_subscriptions()?)
+    }
+
+    fn delete_subscription(&self, id: &Uuid) -> Result<(), StoreError> {
+        Ok(self.delete_subscription(id)?)
+    }
+
+    fn update_subscription_last_success(
+        &self,
+        subscription_id: &Uuid,
+        new_time_secs: u64,
+    ) -> Result<(), StoreError> {
+        Ok(self.update_subscription_last_success(subscription_id, new_time_secs)?)
+    }
+
+    fn flush(&self) -> Result<(), StoreError> {
+        Ok(self.flush()?)
+    }
+
+    fn close(self) -> Result<(), StoreError> {
+        Ok(self.close()?)
+    }
+
+    fn get_blocks_by_heights(
+        &self,
+        from_height: u64,
+        to_height: u64,
+    ) -> Result<HashMap<u64, Block>, StoreError> {
+        let block_hashes = self.get_block_hashes_by_height(from_height, to_height)?;
+        let blocks = self.get_blocks_by_hashes(&block_hashes)?;
+        let mut result = HashMap::default();
+        for (_, block) in blocks {
+            let height = block.height;
+            result.insert(height, block);
+        }
+
+        Ok(result)
+    }
+
+    fn get_tx_out_with_mempool_spent_update(
+        &self,
+        outpoint: &SerializedOutPoint,
+        mempool: Option<bool>,
+    ) -> Result<TxOut, StoreError> {
+        let mut tx_out = self.get_tx_out(outpoint, mempool)?;
+
+        let spent_outpoints: HashMap<SerializedOutPoint, Option<SpenderReference>> =
+            self.get_spent_outpoints_in_mempool(&vec![*outpoint])?;
+
+        let spent_in_mempool = spent_outpoints.get(outpoint);
+
+        match spent_in_mempool {
+            Some(Some(spent)) => {
+                tx_out.spent = titan_types::SpentStatus::Spent(spent.clone());
+            }
+            _ => {}
+        }
+
+        Ok(tx_out)
+    }
+
+    fn get_tx_outs_with_mempool_spent_update(
+        &self,
+        outpoints: &[SerializedOutPoint],
+        mempool: Option<bool>,
+    ) -> Result<HashMap<SerializedOutPoint, TxOut>, StoreError> {
+        let mut tx_outs = self.get_tx_outs(outpoints, mempool)?;
+        let spent_outpoints: HashMap<SerializedOutPoint, Option<SpenderReference>> =
+            self.get_spent_outpoints_in_mempool(outpoints)?;
+
+        for (outpoint, output) in tx_outs.iter_mut() {
+            let spent_in_mempool = spent_outpoints.get(outpoint);
+
+            match spent_in_mempool {
+                Some(Some(spent)) => {
+                    output.spent = titan_types::SpentStatus::Spent(spent.clone());
+                }
+                _ => {}
+            }
+        }
+
+        Ok(tx_outs)
+    }
+
+    fn get_inputs_outputs_from_transaction(
+        &self,
+        transaction: &bitcoin::Transaction,
+        txid: &SerializedTxid,
+    ) -> Result<(Vec<Option<TxOut>>, Vec<Option<TxOut>>), StoreError> {
+        let prev_outpoints = transaction
+            .input
+            .iter()
+            .map(|tx_in| tx_in.previous_output.into())
+            .collect::<Vec<SerializedOutPoint>>();
+
+        let outpoints = transaction
+            .output
+            .iter()
+            .enumerate()
+            .map(|(vout, _)| SerializedOutPoint::from_txid_vout(txid, vout as u32))
+            .collect::<Vec<_>>();
+
+        let all_outpoints = prev_outpoints
+            .iter()
+            .chain(outpoints.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let mut outputs_map = self.get_tx_outs_with_mempool_spent_update(&all_outpoints, None)?;
+
+        let inputs = prev_outpoints
+            .iter()
+            .map(|outpoint| outputs_map.remove(outpoint))
+            .collect::<Vec<_>>();
+
+        let outputs = outpoints
+            .iter()
+            .map(|outpoint| outputs_map.remove(outpoint))
+            .collect::<Vec<_>>();
+
+        Ok((inputs, outputs))
+    }
+
+    fn get_runes(
+        &self,
+        pagination: Pagination,
+    ) -> Result<PaginationResponse<(RuneId, RuneEntry)>, StoreError> {
+        let runes_count = self.get_runes_count()?;
+        let (skip, limit) = pagination.into();
+
+        let start = runes_count.saturating_sub(skip);
+        let end = runes_count.saturating_sub(skip).saturating_sub(limit);
+
+        let mut runes = Vec::new();
+        for i in (end..start).rev() {
+            let rune_id = self.get_rune_id_by_number(i)?;
+            let rune_entry = self.get_rune(&rune_id)?;
+            runes.push((rune_id, rune_entry));
+        }
+
+        let offset = skip + runes.len() as u64;
+        Ok(PaginationResponse {
+            items: runes,
+            offset,
+        })
+    }
+
+    fn finish_bulk_load(&self) -> Result<(), StoreError> {
+        self.switch_to_online_mode().map_err(StoreError::DB)
     }
 }
 

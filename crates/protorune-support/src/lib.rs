@@ -1,8 +1,11 @@
 pub mod balance_sheet;
+pub mod address;
+pub mod byte_view;
 pub mod byte_utils;
 pub mod constants;
 pub mod network;
 pub mod proto;
+pub mod message;
 pub mod protostone;
 pub mod rune_transfer;
 pub mod utils;

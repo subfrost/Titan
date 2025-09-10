@@ -5,9 +5,31 @@ use bitcoin::consensus::{
 };
 use bitcoin::hashes::Hash;
 use bitcoin::{OutPoint, Txid};
-use metashrew_support::utils::{is_empty, remaining_slice};
 use ordinals::varint;
-use std::{io::BufRead, string};
+use std::io::BufRead;
+use crate::byte_view::ByteView;
+use std::io::Read;
+use std::mem::size_of;
+
+pub fn is_empty(cursor: &mut std::io::Cursor<Vec<u8>>) -> bool {
+    cursor.position() >= cursor.get_ref().len() as u64
+}
+
+pub fn remaining_slice(cursor: &mut std::io::Cursor<Vec<u8>>) -> &[u8] {
+    &cursor.get_ref()[(cursor.position() as usize)..cursor.get_ref().len()]
+}
+
+pub fn consume_exact(cursor: &mut std::io::Cursor<Vec<u8>>, n: usize) -> Result<Vec<u8>> {
+    let mut buffer: Vec<u8> = vec![0u8; n];
+    cursor.read_exact(&mut buffer[0..n])?;
+    Ok(buffer)
+}
+
+pub fn consume_sized_int<T: ByteView>(cursor: &mut std::io::Cursor<Vec<u8>>) -> Result<T> {
+    let buffer = consume_exact(cursor, size_of::<T>())?;
+    Ok(T::from_bytes(buffer))
+}
+
 pub fn consensus_encode<T: Encodable>(v: &T) -> Result<Vec<u8>> {
     let mut result = Vec::<u8>::new();
     <T as Encodable>::consensus_encode::<Vec<u8>>(v, &mut result)?;

@@ -2157,7 +2157,6 @@ dependencies = [
  "bitcoin",
  "borsh",
  "hex",
- "metashrew-support 9.0.1 (git+https://github.com/sandshrewmetaprotocols/metashrew?branch=master)",
  "ordinals",
  "protobuf 3.7.2",
  "protobuf-codegen 3.7.2",

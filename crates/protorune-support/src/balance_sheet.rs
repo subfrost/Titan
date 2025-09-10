@@ -3,8 +3,7 @@ use crate::proto::protorune::{BalanceSheetItem, Rune};
 use crate::rune_transfer::RuneTransfer;
 use anyhow::{anyhow, Result};
 use hex;
-use metashrew_support::index_pointer::KeyValuePointer;
-use metashrew_support::utils::consume_sized_int;
+use crate::utils::consume_sized_int;
 use ordinals::RuneId;
 use protobuf::{MessageField, SpecialFields};
 use serde::{Deserialize, Serialize};
@@ -13,6 +12,11 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use std::io::Cursor;
 use std::sync::Arc;
 use std::u128;
+
+pub trait ProtoruneStore {
+	fn get(&self, key: &[u8]) -> Option<Vec<u8>>;
+}
+
 
 #[derive(
     Eq, PartialOrd, Ord, PartialEq, Hash, Clone, Copy, Debug, Default, Serialize, Deserialize, BorshSerialize, BorshDeserialize
@@ -56,7 +60,7 @@ impl From<ProtoruneRuneId> for crate::proto::protorune::ProtoruneRuneId {
     }
 }
 
-impl<P: KeyValuePointer + Clone> From<crate::proto::protorune::BalanceSheet> for BalanceSheet<P> {
+impl<P: ProtoruneStore + Clone> From<crate::proto::protorune::BalanceSheet> for BalanceSheet<P> {
     fn from(balance_sheet: crate::proto::protorune::BalanceSheet) -> BalanceSheet<P> {
         BalanceSheet {
             cached: CachedBalanceSheet {
@@ -75,7 +79,7 @@ impl<P: KeyValuePointer + Clone> From<crate::proto::protorune::BalanceSheet> for
     }
 }
 
-impl<P: KeyValuePointer + Clone> From<BalanceSheet<P>> for crate::proto::protorune::BalanceSheet {
+impl<P: ProtoruneStore + Clone> From<BalanceSheet<P>> for crate::proto::protorune::BalanceSheet {
     fn from(balance_sheet: BalanceSheet<P>) -> crate::proto::protorune::BalanceSheet {
         crate::proto::protorune::BalanceSheet {
             entries: balance_sheet
@@ -312,14 +316,14 @@ impl Eq for CachedBalanceSheet {}
 
 /// The full BalanceSheet that extends CachedBalanceSheet with loading functionality
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BalanceSheet<P: KeyValuePointer + Clone> {
+pub struct BalanceSheet<P: ProtoruneStore + Clone> {
     pub cached: CachedBalanceSheet,
     #[serde(skip)]
     pub load_ptrs: Vec<P>,
 }
 
 // We still need this implementation to customize the equality comparison
-impl<P: KeyValuePointer + Clone> PartialEq for BalanceSheet<P> {
+impl<P: ProtoruneStore + Clone> PartialEq for BalanceSheet<P> {
     fn eq(&self, other: &Self) -> bool {
         // Get all unique rune IDs from both balance sheets
         let mut all_runes = self.balances().keys().collect::<BTreeSet<_>>();
@@ -337,9 +341,9 @@ impl<P: KeyValuePointer + Clone> PartialEq for BalanceSheet<P> {
 }
 
 // Implementing Eq for BalanceSheet
-impl<P: KeyValuePointer + Clone> Eq for BalanceSheet<P> {}
+impl<P: ProtoruneStore + Clone> Eq for BalanceSheet<P> {}
 
-impl<P: KeyValuePointer + Clone> Default for BalanceSheet<P> {
+impl<P: ProtoruneStore + Clone> Default for BalanceSheet<P> {
     fn default() -> Self {
         BalanceSheet {
             cached: CachedBalanceSheet::default(),
@@ -369,7 +373,7 @@ impl From<u128> for crate::proto::protorune::Uint128 {
     }
 }
 
-impl<P: KeyValuePointer + Clone> From<crate::proto::protorune::OutpointResponse>
+impl<P: ProtoruneStore + Clone> From<crate::proto::protorune::OutpointResponse>
     for BalanceSheet<P>
 {
     fn from(v: crate::proto::protorune::OutpointResponse) -> BalanceSheet<P> {
@@ -404,7 +408,7 @@ impl<P: KeyValuePointer + Clone> From<crate::proto::protorune::OutpointResponse>
     }
 }
 
-impl<P: KeyValuePointer + Clone> BalanceSheet<P> {
+impl<P: ProtoruneStore + Clone> BalanceSheet<P> {
     pub fn new_ptr_backed(ptr: P) -> Self {
         BalanceSheet {
             cached: CachedBalanceSheet::new(),
@@ -420,17 +424,14 @@ impl<P: KeyValuePointer + Clone> BalanceSheet<P> {
 
         // Try to load from storage using the stored pointer
         let mut total_stored_balance = 0;
-        let rune_clone = rune.clone(); // Clone the rune to avoid borrowing issues
+        let rune_clone: Vec<u8> = rune.clone().into(); // Clone the rune to avoid borrowing issues
 
         // First, collect all stored balances
         for ptr in &self.load_ptrs {
-            let runes_to_balances_ptr = ptr
-                .clone()
-                .keyword("/id_to_balance")
-                .select(&rune_clone.into());
-            if runes_to_balances_ptr.get().len() != 0 {
-                let stored_balance = runes_to_balances_ptr.get_value::<u128>();
-                total_stored_balance += stored_balance;
+            if let Some(bytes) = ptr.get(&rune_clone) {
+                if bytes.len() == 16 {
+                    total_stored_balance += u128::from_le_bytes(bytes.try_into().unwrap());
+                }
             }
         }
         return total_stored_balance;
@@ -447,7 +448,7 @@ impl<P: KeyValuePointer + Clone> BalanceSheet<P> {
     }
 }
 
-impl<P: KeyValuePointer + Clone> BalanceSheetOperations for BalanceSheet<P> {
+impl<P: ProtoruneStore + Clone> BalanceSheetOperations for BalanceSheet<P> {
     fn balances(&self) -> &BTreeMap<ProtoruneRuneId, u128> {
         self.cached.balances()
     }
@@ -481,7 +482,7 @@ impl<P: KeyValuePointer + Clone> BalanceSheetOperations for BalanceSheet<P> {
     }
 }
 
-impl<P: KeyValuePointer + Clone> TryFrom<Vec<RuneTransfer>> for BalanceSheet<P> {
+impl<P: ProtoruneStore + Clone> TryFrom<Vec<RuneTransfer>> for BalanceSheet<P> {
     type Error = anyhow::Error;
 
     fn try_from(v: Vec<RuneTransfer>) -> Result<BalanceSheet<P>> {

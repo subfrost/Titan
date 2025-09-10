@@ -1,9 +1,7 @@
 use std::collections::BTreeMap;
 
-use metashrew_support::index_pointer::KeyValuePointer;
-
-use crate::balance_sheet::{BalanceSheet, BalanceSheetOperations, ProtoruneRuneId};
-use anyhow::{anyhow, Result};
+use crate::balance_sheet::{BalanceSheet, BalanceSheetOperations, ProtoruneRuneId, ProtoruneStore};
+use anyhow::{Result};
 
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RuneTransfer {
@@ -12,7 +10,7 @@ pub struct RuneTransfer {
 }
 
 impl RuneTransfer {
-    pub fn from_balance_sheet<P: KeyValuePointer + Clone>(s: BalanceSheet<P>) -> Vec<Self> {
+    pub fn from_balance_sheet<P: ProtoruneStore + Clone>(s: BalanceSheet<P>) -> Vec<Self> {
         s.balances()
             .iter()
             .filter_map(|(id, v)| {
@@ -31,7 +29,7 @@ impl RuneTransfer {
 ///                       the current transaction being handled.
 ///   sheet: The balance sheet to increase the balances by
 ///   vout: The target transaction vout to receive the runes
-pub fn increase_balances_using_sheet<P: KeyValuePointer + Clone>(
+pub fn increase_balances_using_sheet<P: ProtoruneStore + Clone>(
     balances_by_output: &mut BTreeMap<u32, BalanceSheet<P>>,
     sheet: &BalanceSheet<P>,
     vout: u32,
@@ -44,7 +42,7 @@ pub fn increase_balances_using_sheet<P: KeyValuePointer + Clone>(
 }
 
 /// Refunds all input runes to the refund pointer
-pub fn refund_to_refund_pointer<P: KeyValuePointer + Clone>(
+pub fn refund_to_refund_pointer<P: ProtoruneStore + Clone>(
     balances_by_output: &mut BTreeMap<u32, BalanceSheet<P>>,
     protomessage_vout: u32,
     refund_pointer: u32,

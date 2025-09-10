@@ -10,6 +10,6 @@ mod index;
 mod inscription;
 mod metrics;
 mod settings;
-mod store;
+pub mod store;
 mod updater;
 mod zmq;

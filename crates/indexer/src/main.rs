@@ -22,6 +22,7 @@ mod db;
 mod index;
 mod models;
 mod options;
+mod protorune;
 mod server;
 mod subscription;
 mod util;
