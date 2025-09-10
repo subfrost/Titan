@@ -160,12 +160,10 @@ pub trait Store {
         transaction: &bitcoin::Transaction,
         txid: &SerializedTxid,
     ) -> Result<(Vec<Option<TxOut>>, Vec<Option<TxOut>>), StoreError>;
-    fn partition_transactions_by_existence<'a, I>(
+    fn partition_transactions_by_existence(
         &self,
-        txids: I,
-    ) -> Result<(Vec<SerializedTxid>, Vec<SerializedTxid>), StoreError>
-    where
-        I: IntoIterator<Item = &'a SerializedTxid>;
+        txids: &Vec<SerializedTxid>,
+    ) -> Result<(Vec<SerializedTxid>, Vec<SerializedTxid>), StoreError>;
 
     // rune transactions
     fn get_last_rune_transactions(

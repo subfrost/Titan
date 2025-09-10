@@ -2406,14 +2406,11 @@ impl Store for RocksDB {
         )))
     }
 
-    fn partition_transactions_by_existence<'a, I>(
+    fn partition_transactions_by_existence(
         &self,
-        txids: I,
-    ) -> Result<(Vec<SerializedTxid>, Vec<SerializedTxid>), StoreError>
-    where
-        I: IntoIterator<Item = &'a SerializedTxid>,
-    {
-        Ok(self.partition_transactions_by_existence(txids)?)
+        txids: &Vec<SerializedTxid>,
+    ) -> Result<(Vec<SerializedTxid>, Vec<SerializedTxid>), StoreError> {
+        Ok(self.partition_transactions_by_existence(txids.iter())?)
     }
 
     fn get_transaction_confirming_block(&self, txid: &SerializedTxid) -> Result<BlockId, StoreError> {
@@ -2492,7 +2489,7 @@ impl Store for RocksDB {
         outpoint: &SerializedOutPoint,
         mempool: Option<bool>,
     ) -> Result<TxOut, StoreError> {
-        let mut tx_out = self.get_tx_out(outpoint, mempool)?;
+        let mut tx_out = <Self as Store>::get_tx_out(self, outpoint, mempool)?;
 
         let spent_outpoints: HashMap<SerializedOutPoint, Option<SpenderReference>> =
             self.get_spent_outpoints_in_mempool(&vec![*outpoint])?;
