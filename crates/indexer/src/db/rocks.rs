@@ -2016,6 +2016,7 @@ mod tests {
     use super::*;
     use crate::models::protorune::ProtoruneBalanceSheet;
     use protorune_support::balance_sheet::{BalanceSheetOperations, ProtoruneRuneId};
+    use std::str::FromStr;
     use tempfile::tempdir;
     use titan_types::SerializedOutPoint;
 

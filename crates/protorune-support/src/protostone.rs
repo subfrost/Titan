@@ -299,8 +299,7 @@ impl Protostone {
     /// protostone_raw: LEB encoded Protostone
     /// num_outputs: needed to check that the edicts of the protostone do not exceed the
     pub fn decipher(values: &Vec<u128>) -> Result<Vec<Protostone>> {
-        let raw: Vec<u8> = join_to_bytes(values);
-        let mut iter = Runestone::integers(&raw)?.into_iter();
+        let mut iter = values.iter().cloned();
         let mut result: Vec<Protostone> = vec![];
         loop {
             if let Some(protocol_tag) = iter.next() {

@@ -7,6 +7,9 @@ pub mod protostone;
 pub mod rune_transfer;
 pub mod utils;
 
+pub use balance_sheet::ProtoruneRuneId;
+pub use protostone::*;
+
 use anyhow;
 use bitcoin::hashes::Hash;
 use bitcoin::{OutPoint, Txid};

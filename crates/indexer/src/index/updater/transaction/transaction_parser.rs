@@ -129,13 +129,29 @@ impl<'client> TransactionParser<'client> {
             tx_outs.push(tx_out);
         }
 
+        let mut protorune_balances = HashMap::default();
+        if let Some(artifact) = Runestone::decipher(tx) {
+            if let Artifact::Runestone(runestone) = artifact {
+                if let Ok(protostones) = Protostone::from_runestone(&runestone) {
+                    for protostone in protostones {
+                        let mut balance_sheet = ProtoruneBalanceSheet::new();
+                        for edict in protostone.edicts {
+                            balance_sheet.increase(&edict.id.into(), edict.amount).unwrap();
+                        }
+                        let outpoint = SerializedOutPoint::from_txid_vout(&tx.compute_txid().into(), protostone.pointer.unwrap_or(0) as u32);
+                        protorune_balances.insert(outpoint, balance_sheet);
+                    }
+                }
+            }
+        }
+
         let transaction_state_change = TransactionStateChange {
             burned,
             inputs,
             outputs: tx_outs,
             etched,
             minted,
-            protorune_balances: HashMap::default(),
+            protorune_balances,
             is_coinbase: tx.is_coinbase(),
         };
 
@@ -228,17 +244,6 @@ impl<'client> TransactionParser<'client> {
             }
         }
 
-        if let Some(runestone) = artifact.as_ref().and_then(|a| match a {
-            Artifact::Runestone(r) => Some(r),
-            _ => None,
-        }) {
-            if let Some(protostone) = runestone.protocol.clone().and_then(|p| Protostone::decipher(&p).ok().and_then(|v| v.into_iter().next())) {
-                let mut balance_sheet = ProtoruneBalanceSheet::new();
-                for edict in protostone.edicts {
-                    balance_sheet.increase(&edict.id.into(), edict.amount).unwrap();
-                }
-            }
-        }
 
         let mut burned: HashMap<RuneId, Lot> = HashMap::default();
 
@@ -582,5 +587,80 @@ impl<'client> TransactionParser<'client> {
         let tx_out_map = store.get_tx_outs(&outpoints)?;
 
         Ok(tx_out_map)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::index::updater::transaction::test_helpers::MockTransactionStore;
+    use bitcoin::{self, Amount, ScriptBuf, TxOut as BitcoinTxOut, locktime::absolute::LockTime, transaction::Version};
+    use bitcoincore_rpc::Auth;
+    use ordinals::{Edict as OrdinalEdict, RuneId as OrdinalRuneId};
+    use protorune_support::{
+        protostone::{Protostone, ProtostoneEdict},
+        ProtoruneRuneId,
+    };
+
+    #[test]
+    fn test_protorune_parsing() {
+        let mut store = MockTransactionStore::new();
+        let rpc_client = Client::new("http://localhost:8332", Auth::None).unwrap();
+        let mut parser = TransactionParser::new(&rpc_client, Chain::Mainnet, 840000, false).unwrap();
+
+        let protostone = Protostone {
+            edicts: vec![ProtostoneEdict {
+                id: ProtoruneRuneId { block: 1, tx: 1 },
+                amount: 100,
+                output: 0,
+            }],
+            pointer: Some(0),
+            burn: None,
+            message: vec![],
+            refund: None,
+            from: None,
+            protocol_tag: 1,
+        };
+        let payload = protostone.to_integers().unwrap();
+
+        let runestone = Runestone {
+            edicts: vec![],
+            etching: None,
+            mint: None,
+            pointer: Some(0),
+            protocol: Some(payload),
+        };
+
+        let script_pubkey = runestone.encipher();
+
+        let tx = Transaction {
+            version: Version(2),
+            lock_time: LockTime::ZERO,
+            input: vec![],
+            output: vec![
+                BitcoinTxOut {
+                    value: Amount::from_sat(0),
+                    script_pubkey: script_pubkey,
+                },
+                BitcoinTxOut {
+                    value: Amount::from_sat(5000),
+                    script_pubkey: ScriptBuf::new(),
+                },
+            ],
+        };
+
+        let result = parser.parse(&mut store, 0, &tx).unwrap();
+
+        assert_eq!(result.protorune_balances.len(), 1);
+        let (outpoint, balance_sheet) = result.protorune_balances.iter().next().unwrap();
+        assert_eq!(
+            *outpoint,
+            SerializedOutPoint::from_txid_vout(&tx.compute_txid().into(), 0)
+        );
+        assert_eq!(balance_sheet.balances.len(), 1);
+        let (protorune_id, &amount) = balance_sheet.balances.iter().next().unwrap();
+        assert_eq!(protorune_id.block, 1);
+        assert_eq!(protorune_id.tx, 1);
+        assert_eq!(amount, 100);
     }
 }
