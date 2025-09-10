@@ -13,7 +13,7 @@ pub struct TitanProtoruneStore<'a> {
 
 impl<'a> ProtoruneStore for TitanProtoruneStore<'a> {
     fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
-        self.store.get(PROTORUNE_BALANCES_CF, key).unwrap()
+        self.store.get(PROTORUNE_BALANCES_CF, key).ok().flatten()
     }
 }
 
