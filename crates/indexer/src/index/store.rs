@@ -4,6 +4,7 @@ use {
         models::{
             BatchDelete, BatchRollback, BatchUpdate, BlockId, Inscription, RuneEntry,
             TransactionStateChange,
+            protorune::ProtoruneBalanceSheet,
         },
     },
     bitcoin::{consensus, hex::HexToArrayError, BlockHash, ScriptBuf},
@@ -186,6 +187,12 @@ pub trait Store {
 
     // inscription
     fn get_inscription(&self, inscription_id: &InscriptionId) -> Result<Inscription, StoreError>;
+
+    // protorune
+    fn get_protorune_balance_sheet(
+        &self,
+        outpoint: &SerializedOutPoint,
+    ) -> Result<ProtoruneBalanceSheet, StoreError>;
 
     // address
     fn get_script_pubkey_outpoints(
@@ -613,6 +620,13 @@ impl Store for RocksDB {
 
     fn get_inscription(&self, inscription_id: &InscriptionId) -> Result<Inscription, StoreError> {
         Ok(self.get_inscription(inscription_id)?)
+    }
+
+    fn get_protorune_balance_sheet(
+        &self,
+        outpoint: &SerializedOutPoint,
+    ) -> Result<ProtoruneBalanceSheet, StoreError> {
+        Ok(self.get_protorune_balance_sheet(outpoint)?)
     }
 
     fn get_last_rune_transactions(

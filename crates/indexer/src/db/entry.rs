@@ -34,3 +34,4 @@ impl Entry for TxOut {}
 impl Entry for Subscription {}
 impl Entry for SpenderReference {}
 impl Entry for MempoolEntry {}
+impl Entry for crate::models::protorune::ProtoruneBalanceSheet {}

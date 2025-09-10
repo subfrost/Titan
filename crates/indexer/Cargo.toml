@@ -5,7 +5,11 @@ edition = "2021"
 
 [dependencies]
 titan-types = { workspace = true }
+alkanes-support = { workspace = true }
+metashrew-support = { workspace = true }
+protorune-support = { workspace = true }
 
+anyhow = { workspace = true }
 axum = { workspace = true }
 axum-server = { workspace = true }
 bitcoin = { workspace = true }

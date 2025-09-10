@@ -3,12 +3,16 @@ use {
     crate::{
         bitcoin_rpc::BitcoinCoreRpcResultExt,
         index::{Chain, StoreError},
-        models::{Lot, TransactionStateChange, TransactionStateChangeInput},
+        models::{protorune::ProtoruneBalanceSheet, Lot, TransactionStateChange, TransactionStateChangeInput},
         util::IntoUsize,
     },
     bitcoin::{consensus::encode, OutPoint, Transaction},
     bitcoincore_rpc::{Client, RpcApi},
     ordinals::{Artifact, Edict, Height, Rune, RuneId, Runestone},
+    protorune_support::{
+        protostone::Protostone,
+        balance_sheet::BalanceSheetOperations,
+    },
     rustc_hash::FxHashMap as HashMap,
     thiserror::Error,
     titan_types::{RuneAmount, SerializedOutPoint, SpentStatus, TxOut},
@@ -131,6 +135,7 @@ impl<'client> TransactionParser<'client> {
             outputs: tx_outs,
             etched,
             minted,
+            protorune_balances: HashMap::default(),
             is_coinbase: tx.is_coinbase(),
         };
 
@@ -219,6 +224,18 @@ impl<'client> TransactionParser<'client> {
                             output,
                         );
                     }
+                }
+            }
+        }
+
+        if let Some(runestone) = artifact.as_ref().and_then(|a| match a {
+            Artifact::Runestone(r) => Some(r),
+            _ => None,
+        }) {
+            if let Some(protostone) = runestone.protocol.clone().and_then(|p| Protostone::decipher(&p).ok().and_then(|v| v.into_iter().next())) {
+                let mut balance_sheet = ProtoruneBalanceSheet::new();
+                for edict in protostone.edicts {
+                    balance_sheet.increase(&edict.id.into(), edict.amount).unwrap();
                 }
             }
         }

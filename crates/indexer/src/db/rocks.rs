@@ -13,6 +13,7 @@ use {
     },
     bitcoin::{consensus, hashes::Hash, BlockHash, ScriptBuf, Transaction},
     borsh::BorshDeserialize,
+    crate::models::protorune::ProtoruneBalanceSheet,
     mapper::DBResultMapper,
     ordinals::RuneId,
     rocksdb::{
@@ -60,6 +61,8 @@ const RUNES_COUNT_KEY: &str = "runes_count";
 const RUNES_CF: &str = "runes";
 const RUNE_IDS_CF: &str = "rune_ids";
 const RUNE_NUMBER_CF: &str = "rune_number";
+
+const PROTORUNE_BALANCES_CF: &str = "protorune_balances";
 
 const INSCRIPTIONS_CF: &str = "inscriptions";
 
@@ -118,6 +121,8 @@ impl RocksDB {
             ColumnFamilyDescriptor::new(RUNE_IDS_CF, cf_opts.clone());
         let rune_number_cfd: ColumnFamilyDescriptor =
             ColumnFamilyDescriptor::new(RUNE_NUMBER_CF, cf_opts.clone());
+        let protorune_balances_cfd: ColumnFamilyDescriptor =
+            ColumnFamilyDescriptor::new(PROTORUNE_BALANCES_CF, cf_opts.clone());
         let inscriptions_cfd: ColumnFamilyDescriptor =
             ColumnFamilyDescriptor::new(INSCRIPTIONS_CF, cf_opts.clone());
         let mempool_cfd: ColumnFamilyDescriptor =
@@ -210,6 +215,7 @@ impl RocksDB {
                 runes_cfd,
                 rune_ids_cfd,
                 rune_number_cfd,
+                protorune_balances_cfd,
                 inscriptions_cfd,
                 mempool_cfd,
                 stats_cfd,
@@ -713,6 +719,20 @@ impl RocksDB {
             )))?;
 
         Ok(inscription)
+    }
+
+    pub fn get_protorune_balance_sheet(
+        &self,
+        outpoint: &SerializedOutPoint,
+    ) -> DBResult<ProtoruneBalanceSheet> {
+        let cf_handle = self.cf_handle(PROTORUNE_BALANCES_CF)?;
+        Ok(self
+            .get_option_vec_data(&cf_handle, outpoint.as_ref())
+            .mapped()?
+            .ok_or(RocksDBError::NotFound(format!(
+                "protorune balance sheet not found: {}",
+                outpoint
+            )))?)
     }
 
     pub fn get_last_rune_transactions(
@@ -1562,6 +1582,14 @@ impl RocksDB {
             }
         }
 
+        // 18. Update protorune_balances
+        {
+            let cf_handle: Arc<BoundColumnFamily<'_>> = self.cf_handle(PROTORUNE_BALANCES_CF)?;
+            for (outpoint, balance_sheet) in update.protorune_balances.iter() {
+                batch.put_cf(&cf_handle, outpoint.as_ref(), balance_sheet.store_ref());
+            }
+        }
+
         // Proceed with the actual write
         self.db.write_opt(batch, &self.write_opts)?;
 
@@ -1949,7 +1977,7 @@ impl RocksDB {
 
         Ok(subs)
     }
-
+    
     pub fn delete_subscription(&self, id: &Uuid) -> DBResult<()> {
         let cf_handle = self.cf_handle(SUBSCRIPTIONS_CF)?;
         let key = id.as_bytes();
@@ -1980,5 +2008,31 @@ impl RocksDB {
         //    at the end of this function.
         //    That will release RocksDB file handles, locks, etc.
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::protorune::ProtoruneBalanceSheet;
+    use protorune_support::balance_sheet::{BalanceSheetOperations, ProtoruneRuneId};
+    use tempfile::tempdir;
+    use titan_types::SerializedOutPoint;
+
+    #[test]
+    fn test_protorune_balance_sheet() {
+        let dir = tempdir().unwrap();
+        let db = RocksDB::open(dir.path().to_str().unwrap()).unwrap();
+
+        let outpoint = SerializedOutPoint::from_str("0000000000000000000000000000000000000000000000000000000000000000:0").unwrap();
+        let mut balance_sheet = ProtoruneBalanceSheet::new();
+        balance_sheet.increase(&ProtoruneRuneId { block: 1, tx: 1 }, 100).unwrap();
+
+        let mut update = BatchUpdate::new(0, 0, 0);
+        update.protorune_balances.insert(outpoint, balance_sheet.clone());
+        db.batch_update(&update, false).unwrap();
+
+        let retrieved_balance_sheet = db.get_protorune_balance_sheet(&outpoint).unwrap();
+        assert_eq!(balance_sheet, retrieved_balance_sheet);
     }
 }

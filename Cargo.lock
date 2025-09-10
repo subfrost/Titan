@@ -27,6 +27,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "alkanes-support"
+version = "1.2.3"
+source = "git+https://github.com/kungfuflex/alkanes-rs?branch=main#3fca4ee11d0f843b1b9dc9a6e0f6e204a7c420f8"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "flate2",
+ "hex",
+ "metashrew-support 9.0.1 (git+https://github.com/sandshrewmetaprotocols/metashrew)",
+ "protobuf 3.7.2",
+ "protobuf-codegen 3.7.2",
+ "protoc-bin-vendored",
+ "protoc-rust",
+ "protorune-support 1.2.3",
+ "serde",
+]
+
+[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -104,6 +122,12 @@ dependencies = [
  "anstyle",
  "windows-sys 0.59.0",
 ]
+
+[[package]]
+name = "anyhow"
+version = "1.0.99"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0674a1ddeecb70197781e945de4b3b8ffb61fa939a5597bcf48503737663100"
 
 [[package]]
 name = "arrayvec"
@@ -300,9 +324,9 @@ dependencies = [
 
 [[package]]
 name = "bitcoin"
-version = "0.32.5"
+version = "0.32.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce6bc65742dea50536e35ad42492b234c27904a27f0abdcbce605015cb4ea026"
+checksum = "0fda569d741b895131a88ee5589a467e73e9c4718e958ac9308e4f7dc44b6945"
 dependencies = [
  "base58ck",
  "bech32",
@@ -1057,6 +1081,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3011d1213f159867b13cfd6ac92d2cd5f1345762c63be3554e84092d85a50bbd"
 
 [[package]]
+name = "home"
+version = "0.5.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "589533453244b0995c858700322199b2becb13b627df2851f64a2775d024abcf"
+dependencies = [
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "http"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1580,6 +1613,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
+name = "metashrew-support"
+version = "9.0.1"
+source = "git+https://github.com/sandshrewmetaprotocols/metashrew?branch=master#6f35138ac71c56b0035b65c874ae94331874f2e3"
+dependencies = [
+ "anyhow",
+ "bech32",
+ "bitcoin",
+ "flate2",
+ "hex",
+ "protobuf 3.7.2",
+ "protobuf-codegen 3.7.2",
+ "protoc-bin-vendored",
+ "protoc-rust",
+]
+
+[[package]]
+name = "metashrew-support"
+version = "9.0.1"
+source = "git+https://github.com/sandshrewmetaprotocols/metashrew#8bc6d080d12837e4b53baf57e9417198dac77ea1"
+dependencies = [
+ "anyhow",
+ "bech32",
+ "bitcoin",
+ "flate2",
+ "hex",
+ "protobuf 3.7.2",
+ "protobuf-codegen 3.7.2",
+ "protoc-bin-vendored",
+ "protoc-rust",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1793,15 +1858,14 @@ dependencies = [
 
 [[package]]
 name = "ordinals"
-version = "0.0.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0ccbc6d37bb38f41103fa2668f1569318da73accf2102821cf731a4c0c09a28"
+version = "1.2.3"
+source = "git+https://github.com/kungfuflex/alkanes-rs?branch=main#3fca4ee11d0f843b1b9dc9a6e0f6e204a7c420f8"
 dependencies = [
  "bitcoin",
  "derive_more",
  "serde",
  "serde_with",
- "thiserror 2.0.9",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1927,7 +1991,7 @@ dependencies = [
  "lazy_static",
  "memchr",
  "parking_lot",
- "protobuf",
+ "protobuf 2.28.0",
  "thiserror 1.0.69",
 ]
 
@@ -1936,6 +2000,189 @@ name = "protobuf"
 version = "2.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
+
+[[package]]
+name = "protobuf"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d65a1d4ddae7d8b5de68153b48f6aa3bba8cb002b243dbdbc55a5afbc98f99f4"
+dependencies = [
+ "bytes",
+ "once_cell",
+ "protobuf-support",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "protobuf-codegen"
+version = "2.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "033460afb75cf755fcfc16dfaed20b86468082a2ea24e05ac35ab4a099a017d6"
+dependencies = [
+ "protobuf 2.28.0",
+]
+
+[[package]]
+name = "protobuf-codegen"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d3976825c0014bbd2f3b34f0001876604fe87e0c86cd8fa54251530f1544ace"
+dependencies = [
+ "anyhow",
+ "once_cell",
+ "protobuf 3.7.2",
+ "protobuf-parse",
+ "regex",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "protobuf-parse"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4aeaa1f2460f1d348eeaeed86aea999ce98c1bded6f089ff8514c9d9dbdc973"
+dependencies = [
+ "anyhow",
+ "indexmap 2.7.0",
+ "log",
+ "protobuf 3.7.2",
+ "protobuf-support",
+ "tempfile",
+ "thiserror 1.0.69",
+ "which",
+]
+
+[[package]]
+name = "protobuf-support"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e36c2f31e0a47f9280fb347ef5e461ffcd2c52dd520d8e216b52f93b0b0d7d6"
+dependencies = [
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "protoc"
+version = "2.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0218039c514f9e14a5060742ecd50427f8ac4f85a6dc58f2ddb806e318c55ee"
+dependencies = [
+ "log",
+ "which",
+]
+
+[[package]]
+name = "protoc-bin-vendored"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1c381df33c98266b5f08186583660090a4ffa0889e76c7e9a5e175f645a67fa"
+dependencies = [
+ "protoc-bin-vendored-linux-aarch_64",
+ "protoc-bin-vendored-linux-ppcle_64",
+ "protoc-bin-vendored-linux-s390_64",
+ "protoc-bin-vendored-linux-x86_32",
+ "protoc-bin-vendored-linux-x86_64",
+ "protoc-bin-vendored-macos-aarch_64",
+ "protoc-bin-vendored-macos-x86_64",
+ "protoc-bin-vendored-win32",
+]
+
+[[package]]
+name = "protoc-bin-vendored-linux-aarch_64"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c350df4d49b5b9e3ca79f7e646fde2377b199e13cfa87320308397e1f37e1a4c"
+
+[[package]]
+name = "protoc-bin-vendored-linux-ppcle_64"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a55a63e6c7244f19b5c6393f025017eb5d793fd5467823a099740a7a4222440c"
+
+[[package]]
+name = "protoc-bin-vendored-linux-s390_64"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dba5565db4288e935d5330a07c264a4ee8e4a5b4a4e6f4e83fad824cc32f3b0"
+
+[[package]]
+name = "protoc-bin-vendored-linux-x86_32"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8854774b24ee28b7868cd71dccaae8e02a2365e67a4a87a6cd11ee6cdbdf9cf5"
+
+[[package]]
+name = "protoc-bin-vendored-linux-x86_64"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b38b07546580df720fa464ce124c4b03630a6fb83e05c336fea2a241df7e5d78"
+
+[[package]]
+name = "protoc-bin-vendored-macos-aarch_64"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89278a9926ce312e51f1d999fee8825d324d603213344a9a706daa009f1d8092"
+
+[[package]]
+name = "protoc-bin-vendored-macos-x86_64"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81745feda7ccfb9471d7a4de888f0652e806d5795b61480605d4943176299756"
+
+[[package]]
+name = "protoc-bin-vendored-win32"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95067976aca6421a523e491fce939a3e65249bac4b977adee0ee9771568e8aa3"
+
+[[package]]
+name = "protoc-rust"
+version = "2.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22f8a182bb17c485f20bdc4274a8c39000a61024cfe461c799b50fec77267838"
+dependencies = [
+ "protobuf 2.28.0",
+ "protobuf-codegen 2.28.0",
+ "protoc",
+ "tempfile",
+]
+
+[[package]]
+name = "protorune-support"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bech32",
+ "bitcoin",
+ "borsh",
+ "hex",
+ "metashrew-support 9.0.1 (git+https://github.com/sandshrewmetaprotocols/metashrew?branch=master)",
+ "ordinals",
+ "protobuf 3.7.2",
+ "protobuf-codegen 3.7.2",
+ "protoc-bin-vendored",
+ "protoc-rust",
+ "serde",
+]
+
+[[package]]
+name = "protorune-support"
+version = "1.2.3"
+source = "git+https://github.com/kungfuflex/alkanes-rs?branch=main#3fca4ee11d0f843b1b9dc9a6e0f6e204a7c420f8"
+dependencies = [
+ "anyhow",
+ "bech32",
+ "bitcoin",
+ "hex",
+ "metashrew-support 9.0.1 (git+https://github.com/sandshrewmetaprotocols/metashrew)",
+ "ordinals",
+ "protobuf 3.7.2",
+ "protobuf-codegen 3.7.2",
+ "protoc-bin-vendored",
+ "protoc-rust",
+ "serde",
+]
 
 [[package]]
 name = "quote"
@@ -2654,6 +2901,8 @@ dependencies = [
 name = "titan"
 version = "0.1.0"
 dependencies = [
+ "alkanes-support",
+ "anyhow",
  "async_zmq",
  "axum",
  "axum-server",
@@ -2670,8 +2919,10 @@ dependencies = [
  "http",
  "indicatif",
  "lazy_static",
+ "metashrew-support 9.0.1 (git+https://github.com/sandshrewmetaprotocols/metashrew?branch=master)",
  "ordinals",
  "prometheus",
+ "protorune-support 0.1.0",
  "rayon",
  "regex",
  "reqwest",
@@ -2682,7 +2933,7 @@ dependencies = [
  "serde_with",
  "thiserror 2.0.9",
  "threadpool",
- "titan-types 0.1.30 (registry+https://github.com/rust-lang/crates.io-index)",
+ "titan-types",
  "tokio",
  "tower-http",
  "tracing",
@@ -2701,7 +2952,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.9",
- "titan-types 0.1.30 (registry+https://github.com/rust-lang/crates.io-index)",
+ "titan-types",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2721,24 +2972,6 @@ dependencies = [
  "ordinals",
  "serde",
  "serde_json",
- "thiserror 2.0.9",
- "uuid",
-]
-
-[[package]]
-name = "titan-types"
-version = "0.1.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff7ef73b29694e2efd99aee5fbce51d9f95acb36ea06779d3c6fd25bc9d63aa3"
-dependencies = [
- "bitcoin",
- "bitcoincore-rpc",
- "borsh",
- "brotli",
- "hex",
- "http",
- "ordinals",
- "serde",
  "thiserror 2.0.9",
  "uuid",
 ]
@@ -3174,6 +3407,18 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "which"
+version = "4.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87ba24419a2078cd2b0f2ede2691b6c66d8e47836da3b6db8265ebad47afbfc7"
+dependencies = [
+ "either",
+ "home",
+ "once_cell",
+ "rustix",
 ]
 
 [[package]]

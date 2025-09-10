@@ -13,4 +13,5 @@ mod inscription;
 mod lot;
 mod media;
 mod rune;
+pub mod protorune;
 mod transaction_state_change;

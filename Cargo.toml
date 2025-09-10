@@ -1,19 +1,26 @@
 [workspace]
 resolver = "2"
 
-members = ["indexer", "types", "client"]
+members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"
+description = "A Bitcoin indexer"
+license = "MIT"
+repository = "https://github.com/Titannet-dao/titan"
 
 [workspace.dependencies]
 # workspace
-titan-types = { version = "0.1.30" }
+titan-types = { path = "./crates/types" }
+alkanes-support = { git = "https://github.com/kungfuflex/alkanes-rs", branch = "main" }
+metashrew-support = { git = "https://github.com/sandshrewmetaprotocols/metashrew", branch = "master" }
+protorune-support = { path = "./crates/protorune-support" }
 
+anyhow = "1.0.86"
 async-trait = "0.1.86"
 axum = "0.8.1"
 axum-server = "0.7.1"
-bitcoin = { version = "0.32.5", features = ["serde"] }
+bitcoin = { version = "0.32.6", features = ["serde"] }
 bitcoincore-rpc = "0.19.0"
 borsh = { version = "1.5.3", features = ["derive"] }
 brotli = "7.0.0"
@@ -23,8 +30,10 @@ hex = "0.4.3"
 http = "1.2.0"
 indicatif = "0.17.9"
 lazy_static = "1.5.0"
-ordinals = "0.0.14"
+ordinals = { git = "https://github.com/kungfuflex/alkanes-rs", branch = "main" }
+paste = "1.0.15"
 prometheus = "0.13.4"
+protobuf = { version = "3.7.2", features = ["with-bytes"] }
 rayon = "1.10.0"
 regex = "1.11.1"
 reqwest = { version = "0.12.12", features = ["json", "blocking"] }

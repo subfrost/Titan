@@ -9,7 +9,10 @@ use {
     crate::{
         bitcoin_rpc::{RpcClientError, RpcClientPool},
         index::updater::{ReorgError, UpdaterError},
-        models::{block_id_to_transaction_status, Inscription, RuneEntry},
+        models::{
+            block_id_to_transaction_status, protorune::ProtoruneBalanceSheet, Inscription,
+            RuneEntry,
+        },
     },
     bitcoin::{Address, BlockHash, Transaction as BitcoinTransaction},
     ordinals::{Rune, RuneId},
@@ -308,6 +311,13 @@ impl Index {
 
     pub fn get_inscription(&self, inscription_id: &InscriptionId) -> Result<Inscription> {
         Ok(self.db.get_inscription(inscription_id)?)
+    }
+
+    pub fn get_protorune_balance_sheet(
+        &self,
+        outpoint: &SerializedOutPoint,
+    ) -> Result<ProtoruneBalanceSheet> {
+        Ok(self.db.get_protorune_balance_sheet(outpoint)?)
     }
 
     pub fn get_last_rune_transactions(

@@ -82,6 +82,7 @@ impl Server {
             .route("/runes", get(Self::runes))
             .route("/rune/{rune}", get(Self::rune))
             .route("/rune/{rune}/transactions", get(Self::rune_transactions))
+            .route("/protorune/{outpoint}", get(Self::protorune))
             // Mempool
             .route("/mempool/txids", get(Self::mempool_txids))
             // Mempool entries
@@ -293,6 +294,14 @@ impl Server {
             Ok(Json(api::last_rune_transactions(index, &rune, Some(pagination))?).into_response())
         })
     }
+
+    async fn protorune(
+        Extension(index): Extension<Arc<Index>>,
+        Path(DeserializeFromStr(outpoint)): Path<DeserializeFromStr<SerializedOutPoint>>,
+    ) -> ServerResult {
+        task::block_in_place(|| Ok(Json(api::protorune(index, &outpoint)?).into_response()))
+    }
+
 
     async fn inscription(
         Extension(index): Extension<Arc<Index>>,

@@ -1,5 +1,5 @@
 use {
-    super::{BlockId, Inscription, RuneEntry, TransactionStateChange},
+    super::{protorune::ProtoruneBalanceSheet, BlockId, Inscription, RuneEntry, TransactionStateChange},
     bitcoin::{BlockHash, ScriptBuf, Transaction},
     ordinals::RuneId,
     rustc_hash::FxHashMap as HashMap,
@@ -24,6 +24,7 @@ pub struct BatchUpdate {
     pub rune_ids: HashMap<u128, RuneId>,
     pub rune_numbers: HashMap<u64, RuneId>,
     pub inscriptions: HashMap<InscriptionId, Inscription>,
+    pub protorune_balances: HashMap<SerializedOutPoint, ProtoruneBalanceSheet>,
     pub transactions: HashMap<SerializedTxid, Transaction>,
     pub transaction_confirming_block: HashMap<SerializedTxid, BlockId>,
     pub mempool_txs: HashMap<SerializedTxid, MempoolEntry>,
@@ -47,6 +48,7 @@ impl BatchUpdate {
             rune_ids: HashMap::default(),
             rune_numbers: HashMap::default(),
             inscriptions: HashMap::default(),
+            protorune_balances: HashMap::default(),
             transactions: HashMap::default(),
             transaction_confirming_block: HashMap::default(),
             mempool_txs: HashMap::default(),
@@ -69,6 +71,7 @@ impl BatchUpdate {
             && self.rune_ids.is_empty()
             && self.rune_numbers.is_empty()
             && self.inscriptions.is_empty()
+            && self.protorune_balances.is_empty()
             && self.mempool_txs.is_empty()
             && self.transactions.is_empty()
             && self.transaction_confirming_block.is_empty()
@@ -90,6 +93,7 @@ impl BatchUpdate {
         self.rune_ids.clear();
         self.rune_numbers.clear();
         self.inscriptions.clear();
+        self.protorune_balances.clear();
         self.mempool_txs.clear();
         self.transactions.clear();
         self.transaction_confirming_block.clear();

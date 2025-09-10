@@ -8,6 +8,7 @@ use {
         index::{Index, IndexError},
         subscription::{self, WebhookSubscriptionManager},
     },
+    crate::models::protorune::ProtoruneBalanceSheet,
     bitcoin::{consensus, Address, BlockHash},
     bitcoincore_rpc::RpcApi,
     http::HeaderMap,
@@ -136,6 +137,10 @@ pub fn last_rune_transactions(
     let rune_id = to_rune_id(rune_query, &index)?;
     let transactions = index.get_last_rune_transactions(&rune_id, pagination, None)?;
     Ok(transactions)
+}
+
+pub fn protorune(index: Arc<Index>, outpoint: &SerializedOutPoint) -> Result<ProtoruneBalanceSheet> {
+    Ok(index.get_protorune_balance_sheet(outpoint)?)
 }
 
 pub fn broadcast_transaction(

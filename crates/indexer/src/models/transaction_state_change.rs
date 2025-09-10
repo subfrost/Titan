@@ -3,6 +3,7 @@ use {
     bitcoin::ScriptBuf,
     borsh::{BorshDeserialize, BorshSerialize},
     ordinals::{Rune, RuneId},
+    super::protorune::ProtoruneBalanceSheet,
     rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet},
     std::{
         fmt::Display,
@@ -56,6 +57,7 @@ pub struct TransactionStateChange {
     pub etched: Option<(RuneId, Rune)>,
     pub minted: Option<RuneAmount>,
     pub burned: HashMap<RuneId, Lot>,
+    pub protorune_balances: HashMap<SerializedOutPoint, ProtoruneBalanceSheet>,
     pub is_coinbase: bool,
 }
 
@@ -110,6 +112,13 @@ impl BorshSerialize for TransactionStateChange {
         // 6) is_coinbase: bool
         self.is_coinbase.serialize(writer)?;
 
+        // 7) protorune_balances
+        (self.protorune_balances.len() as u64).serialize(writer)?;
+        for (outpoint, balance_sheet) in &self.protorune_balances {
+            outpoint.serialize(writer)?;
+            balance_sheet.serialize(writer)?;
+        }
+
         Ok(())
     }
 }
@@ -159,12 +168,22 @@ impl BorshDeserialize for TransactionStateChange {
         // 6) is_coinbase
         let is_coinbase = bool::deserialize_reader(reader)?;
 
+        // 7) protorune_balances
+        let protorune_balances_len = u64::deserialize_reader(reader)?;
+        let mut protorune_balances = HashMap::default();
+        for _ in 0..protorune_balances_len {
+            let outpoint = SerializedOutPoint::deserialize_reader(reader)?;
+            let balance_sheet = ProtoruneBalanceSheet::deserialize_reader(reader)?;
+            protorune_balances.insert(outpoint, balance_sheet);
+        }
+
         Ok(TransactionStateChange {
             inputs,
             outputs,
             etched,
             minted,
             burned,
+            protorune_balances,
             is_coinbase,
         })
     }
