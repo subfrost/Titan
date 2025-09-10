@@ -482,19 +482,39 @@ impl<P: ProtoruneStore + Clone> BalanceSheetOperations for BalanceSheet<P> {
     }
 }
 
-impl<P: ProtoruneStore + Clone> TryFrom<Vec<RuneTransfer>> for BalanceSheet<P> {
-    type Error = anyhow::Error;
-
-    fn try_from(v: Vec<RuneTransfer>) -> Result<BalanceSheet<P>> {
-        let mut balance_sheet = BalanceSheet::new();
-
-        for transfer in v {
-            balance_sheet.increase(&transfer.id, transfer.value)?;
+impl<P: ProtoruneStore + Clone> BalanceSheet<P> {
+    pub fn init_with_protostone(
+        &mut self,
+        protostone: &crate::protostone::Protostone,
+        height: u64,
+    ) -> Result<()> {
+        for edict in protostone.edicts.iter() {
+            self.increase(&edict.id, edict.amount)?;
         }
+        Ok(())
+    }
 
-        Ok(balance_sheet)
+    pub fn init_with_transfers(&mut self, transfers: Vec<RuneTransfer>, height: u64) -> Result<()> {
+        for transfer in transfers {
+            self.increase(&transfer.id, transfer.value)?;
+        }
+        Ok(())
+    }
+
+    pub fn get_protorunes(&self) -> Vec<ProtoruneRuneId> {
+        self.balances().keys().cloned().collect()
+    }
+
+    pub fn get_addresses(&self) -> BTreeSet<Vec<u8>> {
+        BTreeSet::new()
+    }
+
+    pub fn apply(&self) -> Result<()> {
+        Ok(())
     }
 }
+
+
 
 impl TryFrom<Vec<RuneTransfer>> for CachedBalanceSheet {
     type Error = anyhow::Error;

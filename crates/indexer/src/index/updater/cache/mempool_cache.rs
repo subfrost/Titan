@@ -6,7 +6,7 @@ use {
             Chain, Settings,
         },
         models::{
-            BatchDelete, BatchUpdate, BlockId, Inscription, RuneEntry, TransactionStateChange,
+            BatchUpdate, BlockId, Inscription, RuneEntry, TransactionStateChange,
             TransactionStateChangeInput,
         },
     },
@@ -18,7 +18,7 @@ use {
         Event, InscriptionId, Location, MempoolEntry, SerializedOutPoint, SerializedTxid,
         SpenderReference, SpentStatus, TxOut,
     },
-    tracing::{debug, info},
+    tracing::debug,
 };
 
 type Result<T> = std::result::Result<T, StoreError>;

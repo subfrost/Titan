@@ -558,7 +558,7 @@ fn subscribe(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, Read, Write};
+    use std::io::{BufRead, Write};
     use std::net::{SocketAddr, TcpListener};
     use std::thread;
     use std::time::Duration;

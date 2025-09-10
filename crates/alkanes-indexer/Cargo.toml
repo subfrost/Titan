@@ -1,0 +1,50 @@
+[package]
+name = "alkanes-indexer"
+version = "0.1.0"
+edition = "2021"
+description = "Alkanes indexer for Titan"
+license = "MIT"
+
+[dependencies]
+anyhow = { workspace = true }
+num = { workspace = true }
+bitcoin = { workspace = true }
+metashrew-core = { workspace = true }
+metashrew-support = { workspace = true }
+ordinals = { workspace = true }
+protorune-support = { workspace = true }
+alkanes-support = { workspace = true }
+ruint = { workspace = true }
+wasm-bindgen = { workspace = true }
+byteorder = { workspace = true }
+wasmi = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+hex = { workspace = true }
+protobuf = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+web-sys = { workspace = true }
+js-sys = { workspace = true }
+hex_lit = { workspace = true }
+once_cell = { workspace = true }
+borsh = { workspace = true }
+sha2 = { workspace = true }
+
+[build-dependencies]
+anyhow = { workspace = true }
+protobuf-codegen = "3.4.0"
+flate2 = "1.0.34"
+protoc-rust = { version = "2.28.0" }
+protoc-bin-vendored = "3.0.0"
+hex = { workspace = true }
+
+[features]
+test-utils = []
+cache = []
+mainnet = []
+testnet = []
+luckycoin = []
+dogecoin = []
+bellscoin = []
+fractal = []
+debug-log = []

@@ -1,6 +1,6 @@
 use {
     crate::{
-        db::{RocksDB, RocksDBError},
+        db::RocksDBError,
         models::{
             BatchDelete, BatchRollback, BatchUpdate, BlockId, Inscription, RuneEntry,
             TransactionStateChange,
@@ -13,7 +13,7 @@ use {
     thiserror::Error,
     titan_types::{
         Block, InscriptionId, MempoolEntry, Pagination, PaginationResponse, SerializedOutPoint,
-        SerializedTxid, SpenderReference, SpentStatus, Transaction, TransactionStatus, TxOut,
+        SerializedTxid, SpenderReference, Transaction, TxOut,
     },
 };
 

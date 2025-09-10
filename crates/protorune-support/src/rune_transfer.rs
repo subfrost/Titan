@@ -1,12 +1,24 @@
 use std::collections::BTreeMap;
 
 use crate::balance_sheet::{BalanceSheet, BalanceSheetOperations, ProtoruneRuneId, ProtoruneStore};
+use crate::protostone::ProtostoneEdict;
 use anyhow::{Result};
 
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RuneTransfer {
     pub id: ProtoruneRuneId,
     pub value: u128,
+    pub output: u32,
+}
+
+impl From<ProtostoneEdict> for RuneTransfer {
+    fn from(edict: ProtostoneEdict) -> Self {
+        Self {
+            id: edict.id,
+            value: edict.amount,
+            output: edict.output as u32,
+        }
+    }
 }
 
 impl RuneTransfer {
@@ -15,7 +27,11 @@ impl RuneTransfer {
             .iter()
             .filter_map(|(id, v)| {
                 if *v > 0 {
-                    Some(RuneTransfer { id: *id, value: *v })
+                    Some(RuneTransfer {
+                        id: *id,
+                        value: *v,
+                        output: 0,
+                    })
                 } else {
                     None
                 }

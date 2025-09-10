@@ -281,7 +281,7 @@ impl RocksDB {
         Ok(())
     }
 
-    fn cf_handle(&self, name: &str) -> DBResult<Arc<BoundColumnFamily>> {
+    fn cf_handle(&self, name: &str) -> DBResult<Arc<BoundColumnFamily<'_>>> {
         match self.db.cf_handle(name) {
             None => Err(RocksDBError::InvalidHandle(name.to_string())),
             Some(handle) => Ok(handle),

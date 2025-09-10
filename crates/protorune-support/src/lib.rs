@@ -13,6 +13,8 @@ pub mod utils;
 pub use balance_sheet::ProtoruneRuneId;
 pub use protostone::*;
 
+pub struct Protorune(());
+
 use anyhow;
 use bitcoin::hashes::Hash;
 use bitcoin::{OutPoint, Txid};

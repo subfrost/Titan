@@ -1,7 +1,6 @@
 use {
-    crate::db::entry::Entry,
     borsh::{BorshDeserialize, BorshSerialize},
-    protorune_support::balance_sheet::{BalanceSheet, BalanceSheetOperations, ProtoruneRuneId},
+    protorune_support::balance_sheet::{BalanceSheetOperations, ProtoruneRuneId},
     serde::{Deserialize, Serialize},
     std::collections::BTreeMap,
 };

@@ -596,7 +596,7 @@ mod tests {
     use crate::index::updater::transaction::test_helpers::MockTransactionStore;
     use bitcoin::{self, Amount, ScriptBuf, TxOut as BitcoinTxOut, locktime::absolute::LockTime, transaction::Version};
     use bitcoincore_rpc::Auth;
-    use ordinals::{Edict as OrdinalEdict, RuneId as OrdinalRuneId};
+    
     use protorune_support::{
         protostone::{Protostone, ProtostoneEdict},
         ProtoruneRuneId,

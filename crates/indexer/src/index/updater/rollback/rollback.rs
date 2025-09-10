@@ -10,7 +10,7 @@ use {
     std::sync::Arc,
     thiserror::Error,
     titan_types::{InscriptionId, SerializedOutPoint, SerializedTxid, SpentStatus},
-    tracing::{info, trace, warn},
+    tracing::{info, warn},
 };
 
 #[derive(Debug, Error)]

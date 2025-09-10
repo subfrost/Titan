@@ -2,8 +2,7 @@ use crate::id::AlkaneId;
 use anyhow::Result;
 use metashrew_support::utils::consume_sized_int;
 use metashrew_support::{byte_view::ByteView, index_pointer::KeyValuePointer};
-use protorune_support::balance_sheet::CachedBalanceSheet;
-use protorune_support::{balance_sheet::BalanceSheet, balance_sheet::ProtoruneStore, rune_transfer::RuneTransfer};
+use protorune_support::rune_transfer::RuneTransfer;
 
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AlkaneTransfer {
@@ -29,6 +28,7 @@ impl Into<RuneTransfer> for AlkaneTransfer {
         RuneTransfer {
             id: self.id.into(),
             value: self.value,
+            output: 0,
         }
     }
 }
@@ -39,19 +39,6 @@ impl Into<Vec<RuneTransfer>> for AlkaneTransferParcel {
     }
 }
 
-impl<P: KeyValuePointer + Clone + ProtoruneStore> TryInto<BalanceSheet<P>> for AlkaneTransferParcel {
-    type Error = anyhow::Error;
-    fn try_into(self) -> Result<BalanceSheet<P>> {
-        <AlkaneTransferParcel as Into<Vec<RuneTransfer>>>::into(self).try_into()
-    }
-}
-
-impl TryInto<CachedBalanceSheet> for AlkaneTransferParcel {
-    type Error = anyhow::Error;
-    fn try_into(self) -> Result<CachedBalanceSheet> {
-        <AlkaneTransferParcel as Into<Vec<RuneTransfer>>>::into(self).try_into()
-    }
-}
 
 #[derive(Default, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AlkaneTransferParcel(pub Vec<AlkaneTransfer>);
@@ -82,7 +69,7 @@ impl AlkaneTransferParcel {
         let v = self
             .to_vec()
             .into_iter()
-            .map(|v| (v.to_bytes()))
+            .map(|v| v.to_bytes())
             .flatten()
             .collect::<Vec<u8>>();
         v

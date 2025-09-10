@@ -1,6 +1,6 @@
 use crate::{balance_sheet::ProtoruneRuneId, byte_utils::ByteUtils};
 use anyhow::{anyhow, Result};
-use ordinals::{runestone::tag::Tag, Edict, RuneId, Runestone};
+use ordinals::{runestone::tag::Tag, Artifact, Edict, RuneId, Runestone};
 use std::collections::BTreeMap;
 
 pub fn next_protostone_edict_id(
@@ -282,6 +282,14 @@ impl Protostone {
         })
     }
 
+    pub fn scan(transaction: &bitcoin::Transaction) -> impl Iterator<Item = Protostone> {
+        if let Some(Artifact::Runestone(runestone)) = Runestone::decipher(transaction) {
+            if let Ok(protostones) = Protostone::from_runestone(&runestone) {
+                return protostones.into_iter();
+            }
+        }
+        Vec::new().into_iter()
+    }
     pub fn from_runestone(runestone: &Runestone) -> Result<Vec<Self>> {
         if let None = runestone.protocol.as_ref() {
             return Ok(vec![]);

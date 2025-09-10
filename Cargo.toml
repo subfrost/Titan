@@ -14,6 +14,7 @@ repository = "https://github.com/Titannet-dao/titan"
 # workspace
 titan-types = { path = "./crates/types" }
 alkanes-support = { path = "./crates/alkanes-support" }
+alkanes-indexer = { path = "./crates/alkanes-indexer" }
 metashrew-support = { git = "https://github.com/sandshrewmetaprotocols/metashrew", branch = "master" }
 protorune-support = { path = "./crates/protorune-support" }
 metashrew-core = { git = "https://github.com/sandshrewmetaprotocols/metashrew", branch = "master" }
