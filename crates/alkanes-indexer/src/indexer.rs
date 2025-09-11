@@ -1,5 +1,8 @@
+use crate::index_pointer::AtomicPointer;
 use crate::message::AlkaneMessageContext;
 use crate::network::{genesis, genesis_alkane_upgrade_bytes, is_genesis};
+use crate::tables::RUNES;
+use log;
 use crate::vm::fuel::FuelTank;
 use crate::vm::host_functions::clear_diesel_mints_cache;
 use alkanes_support::gz::compress;
@@ -91,12 +94,15 @@ pub fn index_protorunes<T: MessageContext<AlkanesProtoruneStore>>(
     height: u64,
 ) -> Result<BTreeSet<Vec<u8>>> {
     let mut updated_addresses: BTreeSet<Vec<u8>> = BTreeSet::new();
+    log::debug!("Processing block at height {}", height);
     for (txindex, tx) in block.txdata.iter().enumerate() {
+        log::debug!("Scanning transaction {}", txindex);
         let protostones = Protostone::scan(&tx);
         for protostone in protostones.into_iter() {
             if protostone.protocol_tag != T::protocol_tag() {
                 continue;
             }
+            log::debug!("Found protostone: {:?}", protostone);
             let mut sheets = BalanceSheet::<AlkanesProtoruneStore>::new();
             sheets.init_with_protostone(&protostone, height)?;
             let parcel = MessageContextParcel {
@@ -138,10 +144,12 @@ pub fn index_protorunes<T: MessageContext<AlkanesProtoruneStore>>(
 }
 
 pub fn index_block(block: &Block, height: u32) -> Result<()> {
+    log::debug!("Indexing block at height {}", height);
     configure_network();
     clear_diesel_mints_cache();
     let really_is_genesis = is_genesis(height.into());
     if really_is_genesis {
+        log::debug!("Block is genesis block, running genesis indexing");
         genesis(&block).unwrap();
     }
     if height >= genesis::GENESIS_UPGRADE_BLOCK_HEIGHT {
@@ -154,6 +162,13 @@ pub fn index_block(block: &Block, height: u32) -> Result<()> {
         }
     }
     FuelTank::initialize(&block, height);
+    let mut atomic = AtomicPointer::default();
+    for tx in block.txdata.iter() {
+        atomic
+            .derive(&RUNES.HEIGHT_TO_TRANSACTION_IDS.select_value(height as u64))
+            .append(Arc::new(tx.txid().as_byte_array().to_vec()));
+    }
+    atomic.commit();
 
     // Get the set of updated addresses from the indexing process
     let _updated_addresses =

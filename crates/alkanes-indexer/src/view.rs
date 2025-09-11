@@ -261,7 +261,7 @@ pub fn protorunes_by_outpoint(
 ) -> Result<protorune_support::proto::protorune::OutpointResponse> {
     let request =
         protorune_support::proto::protorune::OutpointWithProtocol::parse_from_bytes(input)?;
-    self::protorunes_by_outpoint(input).and_then(|mut response| {
+    crate::protorune_view::protorunes_by_outpoint(input).and_then(|mut response| {
         if into_u128(request.protocol.unwrap_or_else(|| {
             <u128 as Into<protorune_support::proto::protorune::Uint128>>::into(1u128)
         })) == AlkaneMessageContext::protocol_tag()
@@ -307,7 +307,7 @@ pub fn protorunes_by_address(
 ) -> Result<protorune_support::proto::protorune::WalletResponse> {
     let request =
         protorune_support::proto::protorune::ProtorunesWalletRequest::parse_from_bytes(input)?;
-    self::protorunes_by_address(input).and_then(|mut response| {
+    crate::protorune_view::protorunes_by_address(input).and_then(|mut response| {
         if into_u128(request.protocol_tag.unwrap_or_else(|| {
             <u128 as Into<protorune_support::proto::protorune::Uint128>>::into(1u128)
         })) == AlkaneMessageContext::protocol_tag()
@@ -348,7 +348,7 @@ pub fn protorunes_by_address2(
     }
 
     // If no cached response or parsing failed, compute it
-    self::protorunes_by_address2(input).and_then(|mut response| {
+    crate::protorune_view::protorunes_by_address2(input).and_then(|mut response| {
         if into_u128(request.protocol_tag.unwrap_or_else(|| {
             <u128 as Into<protorune_support::proto::protorune::Uint128>>::into(1u128)
         })) == AlkaneMessageContext::protocol_tag()
@@ -364,7 +364,7 @@ pub fn protorunes_by_height(
 ) -> Result<protorune_support::proto::protorune::RunesResponse> {
     let request =
         protorune_support::proto::protorune::ProtorunesByHeightRequest::parse_from_bytes(input)?;
-    self::protorunes_by_height(input).and_then(|mut response| {
+    crate::protorune_view::protorunes_by_height(input).and_then(|mut response| {
         if into_u128(request.protocol_tag.unwrap_or_else(|| {
             <u128 as Into<protorune_support::proto::protorune::Uint128>>::into(1u128)
         })) == AlkaneMessageContext::protocol_tag()

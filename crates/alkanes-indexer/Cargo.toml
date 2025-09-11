@@ -29,6 +29,7 @@ once_cell = { workspace = true }
 borsh = { workspace = true }
 sha2 = { workspace = true }
 lazy_static = "1.4.0"
+log = { workspace = true }
 
 [dev-dependencies]
 rstest = "0.18.2"

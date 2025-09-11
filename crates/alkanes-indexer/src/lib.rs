@@ -5,6 +5,7 @@ use metashrew_support::block::AuxpowBlock;
 #[allow(unused_imports)]
 use metashrew_support::index_pointer::KeyValuePointer;
 pub mod block;
+pub mod balance_sheet;
 pub mod store;
 pub mod etl;
 pub mod traits;
@@ -20,6 +21,7 @@ pub mod unwrap;
 pub mod utils;
 pub mod view;
 pub mod vm;
+pub mod protorune_view;
 
 /*
 All the #[no_mangle] configs will fail during github action cargo test step
@@ -48,10 +50,13 @@ mod unit_tests {
     use crate::indexer::configure_network;
     use bitcoin::OutPoint;
     use crate::message::AlkaneMessageContext;
+    use protobuf::MessageField;
+    use bitcoin::hashes::Hash;
+    use protorune_support::message::MessageContext;
     use protobuf::{Message, SpecialFields};
-    use crate::view::{protorunes_by_outpoint, protorunes_by_address, protorunes_by_height};
+    use crate::view::{protorunes_by_outpoint, protorunes_by_address};
     use crate::indexer::index_protorunes;
-    use protorune_support::proto::protorune::{RunesByHeightRequest, Uint128, WalletRequest};
+    use protorune_support::proto::protorune::{Uint128, WalletRequest};
     use std::fs;
     use std::path::PathBuf;
     use bitcoin::Block;
@@ -73,16 +78,8 @@ mod unit_tests {
         // calling index_block directly fails since genesis(&block).unwrap(); gets segfault
         // index_block(&block, height).unwrap();
         configure_network();
+        crate::network::genesis(&block).unwrap();
         index_protorunes::<AlkaneMessageContext>(block.clone(), height as u64).unwrap();
-
-        let req_height: Vec<u8> = (RunesByHeightRequest {
-            height: 849236,
-            special_fields: SpecialFields::new(),
-        })
-        .write_to_bytes()
-        .unwrap();
-        let runes = protorunes_by_height(&req_height).unwrap();
-        assert!(runes.runes.len() == 2);
 
         // TODO: figure out what address to use for runesbyaddress
         let req_wallet: Vec<u8> = (WalletRequest {
@@ -99,10 +96,13 @@ mod unit_tests {
         eprintln!("RUNES by addr: {:?}", runes_for_addr);
 
         let outpoint_res = protorunes_by_outpoint(
-            &protorune_support::utils::outpoint_encode(&OutPoint {
-                txid: block.txdata[298].compute_txid(),
+            &(protorune_support::proto::protorune::OutpointWithProtocol {
+                txid: block.txdata[298].compute_txid().as_byte_array().to_vec(),
                 vout: 2,
+                protocol: MessageField::some(AlkaneMessageContext::protocol_tag().into()),
+                ..Default::default()
             })
+            .write_to_bytes()
             .unwrap(),
         )
         .unwrap();

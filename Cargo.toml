@@ -45,6 +45,7 @@ hex = "0.4.3"
 http = "1.2.0"
 indicatif = "0.17.9"
 lazy_static = "1.5.0"
+log = "0.4.22"
 hex_lit = "0.1.1"
 ordinals = { git = "https://github.com/kungfuflex/alkanes-rs", branch = "main" }
 paste = "1.0.15"

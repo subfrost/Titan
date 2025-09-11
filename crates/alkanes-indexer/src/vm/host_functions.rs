@@ -1,4 +1,5 @@
 use super::fuel::compute_extcall_fuel;
+use log;
 use super::{
     get_memory, read_arraybuffer, send_to_arraybuffer, sequence_pointer, AlkanesState, Extcall,
     Saveable, SaveableExtendedCallResponse,
@@ -484,7 +485,9 @@ impl AlkanesHostFunctionsImpl {
         checkpoint_ptr: i32,
     ) -> Result<(Cellpack, AlkaneTransferParcel, StorageMap, u64)> {
         let current_depth = AlkanesHostFunctionsImpl::get_checkpoint_depth(caller);
+        log::debug!("Extcall checkpoint depth: {}", current_depth);
         if current_depth >= 75 {
+            log::error!("Possible infinite recursion encountered: checkpoint depth too large({})", current_depth);
             return Err(anyhow!(format!(
                 "Possible infinite recursion encountered: checkpoint depth too large({})",
                 current_depth
@@ -777,14 +780,11 @@ impl AlkanesHostFunctionsImpl {
 
         let total_fuel = compute_extcall_fuel(storage_map_len, height)?;
 
-        #[cfg(feature = "debug-log")]
-        {
-            eprintln!("extcall: target=[{},{}], inputs={:?}, storage_size={} bytes, total_fuel={}, deployment={}",
-                cellpack.target.block, cellpack.target.tx,
-                cellpack.inputs, storage_map_len,
-                total_fuel,
-                cellpack.target.is_deployment());
-        }
+        log::debug!("extcall: target=[{},{}], inputs={:?}, storage_size={} bytes, total_fuel={}, deployment={}",
+            cellpack.target.block, cellpack.target.tx,
+            cellpack.inputs, storage_map_len,
+            total_fuel,
+            cellpack.target.is_deployment());
 
         consume_fuel(caller, total_fuel)?;
 
@@ -825,7 +825,7 @@ impl AlkanesHostFunctionsImpl {
             let data = mem.data(&caller);
             read_arraybuffer(data, v)?
         };
-        eprint!("{}", String::from_utf8(message)?);
+        log::debug!("Wasm log: {}", String::from_utf8_lossy(&message));
         Ok(())
     }
 }

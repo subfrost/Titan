@@ -1,5 +1,6 @@
 use crate::network::{genesis::GENESIS_BLOCK, is_active};
 use crate::utils::{credit_balances, debit_balances, pipe_storagemap_to};
+use log;
 use crate::vm::{
     fuel::{FuelTank, VirtualFuelBytes},
     runtime::AlkanesRuntimeContext,
@@ -33,10 +34,7 @@ pub fn handle_message(
     let cellpack: Cellpack =
         decode_varint_list(&mut Cursor::new(parcel.calldata.clone()))?.try_into()?;
 
-    #[cfg(feature = "debug-log")]
-    {
-        // Log cellpack information at the beginning of transaction processing
-    }
+    log::debug!("Handling message with cellpack: {:?}", cellpack);
 
     let target = cellpack.target.clone();
     let context = Arc::new(Mutex::new(AlkanesRuntimeContext::from_parcel_and_cellpack(
@@ -98,10 +96,7 @@ pub fn handle_message(
             Ok((response_alkanes.into(), combined))
         })
         .or_else(|e| {
-            #[cfg(feature = "debug-log")]
-            {
-            }
-
+            log::debug!("Execution failed: {:?}", e);
             FuelTank::drain_fuel();
             let mut response = ExtendedCallResponse::default();
 

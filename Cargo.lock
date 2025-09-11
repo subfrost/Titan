@@ -52,6 +52,7 @@ dependencies = [
  "hex_lit",
  "js-sys",
  "lazy_static",
+ "log",
  "metashrew-support",
  "num",
  "once_cell",
