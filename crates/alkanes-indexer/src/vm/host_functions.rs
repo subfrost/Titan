@@ -17,12 +17,7 @@ use alkanes_support::{
 #[allow(unused_imports)]
 use anyhow::{anyhow, Result};
 use bitcoin::Transaction;
-use metashrew_core::index_pointer::IndexPointer;
-#[allow(unused_imports)]
-use metashrew_core::{
-    print, println,
-    stdio::{stdout, Write},
-};
+use crate::index_pointer::IndexPointer;
 use metashrew_support::index_pointer::KeyValuePointer;
 use num::traits::ToBytes;
 use ordinals::Artifact;
@@ -125,7 +120,7 @@ impl AlkanesHostFunctionsImpl {
             overflow_error((bytes_processed as u64).checked_mul(FUEL_PER_REQUEST_BYTE))?;
         #[cfg(feature = "debug-log")]
         {
-            println!(
+            eprintln!(
                 "request_storage: key_size={} bytes, result_size={} bytes, fuel_cost={}",
                 bytes_processed - (result as u64),
                 result,
@@ -163,7 +158,7 @@ impl AlkanesHostFunctionsImpl {
         let fuel_cost = overflow_error((bytes_processed as u64).checked_mul(FUEL_PER_LOAD_BYTE))?;
         #[cfg(feature = "debug-log")]
         {
-            println!(
+            eprintln!(
                 "load_storage: key_size={} bytes, value_size={} bytes, total_size={} bytes, fuel_cost={}",
                 bytes_processed - value.len(), value.len(), bytes_processed, fuel_cost
             );
@@ -185,7 +180,7 @@ impl AlkanesHostFunctionsImpl {
         let fuel_cost = overflow_error((result as u64).checked_mul(FUEL_PER_REQUEST_BYTE))?;
         #[cfg(feature = "debug-log")]
         {
-            println!(
+            eprintln!(
                 "request_context: context_size={} bytes, fuel_cost={}",
                 result, fuel_cost
             );
@@ -200,7 +195,7 @@ impl AlkanesHostFunctionsImpl {
         let fuel_cost = overflow_error((result.len() as u64).checked_mul(FUEL_PER_LOAD_BYTE))?;
         #[cfg(feature = "debug-log")]
         {
-            println!(
+            eprintln!(
                 "load_context: context_size={} bytes, fuel_cost={}",
                 result.len(),
                 fuel_cost
@@ -230,7 +225,7 @@ impl AlkanesHostFunctionsImpl {
 
         #[cfg(feature = "debug-log")]
         {
-            println!(
+            eprintln!(
                 "Requesting transaction size: {} bytes, fuel cost={} (fixed)",
                 result, request_fuel
             );
@@ -278,7 +273,7 @@ impl AlkanesHostFunctionsImpl {
         let fuel_cost = overflow_error((returndata.len() as u64).checked_mul(FUEL_PER_LOAD_BYTE))?;
         #[cfg(feature = "debug-log")]
         {
-            println!(
+            eprintln!(
                 "returndatacopy: data_size={} bytes, fuel_cost={}",
                 returndata.len(),
                 fuel_cost
@@ -306,7 +301,7 @@ impl AlkanesHostFunctionsImpl {
 
         #[cfg(feature = "debug-log")]
         {
-            println!(
+            eprintln!(
                 "Loading transaction: size={} bytes, fuel cost={} (fixed)",
                 transaction.len(),
                 FUEL_LOAD_TRANSACTION
@@ -328,7 +323,7 @@ impl AlkanesHostFunctionsImpl {
 
         #[cfg(feature = "debug-log")]
         {
-            println!(
+            eprintln!(
                 "Requesting block size: {} bytes, fuel cost={} (fixed)",
                 len, request_fuel
             );
@@ -345,7 +340,7 @@ impl AlkanesHostFunctionsImpl {
 
         #[cfg(feature = "debug-log")]
         {
-            println!(
+            eprintln!(
                 "Loading block: size={} bytes, fuel cost={} (fixed)",
                 block.len(),
                 FUEL_LOAD_BLOCK
@@ -363,7 +358,7 @@ impl AlkanesHostFunctionsImpl {
 
         #[cfg(feature = "debug-log")]
         {
-            println!("sequence: fuel_cost={}", FUEL_SEQUENCE);
+            eprintln!("sequence: fuel_cost={}", FUEL_SEQUENCE);
         }
 
         consume_fuel(caller, FUEL_SEQUENCE)?;
@@ -377,7 +372,7 @@ impl AlkanesHostFunctionsImpl {
 
         #[cfg(feature = "debug-log")]
         {
-            println!(
+            eprintln!(
                 "fuel: remaining_fuel={}, fuel_cost={}",
                 remaining_fuel, FUEL_FUEL
             );
@@ -394,7 +389,7 @@ impl AlkanesHostFunctionsImpl {
 
         #[cfg(feature = "debug-log")]
         {
-            println!(
+            eprintln!(
                 "height: block_height={}, fuel_cost={}",
                 height_value, FUEL_HEIGHT
             );
@@ -430,7 +425,7 @@ impl AlkanesHostFunctionsImpl {
 
         #[cfg(feature = "debug-log")]
         {
-            println!(
+            eprintln!(
                 "balance: who=[{},{}], what=[{},{}], balance_size={} bytes, fuel_cost={}",
                 who.block,
                 who.tx,
@@ -451,7 +446,7 @@ impl AlkanesHostFunctionsImpl {
         e: anyhow::Error,
         should_rollback: bool,
     ) -> i32 {
-        println!("[[handle_extcall]] Error during extcall: {:?}", e);
+        eprintln!("[[handle_extcall]] Error during extcall: {:?}", e);
         let mut data: Vec<u8> = vec![0x08, 0xc3, 0x79, 0xa0];
         data.extend(e.to_string().as_bytes());
 
@@ -512,7 +507,7 @@ impl AlkanesHostFunctionsImpl {
 
             #[cfg(feature = "debug-log")]
             {
-                println!(
+                eprintln!(
                     "extcall: deployment detected, additional fuel_cost={}",
                     fuel_extcall_deploy(height)
                 );
@@ -558,7 +553,7 @@ impl AlkanesHostFunctionsImpl {
         // Return the current block header
         #[cfg(feature = "debug-log")]
         {
-            println!("Precompiled contract: returning current block header");
+            eprintln!("Precompiled contract: returning current block header");
         }
 
         // Get the block header from the current context
@@ -586,7 +581,7 @@ impl AlkanesHostFunctionsImpl {
         // Return the coinbase transaction bytes
         #[cfg(feature = "debug-log")]
         {
-            println!("Precompiled contract: returning coinbase transaction");
+            eprintln!("Precompiled contract: returning coinbase transaction");
         }
 
         // Get the coinbase transaction from the current block
@@ -603,7 +598,7 @@ impl AlkanesHostFunctionsImpl {
         // Return the coinbase transaction bytes
         #[cfg(feature = "debug-log")]
         {
-            println!("Precompiled contract: returning total miner fee");
+            eprintln!("Precompiled contract: returning total miner fee");
         }
 
         // Get the coinbase transaction from the current block
@@ -623,7 +618,7 @@ impl AlkanesHostFunctionsImpl {
         if let Some(cached_data) = DIESEL_MINTS_CACHE.read().unwrap().clone() {
             #[cfg(feature = "debug-log")]
             {
-                println!("Precompiled contract: returning cached total number of diesel mints");
+                eprintln!("Precompiled contract: returning cached total number of diesel mints");
             }
             let mut response = CallResponse::default();
             response.data = cached_data;
@@ -631,7 +626,7 @@ impl AlkanesHostFunctionsImpl {
         }
         #[cfg(feature = "debug-log")]
         {
-            println!("Precompiled contract: calculating total number of diesel mints in this block");
+            eprintln!("Precompiled contract: calculating total number of diesel mints in this block");
         }
 
         // Get the block header from the current context
@@ -682,7 +677,7 @@ impl AlkanesHostFunctionsImpl {
     ) -> Result<i32> {
         #[cfg(feature = "debug-log")]
         {
-            println!(
+            eprintln!(
                 "extcall: precompiled contract detected at [{},{}]",
                 cellpack.target.block, cellpack.target.tx
             );
@@ -784,7 +779,7 @@ impl AlkanesHostFunctionsImpl {
 
         #[cfg(feature = "debug-log")]
         {
-            println!("extcall: target=[{},{}], inputs={:?}, storage_size={} bytes, total_fuel={}, deployment={}",
+            eprintln!("extcall: target=[{},{}], inputs={:?}, storage_size={} bytes, total_fuel={}, deployment={}",
                 cellpack.target.block, cellpack.target.tx,
                 cellpack.inputs, storage_map_len,
                 total_fuel,
@@ -830,7 +825,7 @@ impl AlkanesHostFunctionsImpl {
             let data = mem.data(&caller);
             read_arraybuffer(data, v)?
         };
-        print!("{}", String::from_utf8(message)?);
+        eprint!("{}", String::from_utf8(message)?);
         Ok(())
     }
 }

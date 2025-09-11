@@ -5,7 +5,7 @@ use alkanes_support::{
 use anyhow::Result;
 use bitcoin::hashes::Hash;
 use bitcoin::{OutPoint, TxOut};
-use metashrew_core::index_pointer::IndexPointer;
+use crate::index_pointer::IndexPointer;
 use metashrew_support::index_pointer::KeyValuePointer;
 use metashrew_support::utils::{consensus_decode, consensus_encode, is_empty};
 use protobuf::{MessageField, SpecialFields};

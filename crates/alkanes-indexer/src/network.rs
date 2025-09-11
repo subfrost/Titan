@@ -14,7 +14,7 @@ use alkanes_support::gz::compress;
 use alkanes_support::id::AlkaneId;
 use anyhow::Result;
 use bitcoin::{Block, OutPoint, Transaction};
-use metashrew_core::index_pointer::{AtomicPointer, IndexPointer};
+use crate::index_pointer::{AtomicPointer, IndexPointer};
 use metashrew_support::index_pointer::KeyValuePointer;
 use crate::traits::PersistentRecord;
 use protorune_support::message::{MessageContext, MessageContextParcel};
@@ -23,11 +23,6 @@ use protorune_support::balance_sheet::{BalanceSheet, BalanceSheetOperations};
 use protorune_support::utils::{outpoint_encode, tx_hex_to_txid};
 use std::sync::Arc;
 
-#[allow(unused_imports)]
-use {
-    metashrew_core::{println, stdio::stdout},
-    std::fmt::Write,
-};
 
 pub fn fr_btc_bytes() -> Vec<u8> {
     fr_btc_build::get_bytes()
@@ -269,21 +264,21 @@ pub fn genesis(block: &Block) -> Result<()> {
     let (response, _gas_used) = (match simulate_parcel(&parcel, u64::MAX) {
         Ok((a, b)) => Ok((a, b)),
         Err(e) => {
-            println!("{:?}", e);
+            eprintln!("{:?}", e);
             Err(e)
         }
     })?;
     let (response3, _gas_used3) = (match simulate_parcel(&parcel2, u64::MAX) {
         Ok((a, b)) => Ok((a, b)),
         Err(e) => {
-            println!("{:?}", e);
+            eprintln!("{:?}", e);
             Err(e)
         }
     })?;
     let (response2, _gas_used2) = (match simulate_parcel(&parcel3, u64::MAX) {
         Ok((a, b)) => Ok((a, b)),
         Err(e) => {
-            println!("{:?}", e);
+            eprintln!("{:?}", e);
             Err(e)
         }
     })?;

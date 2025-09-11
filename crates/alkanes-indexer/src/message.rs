@@ -1,5 +1,4 @@
 use crate::network::{genesis::GENESIS_BLOCK, is_active};
-use crate::trace::save_trace;
 use crate::utils::{credit_balances, debit_balances, pipe_storagemap_to};
 use crate::vm::{
     fuel::{FuelTank, VirtualFuelBytes},
@@ -12,13 +11,7 @@ use alkanes_support::{
     trace::{TraceContext, TraceEvent, TraceResponse},
 };
 use anyhow::{anyhow, Result};
-use bitcoin::OutPoint;
-use metashrew_core::index_pointer::IndexPointer;
-#[allow(unused_imports)]
-use metashrew_core::{
-    println,
-    stdio::{stdout, Write},
-};
+use crate::index_pointer::IndexPointer;
 use metashrew_support::index_pointer::KeyValuePointer;
 use crate::traits::MintableDebit;
 use protorune_support::message::{MessageContext, MessageContextParcel};
@@ -43,26 +36,6 @@ pub fn handle_message(
     #[cfg(feature = "debug-log")]
     {
         // Log cellpack information at the beginning of transaction processing
-        println!("=== TRANSACTION CELLPACK INFO ===");
-        println!(
-            "Transaction index: {}, Transaction height: {}, vout: {}, txid: {}",
-            parcel.txindex,
-            parcel.height,
-            parcel.vout,
-            parcel.transaction.compute_txid()
-        );
-        println!(
-            "Target contract: [block={}, tx={}]",
-            cellpack.target.block, cellpack.target.tx
-        );
-        println!("Input count: {}", cellpack.inputs.len());
-        if !cellpack.inputs.is_empty() {
-            println!("First opcode: {}", cellpack.inputs[0]);
-
-            // Print all inputs for detailed debugging
-            println!("All inputs: {:?}", cellpack.inputs);
-        }
-        println!("================================");
     }
 
     let target = cellpack.target.clone();
@@ -74,13 +47,6 @@ pub fn handle_message(
 
     #[cfg(feature = "debug-log")]
     {
-        // Log the resolved contract addresses
-        println!("Caller: [block={}, tx={}]", caller.block, caller.tx);
-        println!(
-            "Target resolved to: [block={}, tx={}]",
-            myself.block, myself.tx
-        );
-        println!("Parcel runes: {:?}", parcel.runes);
     }
 
     credit_balances(&mut atomic, &myself, &parcel.runes)?;
@@ -128,48 +94,12 @@ pub fn handle_message(
                 inner: response.into(),
                 fuel_used: gas_used,
             }));
-            save_trace(
-                &OutPoint {
-                    txid: parcel.transaction.compute_txid(),
-                    vout: parcel.vout,
-                },
-                parcel.height,
-                trace.clone(),
-            )?;
 
             Ok((response_alkanes.into(), combined))
         })
         .or_else(|e| {
             #[cfg(feature = "debug-log")]
             {
-                // Log detailed error information
-                println!("=== TRANSACTION ERROR ===");
-                println!("Transaction index: {}", parcel.txindex);
-                println!(
-                    "Target contract: [block={}, tx={}]",
-                    cellpack.target.block, cellpack.target.tx
-                );
-                println!(
-                    "Resolved target: [block={}, tx={}]",
-                    myself.block, myself.tx
-                );
-                println!("Error: {}", e);
-
-                // If it's a fuel-related error, provide more context
-                if e.to_string().contains("fuel") || e.to_string().contains("gas") {
-                    println!("This appears to be a fuel-related error.");
-                    println!(
-                        "Contract at [block={}, tx={}] with opcode {} consumed too much fuel.",
-                        myself.block,
-                        myself.tx,
-                        if !cellpack.inputs.is_empty() {
-                            cellpack.inputs[0].to_string()
-                        } else {
-                            "unknown".to_string()
-                        }
-                    );
-                }
-                println!("========================");
             }
 
             FuelTank::drain_fuel();
@@ -182,14 +112,6 @@ pub fn handle_message(
                 inner: response,
                 fuel_used: u64::MAX,
             }));
-            save_trace(
-                &OutPoint {
-                    txid: parcel.transaction.compute_txid(),
-                    vout: parcel.vout,
-                },
-                parcel.height,
-                cloned,
-            )?;
             Err(e)
         })
 }
@@ -205,7 +127,6 @@ impl MessageContext<crate::store::AlkanesProtoruneStore> for AlkaneMessageContex
             match handle_message(_parcel) {
                 Ok((outgoing, runtime)) => Ok((outgoing, runtime)),
                 Err(e) => {
-                    println!("{:?}", e);
                     Err(e) // Print the error
                 }
             }

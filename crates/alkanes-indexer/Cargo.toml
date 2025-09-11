@@ -9,7 +9,6 @@ license = "MIT"
 anyhow = { workspace = true }
 num = { workspace = true }
 bitcoin = { workspace = true }
-metashrew-core = { workspace = true }
 metashrew-support = { workspace = true }
 ordinals = { workspace = true }
 protorune-support = { workspace = true }
@@ -29,6 +28,10 @@ hex_lit = { workspace = true }
 once_cell = { workspace = true }
 borsh = { workspace = true }
 sha2 = { workspace = true }
+lazy_static = "1.4.0"
+
+[dev-dependencies]
+rstest = "0.18.2"
 
 [build-dependencies]
 anyhow = { workspace = true }

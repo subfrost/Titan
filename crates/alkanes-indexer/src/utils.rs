@@ -3,12 +3,7 @@ use alkanes_support::storage::StorageMap;
 use alkanes_support::{id::AlkaneId, parcel::AlkaneTransfer};
 use anyhow::{anyhow, Result};
 use bitcoin::OutPoint;
-use metashrew_core::index_pointer::{AtomicPointer, IndexPointer};
-#[allow(unused_imports)]
-use metashrew_core::{
-    println,
-    stdio::{stdout, Write},
-};
+use crate::index_pointer::{AtomicPointer, IndexPointer};
 use metashrew_support::index_pointer::KeyValuePointer;
 use protorune_support::rune_transfer::RuneTransfer;
 use protorune_support::utils::consensus_decode;
@@ -123,7 +118,7 @@ pub fn transfer_from(
 ) -> Result<()> {
     let non_contract_id = AlkaneId { block: 0, tx: 0 };
     if *to == non_contract_id {
-        println!("skipping transfer_from since caller is not a contract");
+        eprintln!("skipping transfer_from since caller is not a contract");
         return Ok(());
     }
     for transfer in &parcel.0 {

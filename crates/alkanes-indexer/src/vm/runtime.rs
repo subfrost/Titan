@@ -3,11 +3,6 @@ use std::fmt;
 use alkanes_support::{
     cellpack::Cellpack, context::Context, id::AlkaneId, parcel::AlkaneTransferParcel, trace::Trace,
 };
-#[allow(unused_imports)]
-use {
-    metashrew_core::{println, stdio::stdout},
-    std::fmt::Write,
-};
 
 use protorune_support::message::MessageContextParcel;
 

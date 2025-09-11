@@ -8,12 +8,6 @@ use hex;
 use std::sync::{Arc, Mutex};
 use wasmi::*;
 
-#[allow(unused_imports)]
-use metashrew_core::{
-    print, println,
-    stdio::{stdout, Write},
-};
-
 pub struct AlkanesInstance {
     pub(crate) instance: Instance,
     pub(crate) store: Store<AlkanesState>,

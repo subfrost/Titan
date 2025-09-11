@@ -9,16 +9,11 @@ use bitcoin::blockdata::block::Block;
 use crate::store::AlkanesProtoruneStore;
 use protorune_support::protostone::Protostone;
 use protorune_support::rune_transfer::RuneTransfer;
-use protorune_support::balance_sheet::{BalanceSheet, BalanceSheetOperations, ProtoruneStore};
+use protorune_support::balance_sheet::{BalanceSheet, BalanceSheetOperations};
 use protorune_support::message::{MessageContext, MessageContextParcel};
 use std::collections::BTreeSet;
 use crate::init::index_unique_protorunes;
-use metashrew_core::index_pointer::IndexPointer;
-#[allow(unused_imports)]
-use metashrew_core::{
-    println,
-    stdio::{stdout, Write},
-};
+use crate::index_pointer::IndexPointer;
 #[allow(unused_imports)]
 use metashrew_support::index_pointer::KeyValuePointer;
 use protorune_support::network::{set_network, NetworkParams};

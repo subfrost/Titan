@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use metashrew_core::index_pointer::{AtomicPointer, IndexPointer};
+use crate::index_pointer::{AtomicPointer, IndexPointer};
 use metashrew_support::index_pointer::KeyValuePointer;
 use protorune_support::balance_sheet::{BalanceSheet, BalanceSheetOperations, ProtoruneRuneId};
 

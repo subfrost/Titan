@@ -9,12 +9,7 @@ use alkanes_support::{
 };
 use anyhow::{anyhow, Result};
 use bitcoin::OutPoint;
-use metashrew_core::index_pointer::{AtomicPointer, IndexPointer};
-#[allow(unused_imports)]
-use metashrew_core::{
-    clear as clear_base, println,
-    stdio::{stdout, Write},
-};
+use crate::index_pointer::{AtomicPointer, IndexPointer};
 use metashrew_support::index_pointer::KeyValuePointer;
 use protorune_support::utils::consensus_encode;
 use std::sync::{Arc, Mutex};
@@ -257,7 +252,7 @@ pub fn run_after_special(
     #[cfg(feature = "debug-log")]
     {
         // Log initial fuel allocation
-        println!(
+        eprintln!(
             "Starting WebAssembly execution with {} fuel units",
             start_fuel
         );
@@ -273,11 +268,11 @@ pub fn run_after_special(
     #[cfg(feature = "debug-log")]
     {
         // Log fuel usage details
-        println!("WebAssembly execution completed:");
-        println!("  - Initial fuel: {}", start_fuel);
-        println!("  - Remaining fuel: {}", remaining_fuel);
-        println!("  - Direct consumption: {}", start_fuel - remaining_fuel);
-        println!("  - Storage size: {} bytes", storage_len);
+        eprintln!("WebAssembly execution completed:");
+        eprintln!("  - Initial fuel: {}", start_fuel);
+        eprintln!("  - Remaining fuel: {}", remaining_fuel);
+        eprintln!("  - Direct consumption: {}", start_fuel - remaining_fuel);
+        eprintln!("  - Storage size: {} bytes", storage_len);
     }
 
     #[cfg(feature = "debug-log")]
@@ -286,7 +281,7 @@ pub fn run_after_special(
         let computed_storage_fuel = fuel_per_store_byte(height)
             .checked_mul(storage_len)
             .unwrap_or(0);
-        println!("  - Storage fuel cost: {}", computed_storage_fuel);
+        eprintln!("  - Storage fuel cost: {}", computed_storage_fuel);
     }
 
     let fuel_used = overflow_error(start_fuel.checked_sub(remaining_fuel).and_then(
@@ -297,7 +292,7 @@ pub fn run_after_special(
             #[cfg(feature = "debug-log")]
             {
                 // Log total fuel used
-                println!("  - Total fuel used: {}", opt.unwrap_or(u64::MAX));
+                eprintln!("  - Total fuel used: {}", opt.unwrap_or(u64::MAX));
             }
             opt
         },

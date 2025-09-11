@@ -57,6 +57,7 @@ impl Server {
         handle: Handle,
     ) -> SpawnResult<task::JoinHandle<io::Result<()>>> {
         let router = Router::new()
+            .nest("/alkanes", Self::alkanes_router())
             // Health check
             .route("/", get(Self::health_check))
             // Status
@@ -147,6 +148,29 @@ impl Server {
             Json(serde_json::json!({"status": "ok"})),
         )
             .into_response())
+    }
+
+    fn alkanes_router() -> Router<Arc<ServerConfig>> {
+        Router::new()
+            .route("/multisimulate", post(Self::multisimulate))
+            .route("/simulate", post(Self::simulate))
+            .route("/sequence", get(Self::sequence))
+            .route("/meta", post(Self::meta))
+            .route("/runesbyaddress", post(Self::runesbyaddress))
+            .route("/unwrap/:height", get(Self::unwrap))
+            .route("/runesbyoutpoint", post(Self::runesbyoutpoint))
+            .route("/spendablesbyaddress", post(Self::spendablesbyaddress))
+            .route("/protorunesbyaddress", post(Self::protorunesbyaddress))
+            .route("/getblock", post(Self::getblock))
+            .route("/protorunesbyheight", post(Self::protorunesbyheight))
+            .route("/alkanes_id_to_outpoint", post(Self::alkanes_id_to_outpoint))
+            .route("/traceblock/:height", get(Self::traceblock))
+            .route("/trace", post(Self::trace))
+            .route("/getbytecode", post(Self::getbytecode))
+            .route("/protorunesbyoutpoint", post(Self::protorunesbyoutpoint))
+            .route("/runesbyheight", post(Self::runesbyheight))
+            .route("/getinventory", post(Self::getinventory))
+            .route("/getstorageat", post(Self::getstorageat))
     }
 
     async fn tip(Extension(index): Extension<Arc<Index>>) -> ServerResult {
@@ -430,6 +454,138 @@ impl Server {
 
         task::block_in_place(|| {
             Ok(Json(api::get_subscription(subscription_manager, id)?).into_response())
+        })
+    }
+    async fn multisimulate(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::multisumulate(&body).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn simulate(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::simulate(&body).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn sequence() -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::sequence().unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn meta(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::meta(&body).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn runesbyaddress(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::runesbyaddress(&body).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn unwrap(Path(height): Path<u128>) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::unwrap(height).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn runesbyoutpoint(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::runesbyoutpoint(&body).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn spendablesbyaddress(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::spendablesbyaddress(&body).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn protorunesbyaddress(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::protorunesbyaddress(&body).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn getblock(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::getblock(&body).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn protorunesbyheight(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::protorunesbyheight(&body).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn alkanes_id_to_outpoint(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::alkanes_id_to_outpoint(&body).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn traceblock(Path(height): Path<u32>) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::traceblock(height).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn trace(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::trace(&body).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn getbytecode(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::getbytecode(&body).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn protorunesbyoutpoint(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::protorunesbyoutpoint(&body).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn runesbyheight(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::runesbyheight(&body).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn getinventory(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::getinventory(&body).unwrap();
+            Ok(result.into_response())
+        })
+    }
+
+    async fn getstorageat(body: Bytes) -> ServerResult {
+        task::block_in_place(|| {
+            let result = api::alkanes::getstorageat(&body).unwrap();
+            Ok(result.into_response())
         })
     }
 }

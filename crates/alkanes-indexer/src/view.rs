@@ -27,9 +27,7 @@ use bitcoin::hashes::Hash;
 use bitcoin::{
     blockdata::block::Header, Block, BlockHash, CompactTarget, OutPoint, Transaction, TxMerkleNode,
 };
-use metashrew_core::index_pointer::{AtomicPointer, IndexPointer};
-#[allow(unused_imports)]
-use metashrew_core::{println, stdio::stdout};
+use crate::index_pointer::{AtomicPointer, IndexPointer};
 use metashrew_support::{index_pointer::KeyValuePointer, utils::consensus_encode};
 use protobuf::{Message, MessageField};
 use crate::traits::MintableDebit;
@@ -342,7 +340,7 @@ pub fn protorunes_by_address2(
                     return Ok(response);
                 }
                 Err(e) => {
-                    println!("Error parsing cached wallet response: {:?}", e);
+                    eprintln!("Error parsing cached wallet response: {:?}", e);
                     // Fall back to computing the response if parsing fails
                 }
             }
@@ -491,7 +489,7 @@ pub fn simulate_parcel(
 ) -> Result<(ExtendedCallResponse, u64)> {
     let list = decode_varint_list(&mut Cursor::new(parcel.calldata.clone()))?;
     let cellpack: Cellpack = list.clone().try_into()?;
-    println!("{:?}, {:?}", list, cellpack);
+    eprintln!("{:?}, {:?}", list, cellpack);
     let context = Arc::new(Mutex::new(AlkanesRuntimeContext::from_parcel_and_cellpack(
         parcel, &cellpack,
     )));
@@ -540,7 +538,7 @@ pub fn getbytecode(input: &Vec<u8>) -> Result<Vec<u8>> {
     let alkane_id = crate::utils::from_protobuf(alkane_id);
 
     // Get the bytecode from the storage
-    let bytecode = metashrew_core::index_pointer::IndexPointer::from_keyword("/alkanes/")
+    let bytecode = IndexPointer::from_keyword("/alkanes/")
         .select(&alkane_id.into())
         .get();
 

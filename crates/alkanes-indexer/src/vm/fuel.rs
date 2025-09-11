@@ -13,11 +13,6 @@ use std::io::Cursor;
 use std::sync::RwLock;
 use wasmi::*;
 
-#[allow(unused_imports)]
-use {
-    metashrew_core::{println, stdio::stdout},
-    std::fmt::Write,
-};
 
 pub trait VirtualFuelBytes {
     fn vfsize(&self) -> u64;
@@ -191,7 +186,7 @@ impl FuelTank {
         feature = "fractal",
         feature = "luckycoin"
     )))]
-    pub fn _calculate_transaction_fuel(tank: &FuelTank, height: u32) -> u64 {
+    pub fn _calculate_transaction_fuel(_tank: &FuelTank, height: u32) -> u64 {
         // for testing it is useful to assume we always get minimum fuel
         minimum_fuel(height)
     }
@@ -223,13 +218,13 @@ impl FuelTank {
 
         #[cfg(feature = "debug-log")]
         {
-            println!("Fuel allocation for transaction {}:", txindex);
-            println!("  - Transaction size: {} bytes", txsize);
-            println!("  - Block size: {} bytes", tank.size);
-            println!("  - Block fuel before: {}", _block_fuel_before);
-            println!("  - Block fuel after: {}", tank.block_fuel);
-            println!("  - Allocated fuel: {}", tank.transaction_fuel);
-            println!("  - Minimum fuel: {}", minimum_fuel(height));
+            eprintln!("Fuel allocation for transaction {}:", txindex);
+            eprintln!("  - Transaction size: {} bytes", txsize);
+            eprintln!("  - Block size: {} bytes", tank.size);
+            eprintln!("  - Block fuel before: {}", _block_fuel_before);
+            eprintln!("  - Block fuel after: {}", tank.block_fuel);
+            eprintln!("  - Allocated fuel: {}", tank.transaction_fuel);
+            eprintln!("  - Minimum fuel: {}", minimum_fuel(height));
         }
     }
 
@@ -240,14 +235,14 @@ impl FuelTank {
         #[cfg(feature = "debug-log")]
         {
             // Log refunding details before refunding
-            println!(
+            eprintln!(
                 "Refunding fuel to block after transaction {}:",
                 tank.current_txindex
             );
-            println!("  - Block fuel before refund: {}", tank.block_fuel);
-            println!("  - Remaining metered fuel: {}", tank.block_metered_fuel);
-            println!("  - Transaction size: {} bytes", tank.txsize);
-            println!("  - Block size before update: {} bytes", tank.size);
+            eprintln!("  - Block fuel before refund: {}", tank.block_fuel);
+            eprintln!("  - Remaining metered fuel: {}", tank.block_metered_fuel);
+            eprintln!("  - Transaction size: {} bytes", tank.txsize);
+            eprintln!("  - Block size before update: {} bytes", tank.size);
         }
 
         // Only refund the remaining fuel (block_metered_fuel) that wasn't consumed
@@ -259,8 +254,8 @@ impl FuelTank {
         #[cfg(feature = "debug-log")]
         {
             // Log refunding details after refunding
-            println!("  - Block fuel after refund: {}", tank.block_fuel);
-            println!("  - Block size after update: {} bytes", tank.size);
+            eprintln!("  - Block fuel after refund: {}", tank.block_fuel);
+            eprintln!("  - Block size after update: {} bytes", tank.size);
         }
     }
 

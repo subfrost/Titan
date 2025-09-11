@@ -1,6 +1,6 @@
 use alkanes_support::id::AlkaneId;
 use alkanes_support::trace::{TraceContext, TraceEvent};
-use metashrew_core::index_pointer::AtomicPointer;
+use crate::index_pointer::AtomicPointer;
 
 pub trait Extcall {
     fn isdelegate() -> bool;
