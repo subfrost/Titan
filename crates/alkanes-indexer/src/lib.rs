@@ -55,7 +55,7 @@ mod unit_tests {
     use protorune_support::message::MessageContext;
     use protobuf::{Message, SpecialFields};
     use crate::view::{protorunes_by_outpoint, protorunes_by_address};
-    use crate::indexer::index_protorunes;
+    use crate::indexer::{index_block, index_protorunes};
     use protorune_support::proto::protorune::{Uint128, WalletRequest};
     use std::fs;
     use std::path::PathBuf;
@@ -75,11 +75,7 @@ mod unit_tests {
         let block: Block =
             consensus_decode::<Block>(&mut Cursor::new(block_data)).unwrap();
 
-        // calling index_block directly fails since genesis(&block).unwrap(); gets segfault
-        // index_block(&block, height).unwrap();
-        configure_network();
-        crate::network::genesis(&block).unwrap();
-        index_protorunes::<AlkaneMessageContext>(block.clone(), height as u64).unwrap();
+        index_block(&block, height).unwrap();
 
         // TODO: figure out what address to use for runesbyaddress
         let req_wallet: Vec<u8> = (WalletRequest {

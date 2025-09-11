@@ -1,3 +1,4 @@
+use bitcoin::hashes::Hash;
 use crate::index_pointer::AtomicPointer;
 use crate::message::AlkaneMessageContext;
 use crate::network::{genesis, genesis_alkane_upgrade_bytes, is_genesis};
@@ -14,13 +15,21 @@ use protorune_support::protostone::Protostone;
 use protorune_support::rune_transfer::RuneTransfer;
 use protorune_support::balance_sheet::{BalanceSheet, BalanceSheetOperations};
 use protorune_support::message::{MessageContext, MessageContextParcel};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, BTreeMap};
+use crate::balance_sheet::PersistentRecord;
+use bitcoin::Transaction;
+use ordinals::{Artifact, Runestone};
 use crate::init::index_unique_protorunes;
 use crate::index_pointer::IndexPointer;
 #[allow(unused_imports)]
 use metashrew_support::index_pointer::KeyValuePointer;
 use protorune_support::network::{set_network, NetworkParams};
 use std::sync::Arc;
+use protorune_support::utils::outpoint_encode;
+use bitcoin::OutPoint;
+use protobuf::{Message, SpecialFields};
+use protorune_support::proto;
+
 
 #[cfg(all(
     not(feature = "mainnet"),
@@ -89,64 +98,101 @@ use protorune_support::proto::protorune::ProtorunesWalletRequest;
 #[cfg(feature = "cache")]
 use std::sync::Arc;
 
+pub fn save_balances<T: MessageContext<AlkanesProtoruneStore>>(
+    height: u64,
+    atomic: &mut AtomicPointer,
+    tx: &Transaction,
+    map: &BTreeMap<u32, BalanceSheet<AlkanesProtoruneStore>>,
+) -> Result<()> {
+    for i in 0..tx.output.len() {
+        if tx.output[i].script_pubkey.is_op_return() {
+            continue;
+        }
+
+        let sheet = map
+            .get(&(i as u32))
+            .map(|v| v.clone())
+            .unwrap_or_else(|| BalanceSheet::default());
+        let outpoint = OutPoint {
+            txid: tx.compute_txid(),
+            vout: i as u32,
+        };
+        sheet.save(
+            &mut atomic.derive(
+                &crate::tables::RuneTable::for_protocol(T::protocol_tag())
+                    .OUTPOINT_TO_RUNES
+                    .select(&outpoint_encode(&outpoint)?),
+            ),
+            false,
+        );
+    }
+    index_unique_protorunes::<T>(
+        atomic,
+        height,
+        map.iter()
+            .try_fold(
+                BalanceSheet::default(),
+                |mut r, (_k, v)| -> Result<BalanceSheet<AlkanesProtoruneStore>> {
+                    v.pipe(&mut r)?;
+                    Ok(r)
+                },
+            )?
+            .get_protorunes(),
+    );
+    Ok(())
+}
+
+
 pub fn index_protorunes<T: MessageContext<AlkanesProtoruneStore>>(
     block: Block,
     height: u64,
 ) -> Result<BTreeSet<Vec<u8>>> {
-    let mut updated_addresses: BTreeSet<Vec<u8>> = BTreeSet::new();
     log::debug!("Processing block at height {}", height);
     for (txindex, tx) in block.txdata.iter().enumerate() {
-        log::debug!("Scanning transaction {}", txindex);
-        let protostones = Protostone::scan(&tx);
-        for protostone in protostones.into_iter() {
-            if protostone.protocol_tag != T::protocol_tag() {
-                continue;
-            }
-            log::debug!("Found protostone: {:?}", protostone);
-            let mut sheets = BalanceSheet::<AlkanesProtoruneStore>::new();
-            sheets.init_with_protostone(&protostone, height)?;
-            let parcel = MessageContextParcel {
-                store: AlkanesProtoruneStore::default(),
-                runes: protostone.edicts.into_iter().map(|v| v.into()).collect(),
-                transaction: tx.clone(),
-                block: block.clone(),
-                height,
-                pointer: protostone.pointer.unwrap_or_default(),
-                refund_pointer: protostone.refund.unwrap_or_default(),
-                calldata: protostone.message,
-                sheets: Box::new(sheets),
-                txindex: txindex as u32,
-                vout: 0,
-                runtime_balances: Box::new(BalanceSheet::default()),
-            };
-            let (mut transfers, balances) = T::handle(&parcel)?;
-            let mut atomic = parcel.store.0.derive(&IndexPointer::default());
-            balances.apply()?;
-            index_unique_protorunes::<T>(&mut atomic, height, balances.get_protorunes());
-            transfers
-                .iter_mut()
-                .for_each(|v: &mut RuneTransfer| v.output = tx.output.len() as u32);
-            let mut out_sheets = BalanceSheet::<AlkanesProtoruneStore>::new();
-            out_sheets.init_with_transfers(transfers, height)?;
-            out_sheets.apply()?;
-            out_sheets
-                .get_addresses()
-                .into_iter()
-                .for_each(|v| {
-                    updated_addresses.insert(v);
-                });
-            balances.get_addresses().into_iter().for_each(|v| {
-                updated_addresses.insert(v);
-            });
+        if let Some(Artifact::Runestone(runestone)) = Runestone::decipher(&tx) {
+            log::debug!("Found runestone in tx {}: {:?}", txindex, runestone);
+            let mut atomic = AtomicPointer::default();
+            // a lot more logic will go here
+            atomic.commit();
         }
     }
-    Ok(updated_addresses)
+    Ok(BTreeSet::new())
+}
+
+pub fn index_outpoints(block: &Block, height: u64) -> Result<()> {
+    let mut atomic = AtomicPointer::default();
+    for tx in &block.txdata {
+        for i in 0..tx.output.len() {
+            let outpoint_bytes = outpoint_encode(
+                &(OutPoint {
+                    txid: tx.compute_txid(),
+                    vout: i as u32,
+                }),
+            )?;
+            atomic
+                .derive(&crate::tables::RUNES.OUTPOINT_TO_HEIGHT.select(&outpoint_bytes))
+                .set_value(height);
+            atomic
+                .derive(&crate::tables::OUTPOINT_TO_OUTPUT.select(&outpoint_bytes))
+                .set(Arc::new(
+                    (proto::protorune::Output {
+                        script: tx.output[i].clone().script_pubkey.into_bytes(),
+                        value: tx.output[i].clone().value.to_sat(),
+                        special_fields: SpecialFields::new(),
+                    })
+                    .write_to_bytes()?,
+                ));
+        }
+    }
+    atomic.commit();
+    Ok(())
 }
 
 pub fn index_block(block: &Block, height: u32) -> Result<()> {
     log::debug!("Indexing block at height {}", height);
     configure_network();
     clear_diesel_mints_cache();
+    index_outpoints(block, height as u64)?;
     let really_is_genesis = is_genesis(height.into());
     if really_is_genesis {
         log::debug!("Block is genesis block, running genesis indexing");
@@ -166,7 +212,7 @@ pub fn index_block(block: &Block, height: u32) -> Result<()> {
     for tx in block.txdata.iter() {
         atomic
             .derive(&RUNES.HEIGHT_TO_TRANSACTION_IDS.select_value(height as u64))
-            .append(Arc::new(tx.txid().as_byte_array().to_vec()));
+            .append(Arc::new(tx.compute_txid().as_byte_array().to_vec()));
     }
     atomic.commit();
 
